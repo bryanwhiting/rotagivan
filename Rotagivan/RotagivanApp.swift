@@ -19,22 +19,30 @@ struct RotagivanApp: App {
         WindowGroup("Rotagivan", id: "settings") {
             ContentView(store: store, hid: hid)
                 .onAppear { start() }
+                .onReceive(store.$settings) { settings in
+                    hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [])
+                }
         }
         .windowResizability(.contentSize)
 
         MenuBarExtra {
             NavigatorPanel(store: store, hid: hid)
         } label: {
-            Image(systemName: store.precisionActive ? "safari.fill" : "safari")
-                .accessibilityLabel("Rotagivan — \(store.precisionActive ? "Precision" : "Normal") profile")
+            HStack(spacing: 4) {
+            Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
+                .accessibilityLabel("Rotagivan — \(store.activeProfileName) profile")
+            Text(AppVersion.version)
+            }
         }
         .menuBarExtraStyle(.window)
     }
 
     private func start() {
         delegate.onQuit = { hid.stop() }
-        hotKeys.onPrecisionChanged = { active in store.setPrecisionActive(active) }
+        hotKeys.onProfileChanged = { id in store.setActiveProfile(id) }
+        hotKeys.profileName = { id in store.profiles.first { $0.id == id }?.name }
         hotKeys.onAction = { id, down in hid.keyboardAction(id, down: down) }
+        hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [])
         hotKeys.install()
         if store.settings.enabled { hid.start() }
         if !AXIsProcessTrusted() {
@@ -53,7 +61,7 @@ struct NavigatorPanel: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
     @Environment(\.openWindow) private var openWindow
-    @State private var editingPrecision = false
+    @State private var editingProfileID: UInt32 = 1
     @State private var trusted = AXIsProcessTrusted()
 
     private var connected: Bool {
@@ -76,7 +84,7 @@ struct NavigatorPanel: View {
                 Image(systemName: "safari").font(.system(size: 23, weight: .light)).foregroundStyle(.teal)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Rotagivan").font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text("TRACKPAD").font(.system(size: 8, weight: .medium)).tracking(1.5).foregroundStyle(.secondary)
+                    Text(AppVersion.display).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 HStack(spacing: 5) {
@@ -105,25 +113,30 @@ struct NavigatorPanel: View {
             }))
             .toggleStyle(.switch).controlSize(.small)
 
-            Picker("Edit profile", selection: $editingPrecision) {
-                Text("Normal").tag(false)
-                Text("Precision").tag(true)
-            }.pickerStyle(.segmented).labelsHidden()
+            Picker("Edit profile", selection: $editingProfileID) {
+                ForEach(store.profiles, id: \.id) { profile in
+                    Text(profile.name).tag(profile.id)
+                }
+            }.pickerStyle(.menu)
 
-            ShortcutEditor(profile: editingPrecision ? "Precision" : "Normal", showBehavior: false)
+            ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
                 .controlSize(.small)
 
-            speedSlider("Cursor Speed", value: profileValue(\.cursorSpeed), range: 0.05...2)
-            speedSlider("Scroll Speed", value: profileValue(\.scrollMultiplier), range: 0.05...4)
-            Text(store.precisionActive ? "Precision profile active" : "Normal profile active")
+            speedSlider("Cursor Speed", value: profileValue(\.cursorSpeed), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.cursorSpeedMaximum))
+            speedSlider("Scroll Speed", value: profileValue(\.scrollMultiplier), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.scrollSpeedMaximum))
+            Text("\(store.activeProfileName) profile active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
-            ShortcutEditor(behaviorOnly: true).controlSize(.small)
             DisclosureGroup("Click & drag shortcuts") {
                 VStack(alignment: .leading, spacing: 10) {
-                    ShortcutEditor(showBehavior: false, actionIndex: 0)
-                    ShortcutEditor(showBehavior: false, actionIndex: 1)
-                    ShortcutEditor(showBehavior: false, actionIndex: 2)
+                    if editingProfileID == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(editingProfileID) {
+                        ShortcutEditor(showBehavior: false, actionIndex: 0, profileID: editingProfileID)
+                        ShortcutEditor(showBehavior: false, actionIndex: 1, profileID: editingProfileID)
+                    } else {
+                        Text("Tap shortcuts inherit from \(store.profiles[0].name). Enable custom tap settings in All Settings to override.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    ShortcutEditor(showBehavior: false, actionIndex: 2, profileID: editingProfileID)
                 }.controlSize(.small).padding(.top, 8)
             }
             Divider()
@@ -143,26 +156,31 @@ struct NavigatorPanel: View {
         .padding(16)
         .frame(width: 340)
         .tint(.primary)
-        .onAppear { trusted = AXIsProcessTrusted(); editingPrecision = store.precisionActive }
+        .onAppear { trusted = AXIsProcessTrusted(); editingProfileID = store.activeProfileID }
+        .onChange(of: store.profiles.count) { _, _ in
+            if !store.profiles.contains(where: { $0.id == editingProfileID }) { editingProfileID = store.defaultProfileID }
+        }
     }
 
     private func profileValue(_ key: WritableKeyPath<MotionProfile, Double>) -> Binding<Double> {
         Binding(get: {
-            (editingPrecision ? store.settings.precision : store.settings.normal)[keyPath: key]
+            store.motion(for: editingProfileID)[keyPath: key]
         }, set: {
-            if editingPrecision { store.settings.precision[keyPath: key] = $0 }
-            else { store.settings.normal[keyPath: key] = $0 }
+            var motion = store.motion(for: editingProfileID)
+            motion[keyPath: key] = $0
+            store.updateMotion(motion, for: editingProfileID)
         })
     }
 
-    private func speedSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(spacing: 4) {
+    private func speedSlider(_ title: String, value: Binding<Double>, scale: SettingsScale) -> some View {
+        let percentage = Binding(get: { scale.percentage(for: value.wrappedValue) }, set: { value.wrappedValue = scale.value(for: $0.rounded()) })
+        return VStack(spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Text(value.wrappedValue, format: .number.precision(.fractionLength(2))).monospacedDigit()
+                Text(percentage.wrappedValue, format: .number.precision(.fractionLength(0))).monospacedDigit()
             }.font(.caption).foregroundStyle(.secondary)
-            Slider(value: value, in: range, step: 0.01).controlSize(.small)
+            Slider(value: percentage, in: 0...100).controlSize(.small)
                 .accessibilityLabel(title)
         }
     }

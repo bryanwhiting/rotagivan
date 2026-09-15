@@ -18,6 +18,8 @@ Features:
 ## Build
 
 ```sh
+# One-time setup, only after approving a local code-signing certificate:
+zsh Rotagivan/setup-signing.sh
 chmod +x Rotagivan/build.sh
 Rotagivan/build.sh
 ```
@@ -30,7 +32,9 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 The application builds locally and detects the connected Voyager. An initial “device not open” setup error was corrected by explicitly opening the HID device; successful live operation still needs verification. Enable Rotagivan in System Settings → Privacy & Security → Accessibility and, if requested, Input Monitoring. Quit ZSA Navigator, launch Rotagivan, and use General → Reconnect.
 
-Bundle identifier and preferences domain: `local.rotagivan`. Existing preferences are migrated from `local.navigator.clone`. Builds currently use ad-hoc signing, so rebuilding may require removing and re-adding the installed app in Accessibility.
+Bundle identifier and preferences domain: `local.rotagivan`. Existing preferences are migrated from `local.navigator.clone`. Builds now require a persistent signing identity and pin the designated requirement to its certificate and the bundle identifier. The build fails rather than falling back to ad-hoc signing. Local setup keeps the non-extractable private key in your user Keychain, grants codesign access, and trusts the certificate for code signing only. The public certificate is kept in ignored `Rotagivan/.signing/`. This is local development signing, not Apple notarization or a distribution certificate.
+
+Moving from old ad-hoc builds to this identity requires a one-time removal and re-addition of `/Applications/Rotagivan.app` in Accessibility. Quit the app and System Settings before resetting its grant, then add that exact installed path. Do not launch older copies from build or backup folders. Preserve the Keychain identity across updates; deleting or replacing it requires granting permission again. A new computer needs a new local identity (or an Apple Developer signing setup).
 
 Live cursor feel, scrolling, hotkey release, dragging, and multi-monitor behavior still require hardware testing after permission is granted. ZSA's exact acceleration/smoothing algorithms and automatic updater have not been reproduced. This version matches the connected Voyager product ID; other ZSA keyboards need additional verified device IDs.
 

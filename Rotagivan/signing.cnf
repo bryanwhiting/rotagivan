@@ -1,0 +1,14 @@
+[req]
+distinguished_name = identity
+x509_extensions = signing
+prompt = no
+
+[identity]
+CN = Rotagivan Development
+O = Rotagivan Local Development
+
+[signing]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+subjectKeyIdentifier = hash

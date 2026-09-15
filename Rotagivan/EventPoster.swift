@@ -3,26 +3,71 @@ import CoreGraphics
 
 final class EventPoster {
     private let source = CGEventSource(stateID: .hidSystemState)
+    private let shortcutQueue = DispatchQueue(label: "local.rotagivan.shortcut-output")
     private(set) var dragging = false
+    // CGEvent scrolling takes integral deltas. Keep the fractional remainder
+    // so low-speed kinetic scrolling does not disappear between timer ticks.
+    private var scrollRemainder = CGVector.zero
 
     static func tapKeyEvents(_ action: TapAction) -> [CGEvent] {
         guard action == .optionF19 || action == .enter else { return [] }
-        let key: CGKeyCode = action == .optionF19 ? 80 : 36
-        return [true, false].compactMap { down in
-            let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down)
-            event?.flags = action == .optionF19 ? .maskAlternate : []
-            return event
+        return shortcutEvents(RecordedShortcut(keyCode: action == .optionF19 ? 80 : 36,
+            modifiers: action == .optionF19 ? CGEventFlags.maskAlternate.rawValue : 0,
+            keyLabel: action.title))
+    }
+
+    static func shortcutEvents(_ shortcut: RecordedShortcut, heldFlags: CGEventFlags = []) -> [CGEvent] {
+        let allowed: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        let requested = CGEventFlags(rawValue: shortcut.modifiers).intersection(allowed)
+        let modifiers: [(CGKeyCode, CGEventFlags)] = [(59, .maskControl), (58, .maskAlternate), (56, .maskShift), (55, .maskCommand)]
+        let pressed = modifiers.filter { requested.contains($0.1) && !heldFlags.contains($0.1) }
+        let eventSource = CGEventSource(stateID: .privateState)
+        var flags = heldFlags.intersection(allowed)
+        var events: [CGEvent] = []
+        func append(_ key: CGKeyCode, down: Bool, modifier: Bool = false) -> Bool {
+            guard let event = CGEvent(keyboardEventSource: eventSource, virtualKey: key, keyDown: down) else { return false }
+            if modifier { event.type = .flagsChanged }
+            event.flags = flags
+            events.append(event)
+            return true
+        }
+        for (key, flag) in pressed {
+            flags.insert(flag)
+            guard append(key, down: true, modifier: true) else { return [] }
+        }
+        guard append(shortcut.keyCode, down: true), append(shortcut.keyCode, down: false) else { return [] }
+        for (key, flag) in pressed.reversed() {
+            flags.remove(flag)
+            guard append(key, down: false, modifier: true) else { return [] }
+        }
+        return events
+    }
+
+    private func postShortcut(_ shortcut: RecordedShortcut) {
+        // Serialize complete chords so rapid taps cannot interleave their modifier releases.
+        // Pace events off the main thread for listeners that track modifier transitions.
+        shortcutQueue.async {
+            let held = CGEventSource.flagsState(.hidSystemState)
+            let events = Self.shortcutEvents(shortcut, heldFlags: held)
+            for (index, event) in events.enumerated() {
+                if index > 0 { Thread.sleep(forTimeInterval: event.type == .keyUp ? 0.04 : 0.012) }
+                event.post(tap: .cghidEventTap)
+            }
         }
     }
 
-    func performTap(_ action: TapAction) {
+    func performTap(_ action: TapAction, shortcut: RecordedShortcut? = nil) {
         guard !dragging else { return }
         switch action {
         case .leftClick: click()
         case .rightClick: click(button: .right)
         case .none: break
+        case .shortcut:
+            if let shortcut { postShortcut(shortcut) }
         case .optionF19, .enter:
-            Self.tapKeyEvents(action).forEach { $0.post(tap: .cghidEventTap) }
+            postShortcut(RecordedShortcut(keyCode: action == .optionF19 ? 80 : 36,
+                modifiers: action == .optionF19 ? CGEventFlags.maskAlternate.rawValue : 0,
+                keyLabel: action.title))
         }
     }
 
@@ -68,11 +113,20 @@ final class EventPoster {
 
     func scroll(dx: Double, dy: Double, momentum: Bool = false) {
         guard dx.isFinite, dy.isFinite else { return }
-        let sx = Int32(max(Double(Int32.min), min(Double(Int32.max), dx.rounded())))
-        let sy = Int32(max(Double(Int32.min), min(Double(Int32.max), dy.rounded())))
+        let accumulatedX = dx + scrollRemainder.dx
+        let accumulatedY = dy + scrollRemainder.dy
+        let emittedX = accumulatedX.rounded(.towardZero)
+        let emittedY = accumulatedY.rounded(.towardZero)
+        scrollRemainder = CGVector(dx: accumulatedX - emittedX, dy: accumulatedY - emittedY)
+        let sx = Int32(max(Double(Int32.min), min(Double(Int32.max), emittedX)))
+        let sy = Int32(max(Double(Int32.min), min(Double(Int32.max), emittedY)))
         guard sx != 0 || sy != 0 else { return }
         guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: sy, wheel2: sx, wheel3: 0) else { return }
-        if momentum { event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 2) }
+        // These are deliberately ordinary continuous scroll events. Synthetic
+        // momentum-phase events are ignored by a number of macOS apps; the
+        // timer itself provides the inertial motion.
+        _ = momentum
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.post(tap: .cghidEventTap)
     }
 

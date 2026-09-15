@@ -3,6 +3,14 @@ import Foundation
 
 @MainActor
 final class GestureEngine {
+    private struct PendingTap {
+        var fingerCount: Int
+        var action: TapAction
+        var shortcut: RecordedShortcut?
+        var date: Date
+    }
+
+    private static let doubleTapInterval = 0.30
     private let store: SettingsStore
     private let poster = EventPoster()
     private var previousContacts: [UInt8: FingerContact] = [:]
@@ -16,6 +24,8 @@ final class GestureEngine {
     private var lastReportTime = Date.distantPast
     private var momentumTimer: Timer?
     private var pendingDragEnd: Timer?
+    private var pendingTapTimer: Timer?
+    private var pendingTap: PendingTap?
     private var physicalButtonDown = false
     private var keyboardDrag = false
 
@@ -43,8 +53,11 @@ final class GestureEngine {
         keyboardDrag = false
         momentumTimer?.invalidate()
         pendingDragEnd?.invalidate()
+        pendingTapTimer?.invalidate()
         momentumTimer = nil
         pendingDragEnd = nil
+        pendingTapTimer = nil
+        pendingTap = nil
         previousContacts.removeAll()
         poster.endDrag()
         scrolling = false
@@ -96,8 +109,8 @@ final class GestureEngine {
         if poster.dragging {
             pendingDragEnd?.invalidate()
             pendingDragEnd = nil
-        } else if store.settings.gestures.touchAndHoldDrag,
-                  now.timeIntervalSince(lastTap) <= store.settings.gestures.tapMaxDuration {
+        } else if store.activeGestures.gestures.touchAndHoldDrag,
+                  now.timeIntervalSince(lastTap) <= store.activeGestures.gestures.tapMaxDuration {
             poster.beginDrag()
         }
     }
@@ -125,18 +138,26 @@ final class GestureEngine {
         let rawDX = matching.map { $0.0.x - $0.1.x }.reduce(0, +) / Double(matching.count)
         let rawDY = matching.map { $0.0.y - $0.1.y }.reduce(0, +) / Double(matching.count)
         maximumMovement += hypot(rawDX, rawDY)
-        guard maximumMovement > store.settings.gestures.tapMaxMovement else { return }
+        guard maximumMovement > store.activeGestures.gestures.tapMaxMovement else { return }
         let profile = store.activeProfile
         let dx = rawDX * profile.scrollMultiplier * (profile.invertScrollX ? -1 : 1)
         let dy = rawDY * profile.scrollMultiplier * (profile.invertScrollY ? -1 : 1)
         poster.scroll(dx: dx, dy: dy)
         let dt = max(0.001, now.timeIntervalSince(lastReportTime))
-        scrollVelocity = CGVector(dx: dx / dt, dy: dy / dt)
+        let instantaneous = CGVector(dx: dx / dt, dy: dy / dt)
+        // A flick often slows just before lift-off. Blend the final samples so
+        // the release retains the swipe's real intent instead of only its last
+        // tiny movement.
+        let sameDirection = scrollVelocity.dx * instantaneous.dx + scrollVelocity.dy * instantaneous.dy >= 0
+        scrollVelocity = sameDirection
+            ? CGVector(dx: scrollVelocity.dx * 0.35 + instantaneous.dx * 0.65,
+                       dy: scrollVelocity.dy * 0.35 + instantaneous.dy * 0.65)
+            : instantaneous
         scrolling = true
     }
 
     private func finishTouch(at now: Date) {
-        let gestures = store.settings.gestures
+        let gestures = store.activeGestures.gestures
         let duration = now.timeIntervalSince(touchStart)
 
         if scrolling {
@@ -161,11 +182,49 @@ final class GestureEngine {
         guard gestures.tapToClick,
               duration <= gestures.tapMaxDuration,
               maximumMovement <= gestures.tapMaxMovement else { return }
-        let action = hadTwoFingers ? (store.settings.twoFingerTap ?? .enter) : (store.settings.oneFingerTap ?? .optionF19)
-        poster.performTap(action)
-        // A keyboard tap must not arm mouse dragging on the next touch.
-        if !hadTwoFingers && action == .leftClick { lastTap = now }
-        else { lastTap = .distantPast }
+        registerTap(fingerCount: hadTwoFingers ? 2 : 1, at: now)
+    }
+
+    private func registerTap(fingerCount: Int, at now: Date) {
+        let active = store.activeGestures
+        let action = fingerCount == 2 ? active.twoFingerTap : active.oneFingerTap
+        let shortcut = fingerCount == 2 ? active.twoFingerShortcut : active.oneFingerShortcut
+        let doubleAction = fingerCount == 2 ? (active.twoFingerDoubleTap ?? .none) : (active.oneFingerDoubleTap ?? .none)
+        let doubleShortcut = fingerCount == 2 ? active.twoFingerDoubleShortcut : active.oneFingerDoubleShortcut
+
+        if let pendingTap {
+            if pendingTap.fingerCount == fingerCount, now.timeIntervalSince(pendingTap.date) <= Self.doubleTapInterval {
+                pendingTapTimer?.invalidate()
+                self.pendingTap = nil
+                pendingTapTimer = nil
+                performTap(doubleAction, shortcut: doubleShortcut, at: now)
+                return
+            }
+            pendingTapTimer?.invalidate()
+            performTap(pendingTap.action, shortcut: pendingTap.shortcut, at: pendingTap.date)
+            self.pendingTap = nil
+            pendingTapTimer = nil
+        }
+
+        guard doubleAction != .none else {
+            performTap(action, shortcut: shortcut, at: now)
+            return
+        }
+        pendingTap = PendingTap(fingerCount: fingerCount, action: action, shortcut: shortcut, date: now)
+        pendingTapTimer = Timer.scheduledTimer(withTimeInterval: Self.doubleTapInterval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let pending = self.pendingTap else { return }
+                self.pendingTap = nil
+                self.pendingTapTimer = nil
+                self.performTap(pending.action, shortcut: pending.shortcut, at: pending.date)
+            }
+        }
+    }
+
+    private func performTap(_ action: TapAction, shortcut: RecordedShortcut?, at date: Date) {
+        poster.performTap(action, shortcut: shortcut)
+        // Only a real single-finger click may arm tap-hold dragging.
+        lastTap = action == .leftClick ? date : .distantPast
     }
 
     private func handlePhysicalButton(_ down: Bool) {
@@ -176,19 +235,24 @@ final class GestureEngine {
 
     private func startMomentum() {
         momentumTimer?.invalidate()
-        var velocity = scrollVelocity
+        // The hardware reports short, high-frequency coordinate deltas. A
+        // modest boost turns a deliberate flick into visible page coasting.
+        var velocity = CGVector(dx: scrollVelocity.dx * 2.2, dy: scrollVelocity.dy * 2.2)
+        var ticks = 0
         momentumTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { timer.invalidate(); return }
                 let decay = self.store.activeProfile.kineticDecay
-                velocity.dx *= decay
-                velocity.dy *= decay
-                if hypot(velocity.dx, velocity.dy) < 30 {
+                let delta = CGVector(dx: velocity.dx / 60.0, dy: velocity.dy / 60.0)
+                if hypot(delta.dx, delta.dy) < 0.08 || ticks >= 600 || decay <= 0 {
                     timer.invalidate()
                     self.momentumTimer = nil
                     return
                 }
-                self.poster.scroll(dx: velocity.dx / 60.0, dy: velocity.dy / 60.0, momentum: true)
+                self.poster.scroll(dx: delta.dx, dy: delta.dy, momentum: true)
+                velocity.dx *= decay
+                velocity.dy *= decay
+                ticks += 1
             }
         }
     }

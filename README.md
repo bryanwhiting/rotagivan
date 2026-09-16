@@ -2,6 +2,35 @@
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
+## Quick local build and install
+
+```sh
+cd ~/gh/bryanwhiting/rotagivan
+
+# One-time only, unless the signing identity is missing:
+zsh Rotagivan/setup-signing.sh
+
+# Build the app:
+zsh Rotagivan/build.sh
+
+# Optional regression checks:
+zsh Rotagivan/test.sh
+
+# Install and launch:
+osascript -e 'quit app "Navigator"'
+rm -rf /Applications/Rotagivan.app
+cp -R Rotagivan/build/Rotagivan.app /Applications/
+open /Applications/Rotagivan.app
+```
+
+Built app path:
+
+```sh
+Rotagivan/build/Rotagivan.app
+```
+
+Do not run ZSA Navigator and Rotagivan at the same time; both apps would receive and respond to the same touch reports. On first launch, macOS may require Accessibility and possibly Input Monitoring permission for `/Applications/Rotagivan.app`. If macOS blocks the local build because it is not notarized, right-click the app in Finder and choose **Open** once.
+
 Features:
 
 - Smooth log-normal cursor response with Fine/Fast sensitivity, transition center/width, live feedback, and release envelopes

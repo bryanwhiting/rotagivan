@@ -24,6 +24,21 @@ final class ShortcutSettings: ObservableObject {
     @Published var actions: [ProfileShortcut] { didSet { save() } }
     @Published var additional: [UInt32: ProfileShortcut] { didSet { save() } }
     @Published var profileActions: [UInt32: [ProfileShortcut]] { didSet { save() } }
+    private var replacingConfiguration = false
+
+    func replaceConfiguration(normal: ProfileShortcut, precision: ProfileShortcut,
+                              actions: [ProfileShortcut], additional: [UInt32: ProfileShortcut],
+                              profileActions: [UInt32: [ProfileShortcut]], holdToActivate: Bool) {
+        replacingConfiguration = true
+        self.normal = normal
+        self.precision = precision
+        self.actions = actions
+        self.additional = additional
+        self.profileActions = profileActions
+        UserDefaults.standard.set(holdToActivate, forKey: "shortcut.hold")
+        replacingConfiguration = false
+        save()
+    }
 
     func actions(for id: UInt32) -> [ProfileShortcut] {
         guard let saved = profileActions[id], saved.count == 3 else { return actions }
@@ -52,6 +67,7 @@ final class ShortcutSettings: ObservableObject {
         if precision.holdToActivate == nil { precision.holdToActivate = legacyHold }
     }
     private func save() {
+        guard !replacingConfiguration else { return }
         for (index, action) in actions.enumerated() { UserDefaults.standard.set(try? JSONEncoder().encode(action), forKey: "shortcut.action.\(index + 3)") }
         UserDefaults.standard.set(try? JSONEncoder().encode(normal), forKey: "shortcut.normal")
         UserDefaults.standard.set(try? JSONEncoder().encode(precision), forKey: "shortcut.precision")
@@ -121,6 +137,9 @@ final class HotKeyManager {
         let changed = defaultProfileID != defaultID
         defaultProfileID = defaultID
         if changed {
+            // Imports suspend registrations while replacing multiple stores.
+            // Reset the activation baseline even while registration is paused.
+            activation = ProfileActivationState(defaultID: defaultID)
             customTapProfiles = customTaps
             let settings = ShortcutSettings.shared
             if handler != nil { register(normal: settings.normal, precision: settings.precision, additional: settings.additional) }

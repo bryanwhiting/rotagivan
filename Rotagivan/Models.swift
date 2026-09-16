@@ -275,9 +275,11 @@ final class SettingsStore: ObservableObject {
 
     private static let storageKey = "settings.v1"
     private let defaults: UserDefaults
+    private let factorySettings: StoredSettings?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, factorySettings: StoredSettings? = nil) {
         self.defaults = defaults
+        self.factorySettings = factorySettings
         // Keep the legacy domain read-only so existing installations retain their tuning.
         if !defaults.bool(forKey: "migration.rotagivan.v1") {
             let legacy = defaults.persistentDomain(forName: "local.navigator.clone") ?? [:]
@@ -420,8 +422,13 @@ final class SettingsStore: ObservableObject {
     }
 
     func reset() {
-        settings = StoredSettings()
-        activeProfileID = 1
+        replaceSettings(factorySettings ?? StoredSettings())
+    }
+
+    func replaceSettings(_ value: StoredSettings) {
+        settings = value
+        activeProfileID = settings.resolvedDefaultProfileID
+        cursorTelemetry.reset()
     }
 
     private func save() {

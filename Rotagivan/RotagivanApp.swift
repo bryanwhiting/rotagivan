@@ -10,7 +10,9 @@ struct RotagivanApp: App {
     private let hotKeys = HotKeyManager()
 
     init() {
-        let store = SettingsStore()
+        let factory = try? AppConfiguration.factory()
+        try? factory?.seedIfNeeded()
+        let store = SettingsStore(factorySettings: factory?.settings)
         _store = StateObject(wrappedValue: store)
         _hid = StateObject(wrappedValue: NavigatorHIDManager(store: store))
     }

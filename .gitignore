@@ -3,3 +3,5 @@ Rotagivan/build/
 backups/
 .DS_Store
 Rotagivan/.signing/
+YAML/.build/
+YAML/.swiftpm/

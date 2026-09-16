@@ -1,0 +1,163 @@
+# Rotagivan complete configuration
+# Engine units, not slider percentages. Permissions and signing are excluded.
+formatVersion: 1
+settings:
+  customTapProfiles:
+  - 2
+  defaultProfileID: 2
+  enabled: true
+  gestures:
+    dragRegrip: true
+    dragRegripWindow: 0.25
+    secondFingerGracePeriod: 0.05
+    tapMaxDuration: 0.25
+    tapMaxMovement: 30
+    tapToClick: true
+    touchAndHoldDrag: true
+  launchAtLogin: true
+  normal:
+    cursorAcceleration: 1.16
+    cursorDeceleration: 0.71773
+    cursorSpeed: 0.48
+    fineCursorAcceleration: 1.16
+    fineCursorFalloff: 0.71773
+    fineCursorSpeed: 0.48
+    invertScrollX: false
+    invertScrollY: false
+    kineticDecay: 0.75
+    kineticScroll: true
+    scrollMultiplier: 1
+  oneFingerTap: optionF19
+  precision:
+    cursorAcceleration: 1.16
+    cursorDeceleration: 0
+    cursorResponse:
+      fastGain: 1.8139450079113393
+      fastRelease: 0.19032615718984963
+      fineGain: 0.32493574766355143
+      fineRelease: 0.08997224506578948
+      releaseShape: 82.83749999999999
+      smoothing: 62.378125
+      transitionCenter: 2212.368491584367
+      transitionWidth: 0.75
+    cursorSpeed: 1.6704
+    cursorSpeedTransition: 2960
+    fineCursorAcceleration: 1.228
+    fineCursorFalloff: 0.357
+    fineCursorSpeed: 0.9359999999999999
+    invertScrollX: false
+    invertScrollY: false
+    kineticDecay: 0.9423445999999999
+    kineticScroll: true
+    scrollAcceleration: 1
+    scrollMultiplier: 3.0816
+  profileGestures:
+  - 1
+  - gestures:
+      dragRegrip: true
+      dragRegripWindow: 0.25
+      secondFingerGracePeriod: 0.05
+      tapMaxDuration: 0.25
+      tapMaxMovement: 30
+      tapToClick: true
+      touchAndHoldDrag: true
+    oneFingerShortcut:
+      keyCode: 64
+      keyLabel: F17
+      modifiers: 1572864
+    oneFingerTap: shortcut
+    twoFingerTap: enter
+  - 2
+  - gestures:
+      doubleTapInterval: 0.16
+      dragRegrip: true
+      dragRegripWindow: 0.2
+      secondFingerGracePeriod: 0.05
+      tapMaxDuration: 0.25
+      tapMaxMovement: 30
+      tapToClick: true
+      touchAndHoldDrag: true
+    oneFingerDoubleShortcut:
+      keyCode: 64
+      keyLabel: F17
+      modifiers: 1572864
+    oneFingerDoubleTap: shortcut
+    oneFingerShortcut:
+      keyCode: 64
+      keyLabel: F17
+      modifiers: 1572864
+    oneFingerTap: leftClick
+    twoFingerTap: enter
+  profileNames:
+  - 1
+  - Normal
+  sliderBaselineRevision: 6
+  sliderBaselines:
+  - 2
+  - coastCoefficient: 0.9423445999999999
+    cursorAcceleration: 1.16
+    cursorFalloff: 0.43063799999999997
+    cursorSpeed: 0.48
+    doubleTapDelay: 0.16
+    regripWindow: 0.2
+    scrollAcceleration: 1
+    scrollSpeed: 2.16
+    tapImpactSpeed: 0.25
+    tapMovementRadius: 30
+  - 1
+  - coastCoefficient: 0.75
+    cursorAcceleration: 1.16
+    cursorFalloff: 0.71773
+    cursorSpeed: 0.48
+    doubleTapDelay: 0.3
+    regripWindow: 0.25
+    scrollAcceleration: 1
+    scrollSpeed: 1
+    tapImpactSpeed: 0.25
+    tapMovementRadius: 30
+  twoFingerTap: enter
+shortcuts:
+  actions:
+  - enabled: false
+    keyCode: 79
+    modifiers: 0
+  - enabled: false
+    keyCode: 80
+    modifiers: 0
+  - enabled: false
+    keyCode: 90
+    modifiers: 0
+  additional: []
+  holdToActivate: true
+  normal:
+    enabled: true
+    holdToActivate: true
+    keyCode: 106
+    keyLabel: F16
+    modifiers: 6912
+  precision:
+    enabled: false
+    holdToActivate: true
+    keyCode: 106
+    modifiers: 6912
+  profileActions:
+  - 1
+  - - enabled: false
+      keyCode: 79
+      modifiers: 0
+    - enabled: false
+      keyCode: 80
+      modifiers: 0
+    - enabled: false
+      keyCode: 90
+      modifiers: 0
+  - 2
+  - - enabled: false
+      keyCode: 79
+      modifiers: 0
+    - enabled: false
+      keyCode: 80
+      modifiers: 0
+    - enabled: false
+      keyCode: 90
+      modifiers: 0

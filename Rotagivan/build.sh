@@ -15,16 +15,26 @@ security find-identity -v -p codesigning | grep -Fq "$signing_identity" || {
 
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
+yaml_dir="$script_dir/../YAML"
+swift build --package-path "$yaml_dir" -c release --product ConfigurationYAML
+yaml_build=$(swift build --package-path "$yaml_dir" -c release --show-bin-path)
+install -m 644 "$script_dir/DefaultConfiguration.yaml" "$app_dir/Contents/Resources/DefaultConfiguration.yaml"
+install -m 644 "$yaml_dir/.build/checkouts/Yams/LICENSE" "$app_dir/Contents/Resources/Yams-LICENSE.txt"
+install -m 644 "$yaml_dir/LibYAML-LICENSE.txt" "$app_dir/Contents/Resources/LibYAML-LICENSE.txt"
 xcrun swift "$script_dir/DrawIcon.swift" "$build_dir/Rotagivan.iconset"
 iconutil -c icns "$build_dir/Rotagivan.iconset" -o "$app_dir/Contents/Resources/Rotagivan.icns"
 cp "$script_dir/Info.plist" "$app_dir/Contents/Info.plist"
 xcrun swiftc -O -parse-as-library \
+  -I "$yaml_build/Modules" -L "$yaml_build" -lConfigurationYAML \
+  -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
   -framework AppKit \
   -framework SwiftUI \
   -framework Carbon \
   -framework IOKit \
   -framework ServiceManagement \
   "$script_dir/Models.swift" \
+  "$script_dir/AppConfiguration.swift" \
+  "$script_dir/ConfigurationSettingsView.swift" \
   "$script_dir/CursorResponse.swift" \
   "$script_dir/MotionCurveEditor.swift" \
   "$script_dir/TrackpadReport.swift" \

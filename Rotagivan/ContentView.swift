@@ -6,7 +6,6 @@ struct ContentView: View {
     @ObservedObject var hid: NavigatorHIDManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "Profiles"
-    @State private var confirmReset = false
 
     private let sections = [("Profiles", "rectangle.split.2x1"), ("General", "slider.horizontal.3")]
 
@@ -66,9 +65,6 @@ struct ContentView: View {
             DispatchQueue.main.async {
                 store.recenterSliderBaselines(revision: 6)
             }
-        }
-        .confirmationDialog("Reset all profiles and gesture settings? Added profiles will be removed.", isPresented: $confirmReset) {
-            Button("Reset settings", role: .destructive) { store.reset(); ShortcutSettings.shared.additional = [:]; ShortcutSettings.shared.profileActions = [:] }
         }
     }
 
@@ -452,8 +448,10 @@ struct ContentView: View {
             }
             Section {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
-                Button("Reset all settings…") { confirmReset = true }
             }
+            Divider()
+            ConfigurationSettingsView(store: store, hid: hid)
+            Divider()
             Section {
                 Text("Rotagivan is an independent, editable implementation. Do not run it at the same time as ZSA Navigator or both apps will respond to each touch.")
                     .font(.callout)

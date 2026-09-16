@@ -7,15 +7,20 @@ Features:
 - Smooth log-normal cursor response with Fine/Fast sensitivity, transition center/width, live feedback, and release envelopes
 - Two-finger horizontal and vertical smooth scrolling
 - Adjustable kinetic scrolling
-- Configurable tap actions: one finger defaults to Option+F19; two fingers defaults to Enter
+- Configurable one/two-finger tap and double-tap actions, with per-profile overrides
 - Tap-hold dragging and drag re-grip
 - Normal and Precision profiles
 - Configurable profile hotkeys with hold or press-to-switch behavior
 - Configurable single-click, double-click and hold-to-drag keyboard shortcuts
 - Launch at login and menu-bar controls
-- Imports the official app's current settings on first launch
+- Bundled tuned defaults and complete YAML configuration import/export
 
 ## Build
+
+The build uses Swift Package Manager to fetch the pinned Yams 6.1.0 dependency
+on the first build. Yams/libyaml are statically linked; the installed app needs
+no external YAML tools or network connection. Their MIT notices are included
+in the app resources.
 
 ```sh
 # One-time setup, only after approving a local code-signing certificate:
@@ -27,6 +32,36 @@ Rotagivan/build.sh
 Copy `Rotagivan.app` from `Rotagivan/build/` into `/Applications`, quit the official Navigator app, then launch the clone. macOS will ask for Accessibility access so the clone can post pointer and scroll events.
 
 Do not run both apps together: each would receive and respond to the same touch reports.
+
+## Configuration and defaults
+
+General → Configuration provides **Copy YAML**, **Save YAML…**, and **Import YAML…**.
+For import, paste the YAML text (or open a file), click **Validate**, then confirm
+**Replace configuration**. Invalid input does not change preferences. **Undo last
+import** restores the previous complete configuration, including shortcuts; that
+backup survives restarts. Restoring defaults uses the same backup mechanism.
+
+The versioned file includes all profiles, names, selected default, cursor curves,
+scrolling, tap/drag settings, recorded key bindings, activation/click/drag hotkeys,
+slider baselines, enabled state, and launch-at-login preference. Accessibility and
+Input Monitoring grants, signing credentials, debug data, and transient active
+hotkeys are intentionally excluded. Login-item changes remain subject to macOS
+approval; global shortcut conflicts with other apps still depend on that Mac.
+
+Values are engine units, **not slider percentages**. The schema begins with
+`formatVersion: 1`, `settings:`, and `shortcuts:`. Profile-keyed collections retain
+the app's Codable representation: alternating profile IDs and values in a YAML
+sequence. Start with an exported file when editing by hand. Imports reject
+unknown keys, duplicate keys/IDs, invalid ranges or references, multiple documents,
+aliases, and files over 1 MB.
+
+`Rotagivan/DefaultConfiguration.yaml` is the factory configuration captured from
+the current tuned app for v1.1.49 (51). Fresh installations use it without applying
+legacy slider migrations. Existing saved settings are not overwritten by an
+upgrade. **General → Restore defaults…** restores that snapshot. No automatic
+renormalization is performed by import or reset.
+
+Run all regression checks with `zsh Rotagivan/test.sh` (isolated test preferences).
 
 ## Current verification and setup
 

@@ -6,34 +6,43 @@ struct ProfileStorageTests {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
         var settings = StoredSettings()
+        var timing = GestureSettings()
+        precondition(timing.resolvedDoubleTapInterval == 0.30)
+        timing.doubleTapInterval = 0.12
+        precondition(timing.resolvedDoubleTapInterval == 0.12)
+        timing.doubleTapInterval = 2
+        precondition(timing.resolvedDoubleTapInterval == 0.6)
+        print("Double-tap delay tests passed: legacy default, persistence value and safe bounds.")
+        precondition(settings.normal == MotionProfile(cursorSpeed: 0.28, cursorAcceleration: 1.37, scrollMultiplier: 1.0, invertScrollX: false, invertScrollY: false, kineticScroll: true, kineticDecay: 0.75))
+        precondition(settings.precision == MotionProfile(cursorSpeed: 0.25, cursorAcceleration: 1.0, scrollMultiplier: 0.1656, invertScrollX: false, invertScrollY: false, kineticScroll: true, kineticDecay: 0.9423446))
+        precondition(settings.normal.resolvedCursorFalloff == 0)
+        settings.normal.cursorDeceleration = 0.85
+        precondition(settings.normal.resolvedCursorFalloff == 0.85)
+        settings.normal.cursorDeceleration = 1
+        precondition(settings.normal.resolvedCursorFalloff == ProfileMaximum.cursorFalloff)
+        print("Cursor falloff tests passed: legacy default, persistence and safe maximum.")
+        precondition(settings.normal.resolvedScrollAcceleration == 1)
+        settings.normal.scrollAcceleration = 1.3
+        precondition(settings.normal.resolvedScrollAcceleration == 1.3)
+        print("Scroll acceleration tests passed: legacy neutral default and profile persistence.")
+        print("Current motion defaults passed: Normal and Precision match the tuned profiles.")
         settings.normal.cursorSpeed = 0.37
         // Legacy data has no additionalProfiles key.
         let legacy = try decoder.decode(StoredSettings.self, from: encoder.encode(settings))
-        precondition(legacy.additionalProfiles == nil && legacy.normal.cursorSpeed == 0.37 && legacy.globalLimits == nil)
-        let cursorScale = SettingsScale.linear(minimum: 0, maximum: 3)
+        precondition(legacy.additionalProfiles == nil && legacy.normal.cursorSpeed == 0.37)
+        let cursorScale = SettingsScale.linear(minimum: 0, maximum: ProfileMaximum.cursorSpeed)
         precondition(cursorScale.value(for: 0) == 0)
-        precondition(cursorScale.value(for: 100) == 3)
-        precondition(cursorScale.percentage(for: 1.5) == 50)
-        let momentumScale = SettingsScale.momentum(maximum: 0.995)
+        precondition(cursorScale.value(for: 100) == ProfileMaximum.cursorSpeed)
+        precondition(cursorScale.percentage(for: 1.2) == 50)
+        let momentumScale = SettingsScale.momentum(maximum: ProfileMaximum.coastCoefficient)
         precondition(momentumScale.value(for: 0) == 0)
-        precondition(abs(momentumScale.value(for: 100) - 0.995) < 0.000_001)
+        precondition(abs(momentumScale.value(for: 100) - 1) < 0.000_001)
         precondition(momentumScale.value(for: 75) > 0.97)
         precondition(momentumScale.percentage(for: 0.75) < 10)
-        print("0–100 scale tests passed: true zero speeds, upper bounds, curved momentum mapping.")
-        var limits = GlobalLimits()
-        precondition(limits.cursorSpeedMaximum == 3 && limits.scrollSpeedMaximum == 6)
-        precondition(abs(limits.momentumMaximum - 0.995) < 0.000_001)
-        limits.cursorSpeedCeiling = 0
-        limits.scrollSpeedCeiling = 0
-        limits.momentumCeiling = 0
-        precondition(limits.cursorSpeedMaximum == 0 && limits.scrollSpeedMaximum == 0 && limits.momentumMaximum == 0)
-        limits.cursorSpeedCeiling = 100
-        limits.scrollSpeedCeiling = 100
-        limits.momentumCeiling = 100
-        precondition(limits.cursorSpeedMaximum == 6 && limits.scrollSpeedMaximum == 12)
-        let persistedLimits = try decoder.decode(GlobalLimits.self, from: encoder.encode(limits))
-        precondition(persistedLimits == limits)
-        print("Global-limit tests passed: default caps, true zero ceilings, upper ceilings, persistence.")
+        print("0–100 scale tests passed: true zero speeds, upper bounds, curved coast-coefficient mapping.")
+        precondition(ProfileMaximum.scrollSpeed == 6 && ProfileMaximum.scrollAcceleration == 1.5 && ProfileMaximum.coastCoefficient == 1)
+        precondition(ProfileMaximum.cursorSpeed == 2.4 && ProfileMaximum.cursorAcceleration == 1.4 && ProfileMaximum.cursorAccelerationOnset == 6 && ProfileMaximum.cursorFalloff == 0.85)
+        print("Fixed profile maximum tests passed: direct 0–100 controls, true zero and built-in upper bounds.")
         settings.additionalProfiles = [AdditionalProfile(id: 100, name: "Profile 3", motion: settings.normal)]
         settings.additionalProfiles?[0].motion.cursorSpeed = 0.75
         let restored = try decoder.decode(StoredSettings.self, from: encoder.encode(settings))

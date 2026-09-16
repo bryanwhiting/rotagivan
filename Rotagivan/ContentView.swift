@@ -10,6 +10,10 @@ struct ContentView: View {
 
     private let sections = [("Profiles", "rectangle.split.2x1"), ("General", "slider.horizontal.3")]
 
+    private enum ProfileSection {
+        case motion, scrolling, tapping, dragging
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 18) {
@@ -58,6 +62,11 @@ struct ContentView: View {
         .toggleStyle(.checkbox)
         .tint(.primary)
         .frame(width: 800, height: 640)
+        .onAppear {
+            DispatchQueue.main.async {
+                store.recenterSliderBaselines(revision: 6)
+            }
+        }
         .confirmationDialog("Reset all profiles and gesture settings? Added profiles will be removed.", isPresented: $confirmReset) {
             Button("Reset settings", role: .destructive) { store.reset(); ShortcutSettings.shared.additional = [:]; ShortcutSettings.shared.profileActions = [:] }
         }
@@ -114,7 +123,6 @@ struct ContentView: View {
 
     @ViewBuilder
     private func profileCell(_ title: String, id: UInt32, section: Int) -> some View {
-        let limits = store.settings.resolvedGlobalLimits
         switch section {
         case 0:
             profileHeader(title, id: id)
@@ -123,30 +131,58 @@ struct ContentView: View {
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                 .id(id)
         case 1:
-            columnSection("Motion", icon: "cursorarrow.motionlines") {
-                columnSlider("Cursor speed", value: motionBinding(id).cursorSpeed, scale: .linear(minimum: 0, maximum: limits.cursorSpeedMaximum))
-                columnSlider("Acceleration", value: motionBinding(id).cursorAcceleration, scale: .linear(minimum: 1, maximum: limits.cursorAccelerationMaximum))
+            columnSection("Motion", icon: "cursorarrow.motionlines", profileID: id, copySection: .motion) {
+                MotionCurveEditor(curve: Binding(get: { store.motion(for: id).resolvedCursorResponse }, set: { curve in
+                    var motion = store.motion(for: id)
+                    motion.cursorResponse = curve.sanitized
+                    store.updateMotion(motion, for: id)
+                }), telemetry: store.cursorTelemetry, profileID: id, isActive: store.activeProfileID == id)
             }
         case 2:
-            columnSection("Scrolling", icon: "arrow.up.and.down") {
-                columnSlider("Scroll speed", value: motionBinding(id).scrollMultiplier, scale: .linear(minimum: 0, maximum: limits.scrollSpeedMaximum))
+            columnSection("Scrolling", icon: "arrow.up.and.down", profileID: id, copySection: .scrolling) {
+                columnSlider("Scroll speed", value: motionBinding(id).scrollMultiplier, scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.scrollSpeed, keyPath: \.scrollSpeed))
+                // Internal 1.0 means no extra acceleration. A direct scale
+                // keeps every visible 0–100 position editable; a centered
+                // scale collapses when that neutral value is the minimum.
+                columnSlider("Scroll acceleration", value: scrollAccelerationBinding(id), scale: .linear(minimum: 1, maximum: ProfileMaximum.scrollAcceleration))
+                Text("Slow movements use the base speed. Faster swipes gain extra distance, like macOS scrolling.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Toggle("Invert horizontal", isOn: motionBinding(id).invertScrollX)
                 Toggle("Invert vertical", isOn: motionBinding(id).invertScrollY)
-                Toggle("Kinetic scrolling", isOn: motionBinding(id).kineticScroll)
-                columnSlider("Momentum", value: motionBinding(id).kineticDecay, scale: .momentum(maximum: limits.momentumMaximum))
+                Toggle("After-scroll coasting", isOn: motionBinding(id).kineticScroll)
+                columnSlider("Coast coefficient", value: motionBinding(id).kineticDecay, scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.coastCoefficient, keyPath: \.coastCoefficient))
                     .disabled(!store.motion(for: id).kineticScroll)
+                Text("After lift-off, speed decays exponentially. 0 stops immediately; 100 keeps gliding until you touch again or turn it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         case 3:
-            columnSection("Tapping", icon: "hand.tap") { gestures(id) }
+            columnSection("Tapping", icon: "hand.tap", profileID: id, copySection: .tapping) { gestures(id) }
         default:
-            columnSection("Dragging", icon: "hand.draw") { dragging(id) }
+            columnSection("Dragging", icon: "hand.draw", profileID: id, copySection: .dragging) { dragging(id) }
         }
     }
 
-    private func columnSection<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+    private func columnSection<Content: View>(_ title: String, icon: String, profileID: UInt32, copySection: ProfileSection, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
-            Label(title, systemImage: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            HStack {
+                Label(title, systemImage: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if store.profiles.count > 1 {
+                    Menu {
+                        ForEach(store.profiles.filter { $0.id != profileID }, id: \.id) { source in
+                            Button(source.name) { copy(copySection, from: source.id, to: profileID) }
+                        }
+                    } label: {
+                        Label("Copy from", systemImage: "doc.on.doc")
+                    }
+                    .font(.caption)
+                    .menuStyle(.borderlessButton)
+                    .help("Copy this section from another profile")
+                }
+            }
             content()
         }
         .padding(.horizontal, 16).padding(.bottom, 18)
@@ -157,6 +193,10 @@ struct ContentView: View {
             Text(title).foregroundStyle(.secondary)
             profileSlider(title, name: "", value: value, scale: scale)
         }
+    }
+
+    private func centeredScale(_ id: UInt32, minimum: Double, maximum: Double, keyPath: KeyPath<ProfileSliderBaseline, Double>) -> SettingsScale {
+        .centered(minimum: minimum, maximum: maximum, baseline: store.settings.sliderBaseline(for: id)[keyPath: keyPath])
     }
 
     private func profileHeader(_ title: String, id: UInt32) -> some View {
@@ -210,6 +250,74 @@ struct ContentView: View {
         Binding(get: { store.motion(for: id) }, set: { store.updateMotion($0, for: id) })
     }
 
+    private func scrollAccelerationBinding(_ id: UInt32) -> Binding<Double> {
+        Binding(get: { store.motion(for: id).resolvedScrollAcceleration }, set: { value in
+            var motion = store.motion(for: id)
+            motion.scrollAcceleration = min(ProfileMaximum.scrollAcceleration, max(1, value))
+            store.updateMotion(motion, for: id)
+        })
+    }
+
+    private func copy(_ section: ProfileSection, from sourceID: UInt32, to targetID: UInt32) {
+        switch section {
+        case .motion:
+            let source = store.motion(for: sourceID)
+            var target = store.motion(for: targetID)
+            target.copyCursorSettings(from: source)
+            store.updateMotion(target, for: targetID)
+        case .scrolling:
+            let source = store.motion(for: sourceID)
+            var target = store.motion(for: targetID)
+            target.scrollMultiplier = source.scrollMultiplier
+            target.invertScrollX = source.invertScrollX
+            target.invertScrollY = source.invertScrollY
+            target.kineticScroll = source.kineticScroll
+            target.kineticDecay = source.kineticDecay
+            store.updateMotion(target, for: targetID)
+        case .tapping:
+            let source = store.settings.effectiveGestures(for: sourceID)
+            var target = store.settings.gestures(for: targetID)
+            target.oneFingerTap = source.oneFingerTap
+            target.twoFingerTap = source.twoFingerTap
+            target.oneFingerShortcut = source.oneFingerShortcut
+            target.twoFingerShortcut = source.twoFingerShortcut
+            target.oneFingerDoubleTap = source.oneFingerDoubleTap
+            target.twoFingerDoubleTap = source.twoFingerDoubleTap
+            target.oneFingerDoubleShortcut = source.oneFingerDoubleShortcut
+            target.twoFingerDoubleShortcut = source.twoFingerDoubleShortcut
+            target.gestures.tapToClick = source.gestures.tapToClick
+            target.gestures.tapMaxDuration = source.gestures.tapMaxDuration
+            target.gestures.tapMaxMovement = source.gestures.tapMaxMovement
+            target.gestures.doubleTapInterval = source.gestures.doubleTapInterval
+            store.updateGestures(target, for: targetID)
+            if targetID != store.defaultProfileID {
+                var customProfiles = store.settings.customTapProfiles ?? []
+                customProfiles.insert(targetID)
+                store.settings.customTapProfiles = customProfiles
+            }
+            copyShortcutActions([0, 1], from: sourceID, to: targetID)
+        case .dragging:
+            let source = store.settings.gestures(for: sourceID).gestures
+            var target = store.settings.gestures(for: targetID)
+            target.gestures.touchAndHoldDrag = source.touchAndHoldDrag
+            target.gestures.dragRegrip = source.dragRegrip
+            target.gestures.dragRegripWindow = source.dragRegripWindow
+            target.gestures.secondFingerGracePeriod = source.secondFingerGracePeriod
+            store.updateGestures(target, for: targetID)
+            copyShortcutActions([2], from: sourceID, to: targetID)
+        }
+    }
+
+    private func copyShortcutActions(_ indexes: [Int], from sourceID: UInt32, to targetID: UInt32) {
+        let shortcuts = ShortcutSettings.shared
+        let source = shortcuts.actions(for: sourceID)
+        var target = shortcuts.actions(for: targetID)
+        for index in indexes where source.indices.contains(index) && target.indices.contains(index) {
+            target[index] = source[index]
+        }
+        shortcuts.profileActions[targetID] = target
+    }
+
     private func gestures(_ id: UInt32) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if id != store.defaultProfileID {
@@ -230,8 +338,9 @@ struct ContentView: View {
                 tapRecorder("Two-finger double tap", action: doubleTapActionBinding(id, twoFingers: true), shortcut: doubleTapShortcutBinding(id, twoFingers: true))
                 Text("A configured double tap replaces the matching single tap.")
                     .font(.caption).foregroundStyle(.secondary)
-                columnSlider("Maximum tap duration", value: gesture(id, \.tapMaxDuration), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.tapDurationMaximum))
-                columnSlider("Maximum tap movement", value: gesture(id, \.tapMaxMovement), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.tapMovementMaximum))
+                doubleTapDelaySlider(id)
+                tapImpactSpeedSlider(id)
+                columnSlider("Tap movement radius", value: gesture(id, \.tapMaxMovement), scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.tapMovement, keyPath: \.tapMovementRadius))
             }
             Divider()
             ShortcutEditor(showBehavior: false, actionIndex: 0, showError: false, profileID: id)
@@ -253,6 +362,60 @@ struct ContentView: View {
         TapActionEditor(title: title, action: action, shortcut: shortcut)
     }
 
+    private func doubleTapDelaySlider(_ id: UInt32) -> some View {
+        let milliseconds = Binding<Double>(get: {
+            store.settings.gestures(for: id).gestures.resolvedDoubleTapInterval * 1_000
+        }, set: { value in
+            var profileGestures = store.settings.gestures(for: id)
+            profileGestures.gestures.doubleTapInterval = min(600, max(50, value.rounded())) / 1_000
+            store.updateGestures(profileGestures, for: id)
+        })
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Double-tap recognition delay").foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Slider(value: milliseconds, in: 50...max(60, store.settings.sliderBaseline(for: id).doubleTapDelay * 2_000 - 50), step: 10)
+                    .accessibilityLabel("Double-tap recognition delay in milliseconds")
+                TextField("Milliseconds", value: milliseconds, format: .number.precision(.fractionLength(0)))
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(width: 52)
+                    .accessibilityLabel("Double-tap recognition delay in milliseconds")
+            }
+            Text("Single taps wait this long only when that finger count has a double-tap action.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 270)
+    }
+
+    private func tapImpactSpeedSlider(_ id: UInt32) -> some View {
+        let milliseconds = Binding<Double>(get: {
+            store.settings.gestures(for: id).gestures.tapMaxDuration * 1_000
+        }, set: { value in
+            var profileGestures = store.settings.gestures(for: id)
+            profileGestures.gestures.tapMaxDuration = min(1_000, max(0, value.rounded())) / 1_000
+            store.updateGestures(profileGestures, for: id)
+        })
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Tap impact speed").foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Slider(value: milliseconds, in: 0...min(1_000, max(10, store.settings.sliderBaseline(for: id).tapImpactSpeed * 2_000)), step: 10)
+                    .accessibilityLabel("Tap impact speed in milliseconds")
+                TextField("Milliseconds", value: milliseconds, format: .number.precision(.fractionLength(0)))
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(width: 52)
+                    .accessibilityLabel("Tap impact speed in milliseconds")
+            }
+            Text("Maximum finger-down time for a tap. Lower milliseconds require a quicker tap.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 270)
+    }
+
     private func dragging(_ id: UInt32) -> some View {
         let primaryTap = store.settings.effectiveGestures(for: id).oneFingerTap
         let canTapAndHoldDrag = store.settings.effectiveGestures(for: id).gestures.tapToClick && primaryTap.supportsTapAndHoldDrag
@@ -269,7 +432,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Toggle("Allow re-grip while dragging", isOn: gesture(id, \.dragRegrip))
-            columnSlider("Re-grip window", value: gesture(id, \.dragRegripWindow), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.regripWindowMaximum))
+            columnSlider("Re-grip window", value: gesture(id, \.dragRegripWindow), scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.regripWindow, keyPath: \.regripWindow))
         }
         .font(.system(size: 12))
     }
@@ -291,17 +454,6 @@ struct ContentView: View {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
                 Button("Reset all settings…") { confirmReset = true }
             }
-            Section("Global limits") {
-                Text("Each profile slider is a 0–100 fraction of these ceilings. Raise a ceiling if a profile at 100 is still too slow.")
-                    .font(.caption).foregroundStyle(.secondary)
-                globalLimitSlider("Cursor speed ceiling", keyPath: \.cursorSpeedCeiling)
-                globalLimitSlider("Acceleration ceiling", keyPath: \.cursorAccelerationCeiling)
-                globalLimitSlider("Scroll speed ceiling", keyPath: \.scrollSpeedCeiling)
-                globalLimitSlider("Momentum ceiling", keyPath: \.momentumCeiling)
-                globalLimitSlider("Tap duration ceiling", keyPath: \.tapDurationCeiling)
-                globalLimitSlider("Tap movement ceiling", keyPath: \.tapMovementCeiling)
-                globalLimitSlider("Re-grip window ceiling", keyPath: \.regripWindowCeiling)
-            }
             Section {
                 Text("Rotagivan is an independent, editable implementation. Do not run it at the same time as ZSA Navigator or both apps will respond to each touch.")
                     .font(.callout)
@@ -313,15 +465,6 @@ struct ContentView: View {
 
     private func gestureBinding(_ id: UInt32) -> Binding<ProfileGestures> {
         Binding(get: { store.settings.gestures(for: id) }, set: { store.updateGestures($0, for: id) })
-    }
-
-    private func globalLimitSlider(_ title: String, keyPath: WritableKeyPath<GlobalLimits, Double>) -> some View {
-        let value = Binding<Double>(get: { store.settings.resolvedGlobalLimits[keyPath: keyPath] }, set: { newValue in
-            var limits = store.settings.resolvedGlobalLimits
-            limits[keyPath: keyPath] = min(100, max(0, newValue.rounded()))
-            store.updateGlobalLimits(limits)
-        })
-        return columnSlider(title, value: value, scale: .linear(minimum: 0, maximum: 100))
     }
 
     private func gesture<Value>(_ id: UInt32, _ keyPath: WritableKeyPath<GestureSettings, Value>) -> Binding<Value> {

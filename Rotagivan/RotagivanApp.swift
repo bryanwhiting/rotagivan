@@ -122,8 +122,9 @@ struct NavigatorPanel: View {
             ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
                 .controlSize(.small)
 
-            speedSlider("Cursor Speed", value: profileValue(\.cursorSpeed), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.cursorSpeedMaximum))
-            speedSlider("Scroll Speed", value: profileValue(\.scrollMultiplier), scale: .linear(minimum: 0, maximum: store.settings.resolvedGlobalLimits.scrollSpeedMaximum))
+            speedSlider("Fine Speed", value: curveEndpoint(fast: false), scale: .linear(minimum: 0, maximum: CursorResponse.maximumGain))
+            speedSlider("Fast Speed", value: curveEndpoint(fast: true), scale: .linear(minimum: 0, maximum: CursorResponse.maximumGain))
+            speedSlider("Scroll Speed", value: profileValue(\.scrollMultiplier), scale: .linear(minimum: 0, maximum: ProfileMaximum.scrollSpeed))
             Text("\(store.activeProfileName) profile active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
@@ -168,6 +169,19 @@ struct NavigatorPanel: View {
         }, set: {
             var motion = store.motion(for: editingProfileID)
             motion[keyPath: key] = $0
+            store.updateMotion(motion, for: editingProfileID)
+        })
+    }
+
+    private func curveEndpoint(fast: Bool) -> Binding<Double> {
+        Binding(get: {
+            let curve = store.motion(for: editingProfileID).resolvedCursorResponse
+            return fast ? curve.fastGain : curve.fineGain
+        }, set: { gain in
+            var motion = store.motion(for: editingProfileID)
+            var curve = motion.resolvedCursorResponse
+            curve.setEndpoint(fast: fast, gain: gain)
+            motion.cursorResponse = curve
             store.updateMotion(motion, for: editingProfileID)
         })
     }

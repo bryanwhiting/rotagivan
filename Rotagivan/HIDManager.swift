@@ -115,9 +115,9 @@ final class NavigatorHIDManager: ObservableObject {
         state = .looking
     }
 
-    private func received(_ report: UnsafeMutablePointer<UInt8>, length: Int) {
+    private func received(_ report: UnsafeMutablePointer<UInt8>, length: Int, receivedAt: TimeInterval) {
         guard let parsed = TrackpadReport.parse(report, length: length) else { return }
-        gestures.process(parsed)
+        gestures.process(parsed, receivedAt: receivedAt)
     }
 
     nonisolated private static let deviceMatched: IOHIDDeviceCallback = { context, _, _, device in
@@ -136,10 +136,11 @@ final class NavigatorHIDManager: ObservableObject {
         guard result == kIOReturnSuccess, let context else { return }
         let owner = Unmanaged<NavigatorHIDManager>.fromOpaque(context).takeUnretainedValue()
         let copy = Data(bytes: report, count: length)
+        let receivedAt = ProcessInfo.processInfo.systemUptime
         DispatchQueue.main.async {
             copy.withUnsafeBytes { bytes in
                 guard let base = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                owner.received(UnsafeMutablePointer(mutating: base), length: length)
+                owner.received(UnsafeMutablePointer(mutating: base), length: length, receivedAt: receivedAt)
             }
         }
     }

@@ -25,6 +25,8 @@ xcrun swiftc -O -parse-as-library \
   -framework IOKit \
   -framework ServiceManagement \
   "$script_dir/Models.swift" \
+  "$script_dir/CursorResponse.swift" \
+  "$script_dir/MotionCurveEditor.swift" \
   "$script_dir/TrackpadReport.swift" \
   "$script_dir/EventPoster.swift" \
   "$script_dir/GestureEngine.swift" \

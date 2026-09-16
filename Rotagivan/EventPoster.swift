@@ -8,6 +8,9 @@ final class EventPoster {
     // CGEvent scrolling takes integral deltas. Keep the fractional remainder
     // so low-speed kinetic scrolling does not disappear between timer ticks.
     private var scrollRemainder = CGVector.zero
+    // Cursor events have the same practical pixel granularity. Accumulating
+    // sub-pixel fine movements lets a low Fine speed remain responsive.
+    private var cursorRemainder = CGVector.zero
 
     static func tapKeyEvents(_ action: TapAction) -> [CGEvent] {
         guard action == .optionF19 || action == .enter else { return [] }
@@ -73,8 +76,14 @@ final class EventPoster {
 
     func move(dx: Double, dy: Double) {
         guard dx.isFinite, dy.isFinite, dx != 0 || dy != 0 else { return }
+        let accumulatedX = dx + cursorRemainder.dx
+        let accumulatedY = dy + cursorRemainder.dy
+        let emittedX = accumulatedX.rounded(.towardZero)
+        let emittedY = accumulatedY.rounded(.towardZero)
+        cursorRemainder = CGVector(dx: accumulatedX - emittedX, dy: accumulatedY - emittedY)
+        guard emittedX != 0 || emittedY != 0 else { return }
         let quartzCurrent = quartzMouseLocation()
-        let target = constrained(CGPoint(x: quartzCurrent.x + dx, y: quartzCurrent.y + dy))
+        let target = constrained(CGPoint(x: quartzCurrent.x + emittedX, y: quartzCurrent.y + emittedY))
         let type: CGEventType = (dragging || CGEventSource.buttonState(.combinedSessionState, button: .left)) ? .leftMouseDragged : .mouseMoved
         CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
     }

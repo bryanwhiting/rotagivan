@@ -11,6 +11,7 @@ enum AppVersion {
 enum SettingsScale {
     case linear(minimum: Double, maximum: Double)
     case momentum(maximum: Double)
+    case centered(minimum: Double, maximum: Double, baseline: Double)
 
     func percentage(for value: Double) -> Double {
         switch self {
@@ -22,6 +23,12 @@ enum SettingsScale {
             guard maximum > 0 else { return 0 }
             let normalized = min(1, max(0, (value / maximum - 0.70) / 0.30))
             return min(100, max(0, (1 - sqrt(1 - normalized)) * 100))
+        case let .centered(minimum, maximum, baseline):
+            let base = min(maximum, max(minimum, baseline))
+            guard base > minimum else { return value <= minimum ? 50 : 100 }
+            if value <= base { return min(50, max(0, (value - minimum) / (base - minimum) * 50)) }
+            guard maximum > base else { return 50 }
+            return min(100, max(50, 50 + (value - base) / (maximum - base) * 50))
         }
     }
 
@@ -30,28 +37,37 @@ enum SettingsScale {
         switch self {
         case let .linear(minimum, maximum): return minimum + (maximum - minimum) * p
         case let .momentum(maximum): return p == 0 ? 0 : maximum * (0.70 + 0.30 * (1 - pow(1 - p, 2)))
+        case let .centered(minimum, maximum, baseline):
+            let base = min(maximum, max(minimum, baseline))
+            if p <= 0.5 { return minimum + (base - minimum) * (p * 2) }
+            return base + (maximum - base) * ((p - 0.5) * 2)
         }
     }
 }
 
-/// Global 0...100 ceilings. A profile's own 0...100 value is a fraction of
-/// the relevant ceiling, letting profiles remain comparable as limits change.
-struct GlobalLimits: Codable, Equatable {
-    var cursorSpeedCeiling = 50.0
-    var cursorAccelerationCeiling = 50.0
-    var scrollSpeedCeiling = 50.0
-    var momentumCeiling = 100.0
-    var tapDurationCeiling = 60.0
-    var tapMovementCeiling = 50.0
-    var regripWindowCeiling = 40.0
-
-    var cursorSpeedMaximum: Double { 6 * cursorSpeedCeiling / 100 }
-    var cursorAccelerationMaximum: Double { 1 + 2.8 * cursorAccelerationCeiling / 100 }
-    var scrollSpeedMaximum: Double { 12 * scrollSpeedCeiling / 100 }
-    var momentumMaximum: Double { 0.995 * momentumCeiling / 100 }
-    var tapDurationMaximum: Double { tapDurationCeiling / 100 }
-    var tapMovementMaximum: Double { 160 * tapMovementCeiling / 100 }
-    var regripWindowMaximum: Double { 2 * regripWindowCeiling / 100 }
+/// Fixed engine bounds behind the simple 0...100 profile controls.
+enum ProfileMaximum {
+    // Keep the profile scale practical: 100 is a fast but controllable cursor.
+    static let cursorSpeed = 2.4
+    // 1.0 is linear tracking; 1.4 is deliberately the practical upper bound.
+    // Higher exponents make ordinary cursor motion feel disproportionately fast.
+    static let cursorAcceleration = 1.4
+    // Acceleration begins only after deliberate, faster finger movement.
+    static let cursorAccelerationOnset = 6.0
+    // Navigator reports are high-resolution contact coordinates. A few
+    // thousand units/sec separates deliberate fast movement from precise
+    // small movement; 800 made nearly every movement appear "Fast".
+    static let cursorSpeedTransition = 4_000.0
+    // Cursor falloff is intentionally brief; unlike scroll coasting, it never
+    // permits a continuously gliding cursor.
+    static let cursorFalloff = 0.85
+    static let scrollSpeed = 6.0
+    static let scrollAcceleration = 1.5
+    static let scrollAccelerationOnset = 250.0
+    static let coastCoefficient = 1.0
+    static let tapDuration = 1.0
+    static let tapMovement = 160.0
+    static let regripWindow = 2.0
 }
 
 enum TapAction: String, Codable, CaseIterable {
@@ -79,6 +95,7 @@ struct RecordedShortcut: Codable, Equatable {
 }
 
 struct MotionProfile: Codable, Equatable {
+    var cursorResponse: CursorResponse? = nil
     var cursorSpeed: Double
     var cursorAcceleration: Double
     var scrollMultiplier: Double
@@ -86,25 +103,51 @@ struct MotionProfile: Codable, Equatable {
     var invertScrollY: Bool
     var kineticScroll: Bool
     var kineticDecay: Double
+    // Optional preserves profiles saved before scroll acceleration existed.
+    var scrollAcceleration: Double? = nil
+    var resolvedScrollAcceleration: Double { min(ProfileMaximum.scrollAcceleration, max(1, scrollAcceleration ?? 1)) }
+    // Optional preserves profiles saved before cursor deceleration existed.
+    var cursorDeceleration: Double? = nil
+    var fineCursorSpeed: Double? = nil
+    var fineCursorAcceleration: Double? = nil
+    var fineCursorFalloff: Double? = nil
+    var cursorSpeedTransition: Double? = nil
+    var resolvedCursorFalloff: Double { min(ProfileMaximum.cursorFalloff, max(0, cursorDeceleration ?? 0)) }
+    var resolvedFineCursorSpeed: Double { min(ProfileMaximum.cursorSpeed, max(0, fineCursorSpeed ?? cursorSpeed)) }
+    var resolvedFineCursorAcceleration: Double { min(ProfileMaximum.cursorAcceleration, max(1, fineCursorAcceleration ?? cursorAcceleration)) }
+    var resolvedFineCursorFalloff: Double { min(ProfileMaximum.cursorFalloff, max(0, fineCursorFalloff ?? resolvedCursorFalloff)) }
+    var resolvedCursorSpeedTransition: Double { min(ProfileMaximum.cursorSpeedTransition, max(1, cursorSpeedTransition ?? ProfileMaximum.cursorSpeedTransition * 0.5)) }
+    var resolvedCursorResponse: CursorResponse { (cursorResponse ?? CursorResponse(legacy: self)).sanitized }
+
+    mutating func copyCursorSettings(from source: MotionProfile) {
+        cursorResponse = source.resolvedCursorResponse
+        cursorSpeed = source.cursorSpeed
+        cursorAcceleration = source.cursorAcceleration
+        cursorDeceleration = source.cursorDeceleration
+        fineCursorSpeed = source.fineCursorSpeed
+        fineCursorAcceleration = source.fineCursorAcceleration
+        fineCursorFalloff = source.fineCursorFalloff
+        cursorSpeedTransition = source.cursorSpeedTransition
+    }
 
     static let normal = MotionProfile(
-        cursorSpeed: 0.5,
-        cursorAcceleration: 1.5,
-        scrollMultiplier: 1.4,
+        cursorSpeed: 0.28,
+        cursorAcceleration: 1.37,
+        scrollMultiplier: 1.0,
         invertScrollX: false,
         invertScrollY: false,
         kineticScroll: true,
-        kineticDecay: 0.98
+        kineticDecay: 0.75
     )
 
     static let precision = MotionProfile(
-        cursorSpeed: 0.22,
-        cursorAcceleration: 1.15,
-        scrollMultiplier: 0.65,
+        cursorSpeed: 0.25,
+        cursorAcceleration: 1.0,
+        scrollMultiplier: 0.1656,
         invertScrollX: false,
         invertScrollY: false,
         kineticScroll: true,
-        kineticDecay: 0.96
+        kineticDecay: 0.9423446
     )
 }
 
@@ -116,6 +159,9 @@ struct GestureSettings: Codable, Equatable {
     var dragRegrip = true
     var dragRegripWindow = 0.25
     var secondFingerGracePeriod = 0.05
+    // Optional preserves settings saved before the recognition-delay control.
+    var doubleTapInterval: Double?
+    var resolvedDoubleTapInterval: Double { min(0.6, max(0.05, doubleTapInterval ?? 0.30)) }
 }
 
 struct ProfileGestures: Codable {
@@ -137,6 +183,19 @@ struct AdditionalProfile: Codable, Identifiable {
     var motion: MotionProfile
 }
 
+struct ProfileSliderBaseline: Codable {
+    var cursorSpeed: Double
+    var cursorAcceleration: Double
+    var cursorFalloff: Double
+    var scrollSpeed: Double
+    var scrollAcceleration: Double
+    var coastCoefficient: Double
+    var tapImpactSpeed: Double
+    var tapMovementRadius: Double
+    var doubleTapDelay: Double
+    var regripWindow: Double
+}
+
 struct StoredSettings: Codable {
     var enabled = true
     var launchAtLogin = false
@@ -150,8 +209,8 @@ struct StoredSettings: Codable {
     var profileGestures: [UInt32: ProfileGestures]?
     var customTapProfiles: Set<UInt32>?
     var defaultProfileID: UInt32?
-    var globalLimits: GlobalLimits?
-    var resolvedGlobalLimits: GlobalLimits { globalLimits ?? GlobalLimits() }
+    var sliderBaselines: [UInt32: ProfileSliderBaseline]?
+    var sliderBaselineRevision: Int?
     var resolvedDefaultProfileID: UInt32 {
         let id = defaultProfileID ?? 1
         return id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) ? id : 1
@@ -189,6 +248,7 @@ struct StoredSettings: Codable {
             result.gestures.tapToClick = primary.gestures.tapToClick
             result.gestures.tapMaxDuration = primary.gestures.tapMaxDuration
             result.gestures.tapMaxMovement = primary.gestures.tapMaxMovement
+            result.gestures.doubleTapInterval = primary.gestures.doubleTapInterval
         }
         return result
     }
@@ -197,18 +257,28 @@ struct StoredSettings: Codable {
         let name = profileNames?[id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? fallback : name
     }
+
+    func sliderBaseline(for id: UInt32, preferStored: Bool = true) -> ProfileSliderBaseline {
+        if preferStored, let saved = sliderBaselines?[id] { return saved }
+        let motion = id == 1 ? normal : id == 2 ? precision : additionalProfiles?.first(where: { $0.id == id })?.motion ?? normal
+        let profileGestures = effectiveGestures(for: id).gestures
+        return ProfileSliderBaseline(cursorSpeed: motion.cursorSpeed, cursorAcceleration: motion.cursorAcceleration, cursorFalloff: motion.resolvedCursorFalloff, scrollSpeed: motion.scrollMultiplier, scrollAcceleration: motion.resolvedScrollAcceleration, coastCoefficient: motion.kineticDecay, tapImpactSpeed: profileGestures.tapMaxDuration, tapMovementRadius: profileGestures.tapMaxMovement, doubleTapDelay: profileGestures.resolvedDoubleTapInterval, regripWindow: profileGestures.dragRegripWindow)
+    }
 }
 
 @MainActor
 final class SettingsStore: ObservableObject {
+    // Neither cursor samples nor display refreshes invalidate the settings UI.
+    let cursorTelemetry = CursorTelemetry()
     @Published var settings: StoredSettings { didSet { save() } }
     @Published private(set) var activeProfileID: UInt32 = 1
 
     private static let storageKey = "settings.v1"
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         // Keep the legacy domain read-only so existing installations retain their tuning.
-        let defaults = UserDefaults.standard
         if !defaults.bool(forKey: "migration.rotagivan.v1") {
             let legacy = defaults.persistentDomain(forName: "local.navigator.clone") ?? [:]
             for (key, value) in legacy where key == Self.storageKey || key.hasPrefix("shortcut.") {
@@ -216,7 +286,7 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "migration.rotagivan.v1")
         }
-        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+        if let data = defaults.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode(StoredSettings.self, from: data) {
             settings = decoded
         } else {
@@ -228,15 +298,61 @@ final class SettingsStore: ObservableObject {
             settings.twoFingerTap = .enter
             settings.gestures.tapToClick = true
         }
+        // Fine controls originally inherited their Fast counterpart so older
+        // profiles would decode safely. Materialize that inherited value once:
+        // changing Fast must never subsequently move a visible Fine control.
+        if !defaults.bool(forKey: "migration.rotagivan.independentFineMotion.v1") {
+            func materialized(_ motion: MotionProfile) -> MotionProfile {
+                var result = motion
+                if result.fineCursorSpeed == nil { result.fineCursorSpeed = result.cursorSpeed }
+                if result.fineCursorAcceleration == nil { result.fineCursorAcceleration = result.cursorAcceleration }
+                if result.fineCursorFalloff == nil { result.fineCursorFalloff = result.resolvedCursorFalloff }
+                return result
+            }
+            var migrated = settings
+            migrated.normal = materialized(migrated.normal)
+            migrated.precision = materialized(migrated.precision)
+            migrated.additionalProfiles = migrated.additionalProfiles?.map { profile in
+                var result = profile
+                result.motion = materialized(profile.motion)
+                return result
+            }
+            settings = migrated
+            defaults.set(true, forKey: "migration.rotagivan.independentFineMotion.v1")
+        }
+        // Preserve the visible 0–100 position when the physical velocity
+        // range is widened from 800 to 4,000 contact-units/sec.
+        if !defaults.bool(forKey: "migration.rotagivan.cursorTransitionRange.v1") {
+            func widenedTransition(_ motion: MotionProfile) -> MotionProfile {
+                var result = motion
+                if let value = result.cursorSpeedTransition {
+                    result.cursorSpeedTransition = min(ProfileMaximum.cursorSpeedTransition, max(0, value * 5))
+                }
+                return result
+            }
+            var migrated = settings
+            migrated.normal = widenedTransition(migrated.normal)
+            migrated.precision = widenedTransition(migrated.precision)
+            migrated.additionalProfiles = migrated.additionalProfiles?.map { profile in
+                var result = profile
+                result.motion = widenedTransition(profile.motion)
+                return result
+            }
+            settings = migrated
+            defaults.set(true, forKey: "migration.rotagivan.cursorTransitionRange.v1")
+        }
+        // Revision 4 deliberately re-centres the user's existing live tuning
+        // after profile baselines were introduced.
+        if (settings.sliderBaselineRevision ?? 0) < 4 {
+            let ids: [UInt32] = [1, 2] + (settings.additionalProfiles ?? []).map(\.id)
+            settings.sliderBaselines = Dictionary(uniqueKeysWithValues: ids.map { ($0, settings.sliderBaseline(for: $0, preferStored: false)) })
+            settings.sliderBaselineRevision = 4
+        }
         activeProfileID = settings.resolvedDefaultProfileID
     }
 
     var activeProfile: MotionProfile {
         motion(for: activeProfileID)
-    }
-
-    func updateGlobalLimits(_ limits: GlobalLimits) {
-        settings.globalLimits = limits
     }
 
     var activeGestures: ProfileGestures { settings.effectiveGestures(for: activeProfileID) }
@@ -245,6 +361,15 @@ final class SettingsStore: ObservableObject {
         var profiles = settings.profileGestures ?? [:]
         profiles[id] = value
         settings.profileGestures = profiles
+    }
+
+    func recenterSliderBaselines(revision: Int) {
+        guard (settings.sliderBaselineRevision ?? 0) < revision else { return }
+        let ids: [UInt32] = [1, 2] + (settings.additionalProfiles ?? []).map(\.id)
+        var updated = settings
+        updated.sliderBaselines = Dictionary(uniqueKeysWithValues: ids.map { ($0, updated.sliderBaseline(for: $0, preferStored: false)) })
+        updated.sliderBaselineRevision = revision
+        settings = updated
     }
 
     var profiles: [(id: UInt32, name: String)] {
@@ -288,6 +413,9 @@ final class SettingsStore: ObservableObject {
         let profile = AdditionalProfile(id: id, name: "Profile \(profiles.count + 1)", motion: motion(for: defaultProfileID))
         settings.additionalProfiles = (settings.additionalProfiles ?? []) + [profile]
         updateGestures(settings.gestures(for: defaultProfileID), for: id)
+        var baselines = settings.sliderBaselines ?? [:]
+        baselines[id] = settings.sliderBaseline(for: defaultProfileID)
+        settings.sliderBaselines = baselines
         return id
     }
 
@@ -298,7 +426,7 @@ final class SettingsStore: ObservableObject {
 
     private func save() {
         if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: Self.storageKey)
+            defaults.set(data, forKey: Self.storageKey)
         }
     }
 

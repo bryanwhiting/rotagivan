@@ -21,31 +21,35 @@ zsh Rotagivan/test.sh
 ```
 
 `launch.sh` quits Rotagivan gracefully, waits for it to exit, copies the signed
-build into `/Applications` with `ditto`, verifies its signature, and reopens the
-installed copy. It works from any directory, preserves your settings, and does
+build into `/Applications` with `ditto`, verifies its signature, resets only
+Rotagivan's Accessibility permission, and reopens the installed copy. It works
+from any directory, preserves your app settings, and does
 not rebuild or re-sign the app. Use `./launch.sh --check` for a read-only check.
 If a copy will not quit, it stops instead of overwriting a running app.
 
-For a stale Accessibility permission on the Mac where you are installing:
+The reset now runs by default. To keep a working Accessibility permission:
 
 ```sh
-./launch.sh --reset-accessibility
+./launch.sh --keep-accessibility
 ```
 
-This installs and verifies the build, runs `tccutil reset Accessibility
+Without `--keep-accessibility`, the launcher installs and verifies the build,
+runs `tccutil reset Accessibility
 local.rotagivan` while Rotagivan is closed, then opens the app and Accessibility
 settings. Manually enable `/Applications/Rotagivan.app` (add it with **+** if
 needed), then reconnect or relaunch Rotagivan. Close and reopen System Settings
 if its list appears stale. This resets the permission decision; it does not
 guarantee every old app entry disappears from the list.
 
-The reset is **opt-in**, affects only this user's Rotagivan Accessibility
+The reset is **on by default**, affects only this user's Rotagivan Accessibility
 permission, and leaves Input Monitoring, other apps, profiles, YAML, and login
 credentials untouched. Run it as your normal logged-in user, not with `sudo`.
 It cannot grant access automatically or override a managed Mac's policy. A
 reset also cannot fix an unstable signing identity: keep using the same local
 signing certificate for future builds on that Mac. To validate without making
-changes, use `./launch.sh --check --reset-accessibility`.
+changes, use `./launch.sh --check`. The previous `--reset-accessibility` flag is
+still accepted. After granting access, reopen the app from Applications or use
+`--keep-accessibility`; a plain `./launch.sh` will revoke that grant again.
 
 Built app path:
 

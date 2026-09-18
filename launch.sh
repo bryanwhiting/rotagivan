@@ -11,24 +11,26 @@ process_pattern='(^|/)Rotagivan[.]app/Contents/MacOS/Rotagivan([[:space:]]|$)'
 fail() { print -u2 -- "$*"; exit 1; }
 
 check_only=false
-reset_accessibility=false
+reset_accessibility=true
 for argument in "$@"; do
   case "$argument" in
     --check) check_only=true ;;
     --reset-accessibility) reset_accessibility=true ;;
+    --keep-accessibility) reset_accessibility=false ;;
     --help)
-      print -- "Usage: $0 [--check] [--reset-accessibility]"
-      print -- "Quit Rotagivan, install the existing signed build in /Applications, and reopen it."
+      print -- "Usage: $0 [--check] [--keep-accessibility | --reset-accessibility]"
+      print -- "Quit Rotagivan, install the signed build, reset its Accessibility permission, and reopen it."
       print -- "--check validates without quitting, copying, resetting permissions, or launching."
-      print -- "--reset-accessibility clears only Rotagivan's Accessibility decision for this user."
+      print -- "Accessibility is reset for local.rotagivan by default; --reset-accessibility is also accepted."
+      print -- "--keep-accessibility skips the reset when your existing permission is working."
       print -- "You must grant access again in System Settings. Other permissions and settings are unchanged."
       exit 0 ;;
-    *) fail "Usage: $0 [--check] [--reset-accessibility] [--help]" ;;
+    *) fail "Usage: $0 [--check] [--keep-accessibility | --reset-accessibility] [--help]" ;;
   esac
 done
 
 if [[ "$reset_accessibility" == true && "$check_only" == false && $EUID -eq 0 ]]; then
-  fail "Run --reset-accessibility as your logged-in user, without sudo, so it resets that user's permission."
+  fail "Run launch.sh as your logged-in user, without sudo, so it resets that user's permission."
 fi
 
 [[ -x "$built_app/Contents/MacOS/Rotagivan" ]] || fail "No built app found. Run: zsh \"$repo_dir/Rotagivan/build.sh\""

@@ -77,6 +77,16 @@ struct ConfigurationTests {
         ]), at: .left)
         let groupRoundtrip = try AppConfiguration.parse(grouped.yaml())
         precondition(groupRoundtrip.settings.appExplorer == grouped.settings.appExplorer)
+        var tiling = grouped
+        tiling.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Window Manager", action: .windowManager), at: .down, in: [.left, .up])
+        let tilingYAML = try tiling.yaml()
+        let tilingRoundtrip = try AppConfiguration.parse(tilingYAML)
+        precondition(tilingRoundtrip.settings.appExplorer == tiling.settings.appExplorer)
+        rejected(tilingYAML.replacingOccurrences(of: "windowManager", with: "untrustedAction"), "unknown explorer action")
+        var invalidTiling = tiling
+        invalidTiling.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", action: .windowManager), at: .down)
+        rejected(try ConfigurationYAML.encode(invalidTiling), "mixed window manager destination")
+        print("Window Manager YAML roundtrip and action validation passed.")
         var invalidGroup = grouped
         invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
         rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")

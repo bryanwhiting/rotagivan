@@ -274,7 +274,18 @@ apps, excluding the current app and Rotagivan. The editor previews the rank in
 each direction. Switching an existing group to Recent apps preserves its assigned
 favorites; switch back to **Assigned favorites** to restore them. The group type
 syncs, but recent-app history stays local to each Mac.
-Web favorites have a globe icon and an optional custom name; swipe and lift to
+Choose **Window Manager** from a slot's **•••** menu (in General settings or the
+inline Explorer editor) to add a tiling destination, including inside groups.
+Select it, then make a fresh swipe and lift to tile the window in the app you
+were using: **left/right** place it in that half, **diagonals** in that quarter,
+**up** maximizes it, and **down** uses the bottom half. Maximize fills the usable
+display rather than entering macOS full screen. Center tap returns to the parent
+Explorer; Escape cancels. Tiling uses the window's current display and excludes
+the Dock/menu bar. Accessibility must be enabled. Full-screen windows and windows
+that do not support resizing show a message; some apps enforce a minimum size.
+The destination saves and syncs; window references and geometry are never synced.
+
+Web favorites load their site's favicon (with a globe fallback) and support an optional custom name; swipe and lift to
 open the URL in your default browser. Only full `http://` and `https://` links
 without embedded usernames/passwords are accepted. URLs export and sync with
 your settings, so avoid links containing secrets or private sign-in tokens.

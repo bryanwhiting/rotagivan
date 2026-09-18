@@ -360,5 +360,60 @@ import SwiftUI
         precondition(confirmPicker(query: "file:///tmp/unsafe", applications: []) == nil,
                      "Invalid/non-web URLs cannot be submitted")
         print("Native picker passed: fuzzy app selection, pasted URL, and invalid URL rejection via Return.")
+        // Exercise real HUD navigation with a fake window target. Never move a user's windows.
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .left, name: "Tools", children: [
+                AppExplorerFavorite(direction: .left, name: "Window Manager", action: .windowManager)
+            ])
+        ])
+        var tiled: [SwipeDirection] = []
+        var tileError: String?
+        var captureAvailable = true
+        controller.captureWindow = { _ in
+            captureAvailable ? WindowTilingTarget { direction in tiled.append(direction); return tileError } : nil
+        }
+        for direction in SwipeDirection.allCases {
+            controller.show(waitingForLift: false)
+            swipeLeft(); swipeLeft()
+            precondition(controller.isVisible && controller.displayedEntries.count == 8)
+            precondition(controller.displayedEntries.allSatisfy { $0.tilingDirection != nil })
+            controller.beginEditing()
+            precondition(!controller.isEditing, "Tiling mode must not activate the editor or lose the original window")
+            if direction == .left {
+                let tilingPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                let view = tilingPanel.contentView!
+                let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/window-manager.png"))
+                centerTap()
+                precondition(controller.isVisible && controller.groupPath == [.left] && controller.displayedEntries.first?.isWindowManager == true)
+                swipeLeft()
+            }
+            let dx: Double = [.left, .topLeft, .bottomLeft].contains(direction) ? -100 : ([.right, .topRight, .bottomRight].contains(direction) ? 100 : 0)
+            let dy: Double = [.up, .topLeft, .topRight].contains(direction) ? -100 : ([.down, .bottomLeft, .bottomRight].contains(direction) ? 100 : 0)
+            controller.process(report(500))
+            controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 500 + dx, y: 500 + dy, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+            controller.process(report(nil))
+            precondition(!controller.isVisible && tiled.last == direction, "A fresh swipe tiles once and closes the HUD")
+        }
+        precondition(tiled.count == 8)
+        controller.show(waitingForLift: false); swipeLeft(); swipeLeft()
+        tileError = "This window cannot be resized."
+        swipeLeft()
+        precondition(controller.isVisible, "Failed tiling keeps navigation and retry available")
+        tileError = nil
+        swipeLeft()
+        precondition(!controller.isVisible)
+        captureAvailable = false
+        controller.show(waitingForLift: false); swipeLeft(); swipeLeft()
+        let previousTileCount = tiled.count
+        swipeLeft()
+        precondition(controller.isVisible && tiled.count == previousTileCount)
+        centerTap(); centerTap()
+        precondition(controller.groupPath.isEmpty && controller.isVisible)
+        controller.dismiss()
+        precondition(tiled.count == previousTileCount, "Back/cancel/missing targets never tile")
+        print("Window Manager native HUD passed: all directions, nested back navigation, capture failure, retry, and no editor/app activation.")
     }
 }

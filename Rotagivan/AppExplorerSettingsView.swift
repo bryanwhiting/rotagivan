@@ -183,6 +183,9 @@ struct AppExplorerSettingsView: View {
                         Button("Choose app or URL…") { editingApplicationPath = groupPath + [direction] }
                         Button(favorite?.url != nil ? "Edit URL…" : "Set URL…") { editingURLPath = groupPath + [direction] }
                         Divider()
+                        Button("Window Manager") {
+                            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Window Manager", action: .windowManager), at: direction, in: groupPath) }
+                        }
                         Button("New Explorer group…") { editingGroupPath = groupPath + [direction] }
                             .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
                         Button("New Recent apps group") {
@@ -218,6 +221,8 @@ struct AppExplorerSettingsView: View {
                     if let icon {
                         Image(nsImage: icon).resizable().renderingMode(.original)
                             .scaledToFit().frame(width: 16, height: 16)
+                    } else if favorite.isWindowManager {
+                        Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal).frame(width: 16, height: 16)
                     } else if !favorite.isGroup, favorite.url != nil {
                         WebsiteFavicon(url: favorite.resolvedWebURL, size: 16)
                     } else {

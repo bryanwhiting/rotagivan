@@ -33,6 +33,8 @@ extension AppExplorerPresenting {
     private(set) var groupPath: [SwipeDirection] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
+    private var tilingTarget: WindowTilingTarget?
+    var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
@@ -91,6 +93,9 @@ extension AppExplorerPresenting {
         guard !isVisible else { return }
         selectionGeneration &+= 1
         groupPath = []
+        model.showingWindowManager = false
+        model.message = nil
+        tilingTarget = nil
         model.canEdit = editingStore != nil
         contactIsDown = waitingForLift
         sourcePID = workspace.frontmostApplication?.processIdentifier
@@ -150,8 +155,21 @@ extension AppExplorerPresenting {
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
         model.showingRecents = model.mode == .recent || recentGroup
+        model.canEdit = editingStore != nil && !model.showingWindowManager
+        if model.showingWindowManager {
+            model.groupNames.append("Window Manager")
+            model.entries = SwipeDirection.allCases.map { direction in
+                ExplorerEntry(direction: direction, bundleID: nil, name: WindowTile.title(direction),
+                    icon: nil, url: nil, tilingDirection: direction)
+            }
+            return
+        }
         if model.mode == .favorites && !recentGroup {
             model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
+                if favorite.isWindowManager {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                        icon: nil, url: nil, isWindowManager: favorite.isValidDestination)
+                }
                 if favorite.isGroup {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                         icon: nil, url: nil, isGroup: favorite.isValidDestination && groupPath.count < AppExplorerSettings.maximumGroupDepth,
@@ -198,6 +216,24 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if let tile = entry?.tilingDirection {
+            if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
+            let error = tilingTarget.map { $0.apply(tile) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
+            if let error {
+                model.message = error
+                model.selected = nil
+                input = AppExplorerSelection(waitingForLift: contactIsDown)
+                deadline = Date().addingTimeInterval(15)
+            } else { dismiss() }
+            return
+        }
+        if entry?.isWindowManager == true {
+            model.showingWindowManager = true
+            tilingTarget = sourcePID.flatMap(captureWindow)
+            model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
+            refreshGroup()
+            return
+        }
         if entry?.isGroup == true {
             groupPath.append(direction)
             refreshGroup()
@@ -224,6 +260,14 @@ extension AppExplorerPresenting {
 
     func goBack() {
         guard isVisible, !isEditing else { return }
+        if model.showingWindowManager {
+            guard contextIsValid?() != false else { dismiss(); return }
+            model.showingWindowManager = false
+            model.message = nil
+            tilingTarget = nil
+            refreshGroup()
+            return
+        }
         guard contextIsValid?() != false, !groupPath.isEmpty else { dismiss(); return }
         groupPath.removeLast()
         refreshGroup()
@@ -238,7 +282,7 @@ extension AppExplorerPresenting {
     }
 
     func beginEditing() {
-        guard let store = editingStore, let previous = panel, !isEditing,
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingWindowManager,
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
         model.isEditing = true
@@ -306,6 +350,9 @@ extension AppExplorerPresenting {
         model.selected = nil
         groupPath = []
         model.groupNames = []
+        model.showingWindowManager = false
+        model.message = nil
+        tilingTarget = nil
         onDismiss?()
     }
 }
@@ -337,11 +384,15 @@ struct ExplorerEntry {
     var isWebURL: Bool
     var isGroup: Bool
     var isRecentGroup: Bool
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false) {
+    var isWindowManager: Bool
+    var tilingDirection: SwipeDirection?
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
         self.isRecentGroup = isRecentGroup
+        self.isWindowManager = isWindowManager
+        self.tilingDirection = tilingDirection
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -358,6 +409,8 @@ struct ExplorerEntry {
     @Published var canEdit = false
     @Published var isEditing = false
     @Published var showingRecents = false
+    @Published var showingWindowManager = false
+    @Published var message: String?
 }
 
 struct AppExplorerView: View {
@@ -404,8 +457,8 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(model.message ?? (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to go back" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))))
+                .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
         }
         .padding(26)
         .frame(width: 470, height: 464)
@@ -419,7 +472,11 @@ struct AppExplorerView: View {
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    if entry.isGroup {
+                    if let direction = entry.tilingDirection {
+                        WindowTileIcon(direction: direction)
+                    } else if entry.isWindowManager {
+                        Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                    } else if entry.isGroup {
                         Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else if entry.isWebURL {
                         WebsiteFavicon(url: entry.url, size: 42)
@@ -428,7 +485,8 @@ struct AppExplorerView: View {
                     }
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
                     if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
-                    else if entry.url == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.url == nil && entry.tilingDirection == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -440,7 +498,7 @@ struct AppExplorerView: View {
             .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true))
+        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }

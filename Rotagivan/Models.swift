@@ -6,6 +6,8 @@ enum AppExplorerMode: String, Codable, CaseIterable {
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
+enum AppExplorerAction: String, Codable { case windowManager }
+
 struct AppExplorerFavorite: Codable, Equatable {
     var direction: SwipeDirection
     var bundleID: String? = nil
@@ -15,12 +17,15 @@ struct AppExplorerFavorite: Codable, Equatable {
     var children: [AppExplorerFavorite]? = nil
     // Optional so existing groups retain their manually assigned slots.
     var groupMode: AppExplorerMode? = nil
+    var action: AppExplorerAction? = nil
+    var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        if action != nil { return bundleID == nil && url == nil && children == nil && groupMode == nil }
         if isGroup { return bundleID == nil && url == nil }
         guard groupMode == nil else { return false }
         if url != nil { return bundleID == nil && resolvedWebURL != nil }

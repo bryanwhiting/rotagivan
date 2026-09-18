@@ -32,14 +32,31 @@ xcrun swiftc -O -parse-as-library \
   -framework Carbon \
   -framework IOKit \
   -framework ServiceManagement \
+  -framework Security \
   "$script_dir/Models.swift" \
+  "$script_dir/AppOverrides.swift" \
+  "$script_dir/AppOverridesView.swift" \
   "$script_dir/AppConfiguration.swift" \
   "$script_dir/ConfigurationSettingsView.swift" \
+  "$script_dir/SyncStorage.swift" \
+  "$script_dir/SettingsSync.swift" \
+  "$script_dir/SyncSettingsView.swift" \
   "$script_dir/CursorResponse.swift" \
+  "$script_dir/ScrollResponse.swift" \
+  "$script_dir/ScrollCurveEditor.swift" \
   "$script_dir/MotionCurveEditor.swift" \
   "$script_dir/TrackpadReport.swift" \
+  "$script_dir/TrackpadDistance.swift" \
+  "$script_dir/TrackpadDistanceControl.swift" \
   "$script_dir/EventPoster.swift" \
+  "$script_dir/AppExplorerSelection.swift" \
+  "$script_dir/AppExplorer.swift" \
   "$script_dir/GestureEngine.swift" \
+  "$script_dir/DoubleTapSwipe.swift" \
+  "$script_dir/SwipeDirectionClassification.swift" \
+  "$script_dir/DoubleTapSwipeEditor.swift" \
+  "$script_dir/GestureCalibration.swift" \
+  "$script_dir/GestureCalibrationView.swift" \
   "$script_dir/HIDManager.swift" \
   "$script_dir/HotKeyManager.swift" \
   "$script_dir/ContentView.swift" \

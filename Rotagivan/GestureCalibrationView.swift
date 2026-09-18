@@ -1,0 +1,296 @@
+import SwiftUI
+
+@MainActor
+final class GestureCalibrationSession: ObservableObject, Identifiable {
+    let id = UUID()
+    let profileID: UInt32
+    let profileName: String
+    let mode: GestureCalibrationMode
+
+    @Published private(set) var sampleCount: Int
+    @Published private(set) var instruction: String
+    @Published private(set) var isComplete: Bool
+    @Published private(set) var cancellationReason: String?
+
+    var samples: [GestureCalibrationSample] { recorder.samples }
+    var medianDoubleTapInterval: Double? { recorder.medianDoubleTapInterval }
+    var medianSwipeWindow: Double? { recorder.medianSwipeWindow }
+    var medianSwipeDuration: Double? { recorder.medianSwipeDuration }
+
+    private var recorder: GestureCalibrationRecorder
+
+    init(profileID: UInt32, profileName: String, mode: GestureCalibrationMode, gestures: ProfileGestures) {
+        self.profileID = profileID
+        self.profileName = profileName
+        self.mode = mode
+
+        let recorder = GestureCalibrationRecorder(
+            mode: mode,
+            tapMaxDuration: gestures.gestures.tapMaxDuration,
+            tapMaxMovement: gestures.gestures.tapMaxMovement,
+            swipeDistance: (mode == .singleTapSwipe ? (gestures.singleTapSwipe ?? .singleTapDefaults) : (gestures.doubleTapSwipe ?? DoubleTapSwipeSettings())).resolvedDistance
+        )
+        self.recorder = recorder
+        sampleCount = recorder.samples.count
+        instruction = recorder.instruction
+        isComplete = recorder.isComplete
+    }
+
+    func process(_ report: TrackpadReport, at time: TimeInterval) {
+        guard cancellationReason == nil, !isComplete else { return }
+        recorder.process(report, at: time)
+        publishRecorderChanges()
+    }
+
+    func tick(at time: TimeInterval) {
+        guard cancellationReason == nil, !isComplete else { return }
+        recorder.tick(at: time)
+        publishRecorderChanges()
+    }
+
+    func cancel(reason: String) {
+        guard cancellationReason != reason else { return }
+        cancellationReason = reason
+    }
+
+    private func publishRecorderChanges() {
+        let nextSampleCount = recorder.samples.count
+        if sampleCount != nextSampleCount { sampleCount = nextSampleCount }
+        if instruction != recorder.instruction { instruction = recorder.instruction }
+        if isComplete != recorder.isComplete { isComplete = recorder.isComplete }
+    }
+}
+
+struct GestureCalibrationView: View {
+    @ObservedObject var session: GestureCalibrationSession
+    let onApply: () -> Void
+    let onCancel: () -> Void
+
+    private let requiredSampleCount = 10
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+            Divider()
+            if !session.isComplete || session.cancellationReason != nil {
+                instructionCard
+            }
+            progress
+            timings
+            result
+            Spacer(minLength: 0)
+            Divider()
+            footer
+        }
+        .padding(24)
+        .frame(width: 520, height: session.mode != .doubleTap ? 590 : 540)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: session.mode != .doubleTap ? "hand.draw" : "hand.tap")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(.teal)
+                .frame(width: 34, height: 34)
+                .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.title3.weight(.semibold))
+                Text("Calibrating the \(session.profileName) profile")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            statusLabel
+        }
+    }
+
+    @ViewBuilder
+    private var statusLabel: some View {
+        if session.cancellationReason != nil {
+            Label("Stopped", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.secondary)
+        } else if session.isComplete {
+            Label("Ready", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        } else {
+            Label("Capturing", systemImage: "record.circle")
+                .foregroundStyle(.teal)
+        }
+    }
+
+    private var instructionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(session.instruction)
+                .font(.system(size: 15, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(gestureDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Use one finger on the ZSA trackpad. Invalid or incomplete attempts are ignored and do not count.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(session.isComplete ? "Capture complete" : "Valid attempts")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(min(session.sampleCount, requiredSampleCount)) / \(requiredSampleCount)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView(value: Double(min(session.sampleCount, requiredSampleCount)), total: Double(requiredSampleCount))
+                .tint(session.isComplete ? .green : .teal)
+                .accessibilityLabel("Calibration progress")
+                .accessibilityValue("\(min(session.sampleCount, requiredSampleCount)) of \(requiredSampleCount) valid attempts")
+        }
+    }
+
+    private var timings: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Attempt").frame(width: 58, alignment: .leading)
+                Text(session.mode == .singleTapSwipe ? "Swipe duration" : "Tap interval").frame(maxWidth: .infinity, alignment: .trailing)
+                if session.mode != .doubleTap {
+                    Text("Swipe window").frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(session.samples.enumerated()), id: \.offset) { index, sample in
+                        HStack {
+                            Text("\(index + 1)").frame(width: 58, alignment: .leading)
+                            Text(milliseconds(session.mode == .singleTapSwipe ? (sample.swipeDuration ?? 0) : sample.doubleTapInterval))
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                            if session.mode != .doubleTap {
+                                Text(sample.swipeWindow.map(milliseconds) ?? "—")
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                            }
+                        }
+                        .font(.system(size: 12, design: .monospaced))
+                        .padding(.vertical, 5)
+                        if index < session.samples.count - 1 { Divider() }
+                    }
+                }
+            }
+            .frame(height: session.mode != .doubleTap ? 152 : 130)
+            .padding(.horizontal, 10)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+        }
+    }
+
+    @ViewBuilder
+    private var result: some View {
+        if let reason = session.cancellationReason {
+            VStack(alignment: .leading, spacing: 5) {
+                Label(reason, systemImage: "exclamationmark.circle")
+                Text("Pointer control has been restored. Cancel to close this calibration.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if session.isComplete, let tapMedian = session.medianDoubleTapInterval {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Median result").font(.system(size: 12, weight: .semibold))
+                if session.mode == .singleTapSwipe, let duration = session.medianSwipeDuration {
+                    resultLine(label: "Quick-swipe duration", rawSeconds: duration, range: 0.06...0.3)
+                } else {
+                    resultLine(label: "Double-tap interval", rawSeconds: tapMedian, range: 0.05...0.6)
+                }
+                if let swipeMedian = session.medianSwipeWindow {
+                    resultLine(label: "Swipe window", rawSeconds: swipeMedian, range: 0.1...0.8)
+                }
+                Text("Pointer control has been restored. Apply saves these timings; no shortcuts were triggered during the test.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("The median is shown exactly. If slower attempts were missed, choose a larger delay after applying.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(footerGuidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Cancel", action: onCancel)
+                .keyboardShortcut(.cancelAction)
+            Button("Apply", action: onApply)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!session.isComplete || session.cancellationReason != nil)
+        }
+    }
+
+    private var title: String {
+        switch session.mode {
+        case .doubleTap: return "Calibrate double tap"
+        case .doubleTapSwipe: return "Calibrate double tap + swipe"
+        case .singleTapSwipe: return "Calibrate tap + quick swipe"
+        }
+    }
+
+    private var gestureDescription: String {
+        switch session.mode {
+        case .doubleTap:
+            return "Lift your finger, then make two distinct taps at your natural pace. Lift again before the next attempt."
+        case .doubleTapSwipe:
+            return "Lift your finger, make two distinct taps, then place a third contact and swipe horizontally, vertically, or diagonally before lifting."
+        case .singleTapSwipe:
+            return "Tap once and lift. Immediately touch again, swipe in any of eight directions, and lift within 300 ms. Do not pause or hold. Repeat 10 times, pausing between attempts."
+        }
+    }
+
+    @ViewBuilder
+    private func resultLine(label: String, rawSeconds: Double, range: ClosedRange<Double>) -> some View {
+        let rawMilliseconds = rawSeconds * 1_000
+        let appliedMilliseconds = min(range.upperBound * 1_000, max(range.lowerBound * 1_000, rawMilliseconds.rounded()))
+        HStack {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text("\(rawMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms median")
+                .monospacedDigit()
+            if abs(appliedMilliseconds - rawMilliseconds) >= 0.05 {
+                Text("→ \(Int(appliedMilliseconds)) ms applied")
+                    .monospacedDigit()
+                    .foregroundStyle(.orange)
+            }
+        }
+        .font(.system(size: 12))
+    }
+
+    private func milliseconds(_ seconds: Double) -> String {
+        "\(Int((seconds * 1_000).rounded())) ms"
+    }
+
+    private var footerGuidance: String {
+        if session.cancellationReason != nil {
+            return "Press Tab to move focus or Escape to cancel."
+        }
+        if session.isComplete {
+            return "Press Tab to move focus, Return to apply, or Escape to cancel."
+        }
+        return "Pointer and gesture output are suppressed while capturing. Press Escape to cancel."
+    }
+}

@@ -7,6 +7,46 @@ struct CursorResponseTests {
     }
 
     static func main() throws {
+        let speedScale = SettingsScale.cursorGain
+        close(speedScale.value(for: 0), 0, "Speed zero remains stopped")
+        close(speedScale.value(for: 100), CursorResponse.maximumGain, "Top speed unchanged")
+        close(speedScale.value(for: -10), 0, "Speed below range clamps")
+        close(speedScale.value(for: 110), CursorResponse.maximumGain, "Speed above range clamps")
+        close(speedScale.value(for: .nan), 0, "Invalid scale input stays finite")
+        close(speedScale.value(for: .infinity), CursorResponse.maximumGain, "Infinite scale input clamps")
+        close(speedScale.percentage(for: .nan), 0, "Invalid gain stays finite")
+        close(speedScale.percentage(for: .infinity), 100, "Infinite gain clamps")
+        var previousGain = -1.0
+        for tick in 0...1000 {
+            let percent = Double(tick) / 10
+            let gain = speedScale.value(for: percent)
+            precondition(gain > previousGain, "Precision taper must stay strictly increasing")
+            close(speedScale.percentage(for: gain), percent, "Decimal control roundtrip", tolerance: 1e-10)
+            previousGain = gain
+        }
+        let lowStep = speedScale.value(for: 12) - speedScale.value(for: 10)
+        let highStep = speedScale.value(for: 92) - speedScale.value(for: 90)
+        precondition(lowStep < highStep / 20, "Low speeds get much finer increments than high speeds")
+        precondition(lowStep < CursorResponse.maximumGain * 0.02 / 8, "10 to 12 is over eight times finer than before")
+        // Re-label the user's saved gains without modifying their response.
+        for savedGain in [0, 0.18, 0.3249357476635514, 0.336, 1.15, 1.813945007911339, CursorResponse.maximumGain] {
+            let percent = speedScale.percentage(for: savedGain)
+            close(speedScale.value(for: percent), savedGain, "Existing physical gain preserved", tolerance: 1e-12)
+        }
+        let oldTen = CursorResponse.maximumGain * 0.10
+        let preservedPosition = speedScale.percentage(for: oldTen)
+        precondition(speedScale.value(for: preservedPosition + 2) - oldTen < CursorResponse.maximumGain * 0.02 * 0.51)
+        precondition(speedScale.value(for: 46.1) != speedScale.value(for: 46), "Decimal entries are not quantized away")
+        var preservedCurve = CursorResponse.balanced
+        preservedCurve.fineGain = 0.3249357476635514
+        preservedCurve.fastGain = 1.813945007911339
+        let preservedBytes = try JSONEncoder().encode(preservedCurve)
+        _ = speedScale.percentage(for: preservedCurve.fineGain)
+        _ = speedScale.percentage(for: preservedCurve.fastGain)
+        let decodedPreservedCurve = try JSONDecoder().decode(CursorResponse.self, from: preservedBytes)
+        precondition(decodedPreservedCurve == preservedCurve)
+        print("Passed precision speed scale: true zero, unchanged maximum, decimal roundtrips, finer low-speed steps, and saved-gain preservation.")
+
         let legacyJSON = """
         {"cursorSpeed":0.48,"cursorAcceleration":1.16,"scrollMultiplier":2.16,"invertScrollX":false,"invertScrollY":false,"kineticScroll":true,"kineticDecay":0.94,"fineCursorSpeed":0.18,"cursorSpeedTransition":2400}
         """

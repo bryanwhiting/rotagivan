@@ -1,7 +1,22 @@
 import AppKit
 import CoreGraphics
 
-final class EventPoster {
+protocol GestureEventPosting: AnyObject {
+    var dragging: Bool { get }
+    func performTap(_ action: TapAction, shortcut: RecordedShortcut?)
+    func click(button: CGMouseButton, count: Int)
+    func move(dx: Double, dy: Double)
+    func scroll(dx: Double, dy: Double, momentum: Bool)
+    func beginDrag()
+    func endDrag()
+}
+
+extension GestureEventPosting {
+    func click(count: Int) { click(button: .left, count: count) }
+    func scroll(dx: Double, dy: Double) { scroll(dx: dx, dy: dy, momentum: false) }
+}
+
+final class EventPoster: GestureEventPosting {
     private let source = CGEventSource(stateID: .hidSystemState)
     private let shortcutQueue = DispatchQueue(label: "local.rotagivan.shortcut-output")
     private(set) var dragging = false
@@ -47,9 +62,11 @@ final class EventPoster {
     }
 
     private func postShortcut(_ shortcut: RecordedShortcut) {
+        let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Serialize complete chords so rapid taps cannot interleave their modifier releases.
         // Pace events off the main thread for listeners that track modifier transitions.
         shortcutQueue.async {
+            guard targetPID == NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
             let held = CGEventSource.flagsState(.hidSystemState)
             let events = Self.shortcutEvents(shortcut, heldFlags: held)
             for (index, event) in events.enumerated() {
@@ -63,8 +80,11 @@ final class EventPoster {
         guard !dragging else { return }
         switch action {
         case .leftClick: click()
+        case .doubleLeftClick: click(button: .left, count: 2)
+        case .tripleLeftClick: click(button: .left, count: 3)
         case .rightClick: click(button: .right)
         case .none: break
+        case .appExplorer: break // Handled by GestureEngine's local action coordinator.
         case .shortcut:
             if let shortcut { postShortcut(shortcut) }
         case .optionF19, .enter:
@@ -98,7 +118,7 @@ final class EventPoster {
         var events: [CGEvent] = []
         let down: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
         let up: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
-        for click in 1...max(1, min(2, count)) {
+        for click in 1...max(1, min(3, count)) {
             for type in [down, up] {
                 let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: button)
                 event?.setIntegerValueField(.mouseEventClickState, value: Int64(click))

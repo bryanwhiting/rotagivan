@@ -7,6 +7,7 @@ struct RotagivanApp: App {
     @NSApplicationDelegateAdaptor(CloneDelegate.self) private var delegate
     @StateObject private var store: SettingsStore
     @StateObject private var hid: NavigatorHIDManager
+    @StateObject private var sync: SettingsSync
     private let hotKeys = HotKeyManager()
 
     init() {
@@ -14,12 +15,14 @@ struct RotagivanApp: App {
         try? factory?.seedIfNeeded()
         let store = SettingsStore(factorySettings: factory?.settings)
         _store = StateObject(wrappedValue: store)
-        _hid = StateObject(wrappedValue: NavigatorHIDManager(store: store))
+        let hid = NavigatorHIDManager(store: store)
+        _hid = StateObject(wrappedValue: hid)
+        _sync = StateObject(wrappedValue: SettingsSync(store: store, hid: hid))
     }
 
     var body: some Scene {
         WindowGroup("Rotagivan", id: "settings") {
-            ContentView(store: store, hid: hid)
+            ContentView(store: store, hid: hid, sync: sync)
                 .onAppear { start() }
                 .onReceive(store.$settings) { settings in
                     hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [])
@@ -41,6 +44,8 @@ struct RotagivanApp: App {
 
     private func start() {
         delegate.onQuit = { hid.stop() }
+        delegate.beforeQuit = { await sync.prepareToQuit() }
+        sync.start()
         hotKeys.onProfileChanged = { id in store.setActiveProfile(id) }
         hotKeys.profileName = { id in store.profiles.first { $0.id == id }?.name }
         hotKeys.onAction = { id, down in hid.keyboardAction(id, down: down) }
@@ -124,9 +129,12 @@ struct NavigatorPanel: View {
             ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
                 .controlSize(.small)
 
-            speedSlider("Fine Speed", value: curveEndpoint(fast: false), scale: .linear(minimum: 0, maximum: CursorResponse.maximumGain))
-            speedSlider("Fast Speed", value: curveEndpoint(fast: true), scale: .linear(minimum: 0, maximum: CursorResponse.maximumGain))
-            speedSlider("Scroll Speed", value: profileValue(\.scrollMultiplier), scale: .linear(minimum: 0, maximum: ProfileMaximum.scrollSpeed))
+            speedSlider("Fine Speed", value: curveEndpoint(fast: false), scale: .cursorGain, fractionDigits: 1)
+            speedSlider("Fast Speed", value: curveEndpoint(fast: true), scale: .cursorGain, fractionDigits: 1)
+            DisclosureGroup("Scrolling") {
+                ScrollCurveEditor(profile:Binding(get:{store.motion(for:editingProfileID)},set:{store.updateMotion($0,for:editingProfileID)}),showGraph:false)
+                    .padding(.top,8)
+            }
             Text("\(store.activeProfileName) profile active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
@@ -188,13 +196,17 @@ struct NavigatorPanel: View {
         })
     }
 
-    private func speedSlider(_ title: String, value: Binding<Double>, scale: SettingsScale) -> some View {
-        let percentage = Binding(get: { scale.percentage(for: value.wrappedValue) }, set: { value.wrappedValue = scale.value(for: $0.rounded()) })
+    private func speedSlider(_ title: String, value: Binding<Double>, scale: SettingsScale, fractionDigits: Int = 0) -> some View {
+        let precision = pow(10.0, Double(fractionDigits))
+        let percentage = Binding(get: { scale.percentage(for: value.wrappedValue) }, set: {
+            guard $0.isFinite else { return }
+            value.wrappedValue = scale.value(for: ($0 * precision).rounded() / precision)
+        })
         return VStack(spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Text(percentage.wrappedValue, format: .number.precision(.fractionLength(0))).monospacedDigit()
+                Text(percentage.wrappedValue, format: .number.precision(.fractionLength(fractionDigits))).monospacedDigit()
             }.font(.caption).foregroundStyle(.secondary)
             Slider(value: percentage, in: 0...100).controlSize(.small)
                 .accessibilityLabel(title)
@@ -214,5 +226,11 @@ struct SettingsButton: View {
 
 final class CloneDelegate: NSObject, NSApplicationDelegate {
     var onQuit: (() -> Void)?
+    var beforeQuit: (() async -> Void)?
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let beforeQuit else { return .terminateNow }
+        Task { await beforeQuit(); sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
     func applicationWillTerminate(_ notification: Notification) { onQuit?() }
 }

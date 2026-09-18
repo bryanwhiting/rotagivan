@@ -4,10 +4,11 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
+    @ObservedObject var sync: SettingsSync
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "Profiles"
 
-    private let sections = [("Profiles", "rectangle.split.2x1"), ("General", "slider.horizontal.3")]
+    private let sections = [("Profiles", "rectangle.split.2x1"), ("Apps", "app.badge"), ("General", "slider.horizontal.3")]
 
     private enum ProfileSection {
         case motion, scrolling, tapping, dragging
@@ -39,10 +40,11 @@ struct ContentView: View {
                 Group {
                     switch selection {
                     case "General": general
+                    case "Apps": AppOverridesView(store: store)
                     default: profiles
                     }
                 }
-                .frame(width: selection == "Profiles" ? 720 : 510)
+                .frame(width: selection == "Profiles" ? 720 : (selection == "Apps" ? 640 : 510))
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity)
             }
@@ -61,6 +63,17 @@ struct ContentView: View {
         .toggleStyle(.checkbox)
         .tint(.primary)
         .frame(width: 800, height: 640)
+        .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
+            if value == nil { hid.endCalibration() }
+        })) { session in
+            GestureCalibrationView(session: session,
+                onApply: { hid.applyCalibration() }, onCancel: { hid.endCalibration() })
+                .onDisappear { hid.endCalibration() }
+        }
+        .onDisappear { hid.endCalibration() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            hid.endCalibration()
+        }
         .onAppear {
             DispatchQueue.main.async {
                 store.recenterSliderBaselines(revision: 6)
@@ -136,14 +149,8 @@ struct ContentView: View {
             }
         case 2:
             columnSection("Scrolling", icon: "arrow.up.and.down", profileID: id, copySection: .scrolling) {
-                columnSlider("Scroll speed", value: motionBinding(id).scrollMultiplier, scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.scrollSpeed, keyPath: \.scrollSpeed))
-                // Internal 1.0 means no extra acceleration. A direct scale
-                // keeps every visible 0–100 position editable; a centered
-                // scale collapses when that neutral value is the minimum.
-                columnSlider("Scroll acceleration", value: scrollAccelerationBinding(id), scale: .linear(minimum: 1, maximum: ProfileMaximum.scrollAcceleration))
-                Text("Slow movements use the base speed. Faster swipes gain extra distance, like macOS scrolling.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                ScrollCurveEditor(profile:motionBinding(id))
+                Divider()
                 Toggle("Invert horizontal", isOn: motionBinding(id).invertScrollX)
                 Toggle("Invert vertical", isOn: motionBinding(id).invertScrollY)
                 Toggle("After-scroll coasting", isOn: motionBinding(id).kineticScroll)
@@ -264,11 +271,7 @@ struct ContentView: View {
         case .scrolling:
             let source = store.motion(for: sourceID)
             var target = store.motion(for: targetID)
-            target.scrollMultiplier = source.scrollMultiplier
-            target.invertScrollX = source.invertScrollX
-            target.invertScrollY = source.invertScrollY
-            target.kineticScroll = source.kineticScroll
-            target.kineticDecay = source.kineticDecay
+            target.copyScrollSettings(from:source)
             store.updateMotion(target, for: targetID)
         case .tapping:
             let source = store.settings.effectiveGestures(for: sourceID)
@@ -281,9 +284,17 @@ struct ContentView: View {
             target.twoFingerDoubleTap = source.twoFingerDoubleTap
             target.oneFingerDoubleShortcut = source.oneFingerDoubleShortcut
             target.twoFingerDoubleShortcut = source.twoFingerDoubleShortcut
+            target.doubleTapSwipe = source.doubleTapSwipe
+            target.singleTapSwipe = source.singleTapSwipe
+            target.twoFingerSwipe = source.twoFingerSwipe
+            target.oneFingerTripleTap = source.oneFingerTripleTap
+            target.twoFingerTripleTap = source.twoFingerTripleTap
+            target.oneFingerTripleShortcut = source.oneFingerTripleShortcut
+            target.twoFingerTripleShortcut = source.twoFingerTripleShortcut
             target.gestures.tapToClick = source.gestures.tapToClick
             target.gestures.tapMaxDuration = source.gestures.tapMaxDuration
             target.gestures.tapMaxMovement = source.gestures.tapMaxMovement
+            target.gestures.keepCursorStillForTaps = source.gestures.keepCursorStillForTaps
             target.gestures.doubleTapInterval = source.gestures.doubleTapInterval
             store.updateGestures(target, for: targetID)
             if targetID != store.defaultProfileID {
@@ -330,13 +341,49 @@ struct ContentView: View {
             if store.settings.gestures(for: id).gestures.tapToClick {
                 tapRecorder("One-finger tap", action: gestureBinding(id).oneFingerTap, shortcut: gestureBinding(id).oneFingerShortcut)
                 tapRecorder("One-finger double tap", action: doubleTapActionBinding(id, twoFingers: false), shortcut: doubleTapShortcutBinding(id, twoFingers: false))
+                tapRecorder("One-finger triple tap", action: tripleTapActionBinding(id, twoFingers: false), shortcut: gestureBinding(id).oneFingerTripleShortcut)
                 tapRecorder("Two-finger tap", action: gestureBinding(id).twoFingerTap, shortcut: gestureBinding(id).twoFingerShortcut)
                 tapRecorder("Two-finger double tap", action: doubleTapActionBinding(id, twoFingers: true), shortcut: doubleTapShortcutBinding(id, twoFingers: true))
-                Text("A configured double tap replaces the matching single tap.")
+                tapRecorder("Two-finger triple tap", action: tripleTapActionBinding(id, twoFingers: true), shortcut: gestureBinding(id).twoFingerTripleShortcut)
+                Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
                 doubleTapDelaySlider(id)
+                calibrationButton("Calibrate double tap…", profileID: id, mode: .doubleTap)
                 tapImpactSpeedSlider(id)
-                columnSlider("Tap movement radius", value: gesture(id, \.tapMaxMovement), scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.tapMovement, keyPath: \.tapMovementRadius))
+                Toggle("Keep cursor still while tapping", isOn: Binding(get: {
+                    store.settings.gestures(for: id).gestures.resolvedKeepCursorStillForTaps
+                }, set: { enabled in
+                    var taps = store.settings.gestures(for: id)
+                    taps.gestures.keepCursorStillForTaps = enabled
+                    store.updateGestures(taps, for: id)
+                }))
+                TrackpadDistanceControl(title: "Tap movement radius", units: gesture(id, \.tapMaxMovement),
+                    scale: hid.distanceScale, range: 0...ProfileMaximum.tapMovement,
+                    explanation: "How far one finger may move from its landing point and still count as a tap. Two-finger taps use accumulated movement. This does not limit the distance between separate taps.")
+                if store.settings.gestures(for: id).gestures.resolvedKeepCursorStillForTaps {
+                    Text("Tap wobble within this radius won't move the cursor. Move beyond it or hold past Tap impact speed to start tracking. Lower the radius for quicker fine movement. Tap-and-hold dragging still works.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Divider()
+                DoubleTapSwipeEditor(settings: Binding(get: {
+                    store.settings.gestures(for: id).singleTapSwipe ?? .singleTapDefaults
+                }, set: { value in
+                    var taps = store.settings.gestures(for: id)
+                    taps.singleTapSwipe = value
+                    store.updateGestures(taps, for: id)
+                }), singleTap: true, onCalibrate: {
+                    hid.beginCalibration(profileID: id, mode: .singleTapSwipe)
+                }, canCalibrate: hid.canCalibrate, distanceScale: hid.distanceScale)
+                Divider()
+                DoubleTapSwipeEditor(settings: Binding(get: {
+                    store.settings.gestures(for: id).doubleTapSwipe ?? DoubleTapSwipeSettings()
+                }, set: { value in
+                    var taps = store.settings.gestures(for: id)
+                    taps.doubleTapSwipe = value
+                    store.updateGestures(taps, for: id)
+                }), onCalibrate: {
+                    hid.beginCalibration(profileID: id, mode: .doubleTapSwipe)
+                }, canCalibrate: hid.canCalibrate, distanceScale: hid.distanceScale)
             }
             Divider()
             ShortcutEditor(showBehavior: false, actionIndex: 0, showError: false, profileID: id)
@@ -356,6 +403,14 @@ struct ContentView: View {
 
     private func tapRecorder(_ title: String, action: Binding<TapAction>, shortcut: Binding<RecordedShortcut?>) -> some View {
         TapActionEditor(title: title, action: action, shortcut: shortcut)
+    }
+
+    private func calibrationButton(_ title: String, profileID: UInt32, mode: GestureCalibrationMode) -> some View {
+        Button { hid.beginCalibration(profileID: profileID, mode: mode) } label: {
+            Label(title, systemImage: "stopwatch")
+        }
+        .disabled(!hid.canCalibrate)
+        .help(hid.canCalibrate ? "Time 10 tries using your trackpad and apply the median." : "Enable and connect your trackpad to calibrate.")
     }
 
     private func doubleTapDelaySlider(_ id: UInt32) -> some View {
@@ -422,6 +477,11 @@ struct ContentView: View {
             Divider()
             Toggle("Tap, then touch and hold to drag", isOn: gesture(id, \.touchAndHoldDrag))
                 .disabled(!canTapAndHoldDrag)
+            if canTapAndHoldDrag {
+                Text("The second touch can land anywhere on the trackpad. You have at least 400 ms to touch again, then hold or move to drag. Lift to drop.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !canTapAndHoldDrag {
                 Text("Tap-and-hold drag needs One-finger tap to be set to Left click. Your current action is \(primaryTap.title).")
                     .font(.caption).foregroundStyle(.secondary)
@@ -452,6 +512,8 @@ struct ContentView: View {
             Divider()
             ConfigurationSettingsView(store: store, hid: hid)
             Divider()
+            SyncSettingsView(sync: sync)
+            Divider()
             Section {
                 Text("Rotagivan is an independent, editable implementation. Do not run it at the same time as ZSA Navigator or both apps will respond to each touch.")
                     .font(.callout)
@@ -467,6 +529,17 @@ struct ContentView: View {
 
     private func gesture<Value>(_ id: UInt32, _ keyPath: WritableKeyPath<GestureSettings, Value>) -> Binding<Value> {
         gestureBinding(id).gestures[dynamicMember: keyPath]
+    }
+
+    private func tripleTapActionBinding(_ id: UInt32, twoFingers: Bool) -> Binding<TapAction> {
+        Binding(get: {
+            let taps = store.settings.gestures(for: id)
+            return (twoFingers ? taps.twoFingerTripleTap : taps.oneFingerTripleTap) ?? .none
+        }, set: { action in
+            var taps = store.settings.gestures(for: id)
+            if twoFingers { taps.twoFingerTripleTap = action } else { taps.oneFingerTripleTap = action }
+            store.updateGestures(taps, for: id)
+        })
     }
 
     private func doubleTapActionBinding(_ id: UInt32, twoFingers: Bool) -> Binding<TapAction> {

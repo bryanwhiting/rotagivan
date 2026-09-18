@@ -9,7 +9,14 @@ struct ClickTests {
         let double = EventPoster.clickEvents(position: point, count: 2)
         precondition(double.map(\.type) == [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
         precondition(double.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2])
+        precondition(double.allSatisfy { $0.getIntegerValueField(.mouseEventButtonNumber) == Int64(CGMouseButton.left.rawValue) })
         precondition(double.allSatisfy { $0.location == point })
+        let triple = EventPoster.clickEvents(position: point, count: 3)
+        precondition(triple.map(\.type) == [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
+        precondition(triple.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2, 3, 3])
+        precondition(triple.allSatisfy { $0.location == point && $0.getIntegerValueField(.mouseEventButtonNumber) == 0 })
+        precondition(EventPoster.tapKeyEvents(.tripleLeftClick).isEmpty)
+        print("Native triple-click event ordering, click count, and fixed position passed (no events posted).")
         for (action, key, flags) in [(TapAction.optionF19, Int64(80), CGEventFlags.maskAlternate), (.enter, Int64(36), CGEventFlags())] {
             let events = EventPoster.tapKeyEvents(action).filter { $0.type != .flagsChanged }
             precondition(events.map(\.type) == [.keyDown, .keyUp])

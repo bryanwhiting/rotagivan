@@ -1,5 +1,24 @@
 import Foundation
 
+/// An audio-style control taper, not cursor acceleration. More slider travel
+/// is reserved for small gains; stored gains and the runtime response stay put.
+enum CursorSpeedScale {
+    private static let curvature = 4.0
+    private static let span = expm1(curvature)
+
+    static func gain(forPercent percent: Double) -> Double {
+        guard !percent.isNaN, percent > 0 else { return 0 }
+        guard percent < 100 else { return CursorResponse.maximumGain }
+        return CursorResponse.maximumGain * expm1(curvature * percent / 100) / span
+    }
+
+    static func percent(forGain gain: Double) -> Double {
+        guard !gain.isNaN, gain > 0 else { return 0 }
+        guard gain < CursorResponse.maximumGain else { return 100 }
+        return 100 * log1p(gain / CursorResponse.maximumGain * span) / curvature
+    }
+}
+
 struct CursorSample: Equatable {
     var profileID: UInt32 = 0
     var speed = 0.0

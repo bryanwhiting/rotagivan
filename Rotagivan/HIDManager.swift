@@ -15,15 +15,161 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     @Published private(set) var state: State = .stopped
+    @Published private(set) var distanceScale: TrackpadDistanceScale?
+    @Published private(set) var calibrationSession: GestureCalibrationSession?
+    private var calibrationTimer: Timer?
+    private var calibrationSettings: ProfileGestures?
+    private var calibrationActiveProfile: UInt32?
+    private var calibrationCapturing = false
+    private var contactsDown = false
+    private var suppressUntilLift = false
+    private var explorer: (any AppExplorerPresenting)?
+    private var explorerProfileID: UInt32?
+    private var explorerSettings: ProfileGestures?
+    private var appObserver: NSObjectProtocol?
+
+    var isCalibrating: Bool { calibrationCapturing }
+    var canCalibrate: Bool {
+        if case .connected = state { return store.settings.enabled }
+        return false
+    }
     private let store: SettingsStore
     private let gestures: GestureEngine
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var reportBuffer = [UInt8](repeating: 0, count: 64)
 
-    init(store: SettingsStore) {
+    init(store: SettingsStore, gestures: GestureEngine? = nil, explorer: (any AppExplorerPresenting)? = nil) {
         self.store = store
-        gestures = GestureEngine(store: store)
+        self.gestures = gestures ?? GestureEngine(store: store)
+        if gestures == nil {
+            foregroundAppChanged(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+            appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil, queue: .main) { [weak self] notification in
+                MainActor.assumeIsolated {
+                    self?.foregroundAppChanged((notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier)
+                }
+            }
+        }
+        if gestures == nil || explorer != nil {
+            let explorer: any AppExplorerPresenting = explorer ?? AppExplorerController()
+            self.explorer = explorer
+            self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
+            explorer.onDismiss = { [weak self] in
+                guard let self else { return }
+                self.gestures.reset()
+                self.suppressUntilLift = self.contactsDown
+            }
+            explorer.contextIsValid = { [weak self] in
+                guard let self else { return false }
+                return self.store.settings.enabled && self.store.activeProfileID == self.explorerProfileID &&
+                    self.store.activeGestures == self.explorerSettings && !self.calibrationCapturing
+            }
+        }
+    }
+
+    deinit {
+        if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
+    }
+
+    func foregroundAppChanged(_ bundleID: String?) {
+        guard store.foregroundBundleID != bundleID else { return }
+        explorer?.dismiss()
+        gestures.reset()
+        suppressUntilLift = contactsDown
+        store.foregroundBundleID = bundleID
+    }
+
+    private func openAppExplorer() {
+        guard store.settings.enabled, !calibrationCapturing else { return }
+        explorerProfileID = store.activeProfileID
+        explorerSettings = store.activeGestures
+        explorer?.show(waitingForLift: contactsDown)
+    }
+
+    func beginCalibration(profileID: UInt32, mode: GestureCalibrationMode) {
+        guard canCalibrate, calibrationSession == nil,
+              let profile = store.profiles.first(where: { $0.id == profileID }) else { return }
+        startCalibrationSession(GestureCalibrationSession(profileID: profileID,
+            profileName: profile.name, mode: mode, gestures: store.settings.gestures(for: profileID)))
+    }
+
+    // Separate from connection setup so the input gate can be tested without a physical device.
+    func startCalibrationSession(_ session: GestureCalibrationSession, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        explorer?.dismiss()
+        endCalibration()
+        gestures.reset()
+        calibrationSettings = store.settings.gestures(for: session.profileID)
+        calibrationActiveProfile = store.activeProfileID
+        calibrationSession = session
+        calibrationCapturing = true
+        if !contactsDown {
+            session.process(TrackpadReport(contacts: [], buttonDown: false, scanTime: 0), at: time)
+        }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.advanceCalibration(at: ProcessInfo.processInfo.systemUptime)
+            }
+        }
+        calibrationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func advanceCalibration(at time: TimeInterval) {
+        guard let session = calibrationSession else { return }
+        if !store.settings.enabled || store.activeProfileID != calibrationActiveProfile ||
+            !store.profiles.contains(where: { $0.id == session.profileID }) ||
+            store.settings.gestures(for: session.profileID) != calibrationSettings ||
+            (session.profileID != store.defaultProfileID && !(store.settings.customTapProfiles ?? []).contains(session.profileID)) {
+            session.cancel(reason: "The profile or its tap settings changed. Start a new calibration.")
+        }
+        if session.cancellationReason == nil && !session.isComplete { session.tick(at: time) }
+        if session.isComplete || session.cancellationReason != nil { finishCalibrationCapture() }
+    }
+
+    private func finishCalibrationCapture() {
+        guard calibrationCapturing else { return }
+        calibrationCapturing = false
+        calibrationTimer?.invalidate()
+        calibrationTimer = nil
+        suppressUntilLift = contactsDown
+        gestures.reset()
+    }
+
+    private func cancelCalibration(reason: String) {
+        calibrationSession?.cancel(reason: reason)
+        finishCalibrationCapture()
+    }
+
+    func endCalibration() {
+        finishCalibrationCapture()
+        calibrationSession = nil
+        calibrationSettings = nil
+        calibrationActiveProfile = nil
+    }
+
+    func applyCalibration() {
+        advanceCalibration(at: ProcessInfo.processInfo.systemUptime)
+        guard let session = calibrationSession, session.isComplete, session.cancellationReason == nil,
+              let median = session.medianDoubleTapInterval else { return }
+        var taps = store.settings.gestures(for: session.profileID)
+        if session.mode != .singleTapSwipe {
+            taps.gestures.doubleTapInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
+        }
+        if session.mode == .singleTapSwipe, let window = session.medianSwipeWindow, let duration = session.medianSwipeDuration {
+            var swipe = taps.singleTapSwipe ?? .singleTapDefaults
+            swipe.swipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
+            swipe.fastSwipeDuration = min(300, max(60, (duration * 1_000).rounded())) / 1_000
+            taps.singleTapSwipe = swipe
+        }
+        if session.mode == .doubleTapSwipe, let window = session.medianSwipeWindow {
+            var swipe = taps.doubleTapSwipe ?? DoubleTapSwipeSettings()
+            swipe.swipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
+            taps.doubleTapSwipe = swipe
+        }
+        let profileID = session.profileID
+        endCalibration()
+        store.updateGestures(taps, for: profileID)
     }
 
     func start() {
@@ -56,12 +202,17 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func keyboardAction(_ id: UInt32, down: Bool) {
+        if explorer?.isVisible == true { return }
+        guard !calibrationCapturing, !suppressUntilLift else { return }
         if !down { gestures.keyboardAction(id, down: false); return }
         guard store.settings.enabled, AXIsProcessTrusted() else { return }
         gestures.keyboardAction(id, down: true)
     }
 
     func stop() {
+        explorer?.dismiss()
+        distanceScale = nil
+        cancelCalibration(reason: "The trackpad was disconnected or disabled. Reconnect and start again.")
         gestures.reset()
         if let manager {
             if let device {
@@ -104,20 +255,70 @@ final class NavigatorHIDManager: ObservableObject {
             return
         }
         let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "ZSA Navigator"
+        distanceScale = Self.readDistanceScale(from: device)
         UserDefaults.standard.set(Date(), forKey: "debug.lastConnected")
         state = .connected(product)
     }
 
     private func didRemove(_ device: IOHIDDevice) {
         guard self.device === device else { return }
+        explorer?.dismiss()
+        distanceScale = nil
+        cancelCalibration(reason: "The trackpad disconnected. Reconnect and start again.")
         self.device = nil
         gestures.reset()
         state = .looking
     }
 
+    static func readDistanceScale(from device: IOHIDDevice) -> TrackpadDistanceScale? {
+        let elements = IOHIDDeviceCopyMatchingElements(device, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement] ?? []
+        let axes = elements.filter {
+            IOHIDElementGetReportID($0) == 1 && IOHIDElementGetUsagePage($0) == 1 &&
+                !IOHIDElementIsRelative($0) && [UInt32(0x30), 0x31].contains(IOHIDElementGetUsage($0))
+        }.map { element in
+            TrackpadDistanceScale.Axis(usage: IOHIDElementGetUsage(element),
+                logicalMin: Double(IOHIDElementGetLogicalMin(element)), logicalMax: Double(IOHIDElementGetLogicalMax(element)),
+                physicalMin: Double(IOHIDElementGetPhysicalMin(element)), physicalMax: Double(IOHIDElementGetPhysicalMax(element)),
+                unit: IOHIDElementGetUnit(element), unitExponent: IOHIDElementGetUnitExponent(element))
+        }
+        if let scale = TrackpadDistanceScale(axes: axes) { return scale }
+        // Do not substitute a registry scale for conflicting live elements.
+        guard axes.isEmpty else { return nil }
+        let service = IOHIDDeviceGetService(device)
+        // Elements are dynamically serialized with the whole property table;
+        // fetching the single "Elements" key may return nil on DriverKit HID.
+        var properties: Unmanaged<CFMutableDictionary>?
+        guard service != 0,
+              IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let dictionary = properties?.takeRetainedValue() as? [String: Any],
+              let elements = dictionary["Elements"] as? [[String: Any]] else { return nil }
+        return TrackpadDistanceScale(hidElements: elements)
+    }
+
     private func received(_ report: UnsafeMutablePointer<UInt8>, length: Int, receivedAt: TimeInterval) {
         guard let parsed = TrackpadReport.parse(report, length: length) else { return }
-        gestures.process(parsed, receivedAt: receivedAt)
+        receive(parsed, at: receivedAt)
+    }
+
+    func receive(_ report: TrackpadReport, at receivedAt: TimeInterval) {
+        contactsDown = report.buttonDown || report.contacts.contains(where: { $0.touching })
+        if explorer?.isVisible == true {
+            explorer?.process(report)
+            return
+        }
+        if calibrationCapturing, let session = calibrationSession {
+            advanceCalibration(at: receivedAt)
+            if calibrationCapturing {
+                session.process(report, at: receivedAt)
+                if session.isComplete || session.cancellationReason != nil { finishCalibrationCapture() }
+            }
+            return
+        }
+        if suppressUntilLift {
+            if !contactsDown { suppressUntilLift = false }
+            return
+        }
+        gestures.process(report, receivedAt: receivedAt)
     }
 
     nonisolated private static let deviceMatched: IOHIDDeviceCallback = { context, _, _, device in

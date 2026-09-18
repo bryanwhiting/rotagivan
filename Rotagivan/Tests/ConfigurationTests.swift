@@ -46,6 +46,35 @@ struct ConfigurationTests {
         precondition(factory.shortcuts.normal.enabled)
         precondition(!factory.shortcuts.precision.enabled)
         precondition(factory.settings.precision.cursorResponse != nil)
+        var withSingleSwipe = factory
+        withSingleSwipe.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0.25,fastMultiplier:2.5,transitionSpeed:1300)
+        withSingleSwipe.settings.appOverrides = [.chrome]
+        var gestures = withSingleSwipe.settings.gestures(for: 1)
+        gestures.singleTapSwipe = .singleTapDefaults
+        gestures.singleTapSwipe!.enabled = true
+        gestures.singleTapSwipe!.fastSwipeDuration = 0.125
+        gestures.singleTapSwipe!.topRight = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
+        gestures.singleTapSwipe!.setAction(.appExplorer, for: .down)
+        gestures.oneFingerDoubleTap = .appExplorer
+        withSingleSwipe.settings.profileGestures?[1] = gestures
+        let singleSwipeYAML = try withSingleSwipe.yaml()
+        let singleSwipeRoundtrip = try AppConfiguration.parse(singleSwipeYAML)
+        precondition(singleSwipeRoundtrip.settings.precision.scrollResponse == withSingleSwipe.settings.precision.scrollResponse)
+        var invalidScroll = withSingleSwipe
+        invalidScroll.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:3,fastMultiplier:1)
+        rejected(try ConfigurationYAML.encode(invalidScroll), "scroll slow speed above fast speed")
+        invalidScroll.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0,fastMultiplier:7)
+        rejected(try ConfigurationYAML.encode(invalidScroll), "scroll curve exceeds maximum")
+        invalidScroll.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0,fastMultiplier:1,transitionSpeed:0)
+        rejected(try ConfigurationYAML.encode(invalidScroll), "invalid scroll transition")
+        precondition(singleSwipeRoundtrip.settings.appOverrides == [.chrome])
+        var invalidApp = withSingleSwipe
+        invalidApp.settings.appOverrides = [.chrome, .chrome]
+        rejected(try ConfigurationYAML.encode(invalidApp), "duplicate app overrides")
+        invalidApp.settings.appOverrides = [AppGestureOverride(bundleID:"test.app",name:"Test",bindings:[AppGestureBinding(trigger:.oneFingerTap,action:.shortcut)])]
+        rejected(try ConfigurationYAML.encode(invalidApp), "app keyboard override missing shortcut")
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).singleTapSwipe == gestures.singleTapSwipe)
+        rejected(singleSwipeYAML.replacingOccurrences(of: "fastSwipeDuration: 0.125", with: "fastSwipeDuration: 0.5"), "slow single-swipe duration")
         print("Passed full YAML roundtrip: profiles, recorded taps, activation/click/drag shortcuts, calibration, and general settings.")
 
         rejected("", "empty input")
@@ -118,6 +147,52 @@ struct ConfigurationTests {
         let preciseRoundtrip = try AppConfiguration.parse(precise.yaml())
         precondition(preciseRoundtrip.settings.precision.cursorResponse!.fineGain == 0.32493574766355143)
         print("Passed ambiguous string names and exact floating-point preservation.")
+        var swipes = factory
+        var taps = swipes.settings.gestures(for: swipes.settings.resolvedDefaultProfileID)
+        taps.doubleTapSwipe = DoubleTapSwipeSettings(enabled: true,
+            left: RecordedShortcut(keyCode: 123, modifiers: 1048576, keyLabel: "Left arrow"),
+            up: RecordedShortcut(keyCode: 126, modifiers: 0, keyLabel: "Up arrow"))
+        let swipeProfileID = swipes.settings.resolvedDefaultProfileID
+        swipes.settings.profileGestures?[swipeProfileID] = taps
+        let swipeYAML = try swipes.yaml()
+        let swipeRoundtrip = try AppConfiguration.parse(swipeYAML)
+        precondition(tryEqual(swipes, swipeRoundtrip))
+        rejected(swipeYAML.replacingOccurrences(of: "swipeWindow: [^\\n]+", with: "swipeWindow: 99", options: .regularExpression), "out-of-range swipe window")
+        print("Passed double-tap swipe settings and shortcut YAML roundtrip.")
+        // Old configurations still load without adding any diagonal bindings.
+        let legacySwipe = swipeRoundtrip.settings.gestures(for: swipeProfileID).doubleTapSwipe!
+        precondition(legacySwipe.topLeft == nil && legacySwipe.topRight == nil && legacySwipe.bottomLeft == nil && legacySwipe.bottomRight == nil)
+        for (index, direction) in [SwipeDirection.topLeft, .topRight, .bottomLeft, .bottomRight].enumerated() {
+            taps.doubleTapSwipe![direction] = RecordedShortcut(keyCode: UInt16(18 + index), modifiers: 1048576, keyLabel: direction.title)
+        }
+        taps.oneFingerTap = .doubleLeftClick
+        taps.twoFingerDoubleTap = .doubleLeftClick
+        swipes.settings.profileGestures?[swipeProfileID] = taps
+        let expandedYAML = try swipes.yaml()
+        let expandedRoundtrip = try AppConfiguration.parse(expandedYAML)
+        precondition(tryEqual(swipes, expandedRoundtrip))
+        precondition(expandedRoundtrip.settings.gestures(for: swipeProfileID).oneFingerTap == .doubleLeftClick)
+        var invalidDiagonal = swipes
+        invalidDiagonal.settings.profileGestures?[swipeProfileID]?.doubleTapSwipe?.topLeft?.keyCode = 999
+        rejected(try ConfigurationYAML.encode(invalidDiagonal), "invalid diagonal shortcut key code")
+        print("Passed four diagonal bindings, double-left-click actions, legacy defaults, and YAML roundtrip.")
+        precondition(swipeRoundtrip.settings.gestures(for: swipeProfileID).gestures.resolvedKeepCursorStillForTaps)
+        for enabled in [false, true] {
+            swipes.settings.profileGestures?[swipeProfileID]?.gestures.keepCursorStillForTaps = enabled
+            let stationaryRoundtrip = try AppConfiguration.parse(swipes.yaml())
+            precondition(tryEqual(swipes, stationaryRoundtrip))
+            precondition(stationaryRoundtrip.settings.gestures(for: swipeProfileID).gestures.resolvedKeepCursorStillForTaps == enabled)
+        }
+        print("Passed stationary-tap YAML opt-in, opt-out, and legacy default.")
+        precondition(swipeRoundtrip.settings.gestures(for: swipeProfileID).oneFingerTripleTap == nil)
+        swipes.settings.profileGestures?[swipeProfileID]?.oneFingerTripleTap = .tripleLeftClick
+        swipes.settings.profileGestures?[swipeProfileID]?.twoFingerTripleTap = .shortcut
+        swipes.settings.profileGestures?[swipeProfileID]?.twoFingerTripleShortcut = RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return")
+        let tripleRoundtrip = try AppConfiguration.parse(swipes.yaml())
+        precondition(tryEqual(swipes, tripleRoundtrip))
+        swipes.settings.profileGestures?[swipeProfileID]?.twoFingerTripleShortcut = nil
+        rejected(try ConfigurationYAML.encode(swipes), "triple tap shortcut missing its key binding")
+        print("Triple-tap actions, shortcut YAML roundtrip, legacy defaults and validation passed.")
     }
 
     static func tryEqual<T: Encodable>(_ a: T, _ b: T) -> Bool { try! equal(a, b) }

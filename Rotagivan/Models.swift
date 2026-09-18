@@ -9,12 +9,14 @@ enum AppVersion {
 /// User-facing settings are always 0...100. MotionProfile keeps the values
 /// used by the gesture engine so existing saved profiles retain their feel.
 enum SettingsScale {
+    case cursorGain
     case linear(minimum: Double, maximum: Double)
     case momentum(maximum: Double)
     case centered(minimum: Double, maximum: Double, baseline: Double)
 
     func percentage(for value: Double) -> Double {
         switch self {
+        case .cursorGain: return CursorSpeedScale.percent(forGain: value)
         case let .linear(minimum, maximum):
             guard maximum > minimum else { return 0 }
             return min(100, max(0, (value - minimum) / (maximum - minimum) * 100))
@@ -35,6 +37,7 @@ enum SettingsScale {
     func value(for percentage: Double) -> Double {
         let p = min(100, max(0, percentage)) / 100
         switch self {
+        case .cursorGain: return CursorSpeedScale.gain(forPercent: percentage)
         case let .linear(minimum, maximum): return minimum + (maximum - minimum) * p
         case let .momentum(maximum): return p == 0 ? 0 : maximum * (0.70 + 0.30 * (1 - pow(1 - p, 2)))
         case let .centered(minimum, maximum, baseline):
@@ -71,15 +74,18 @@ enum ProfileMaximum {
 }
 
 enum TapAction: String, Codable, CaseIterable {
-    case optionF19, enter, leftClick, rightClick, none, shortcut
+    case optionF19, enter, leftClick, doubleLeftClick, tripleLeftClick, rightClick, none, shortcut, appExplorer
     var title: String {
         switch self {
         case .optionF19: return "Option + F19"
         case .enter: return "Enter"
         case .leftClick: return "Left click"
+        case .doubleLeftClick: return "Double left click"
+        case .tripleLeftClick: return "Triple left click"
         case .rightClick: return "Right click"
         case .none: return "Nothing"
         case .shortcut: return "Keyboard shortcut"
+        case .appExplorer: return "App Explorer"
         }
     }
 
@@ -95,6 +101,7 @@ struct RecordedShortcut: Codable, Equatable {
 }
 
 struct MotionProfile: Codable, Equatable {
+    var scrollResponse: ScrollResponse? = nil
     var cursorResponse: CursorResponse? = nil
     var cursorSpeed: Double
     var cursorAcceleration: Double
@@ -155,6 +162,9 @@ struct GestureSettings: Codable, Equatable {
     var tapToClick = true
     var tapMaxDuration = 0.25
     var tapMaxMovement = 30.0
+    // Optional keeps existing configurations readable without rewriting them.
+    var keepCursorStillForTaps: Bool? = nil
+    var resolvedKeepCursorStillForTaps: Bool { keepCursorStillForTaps ?? true }
     var touchAndHoldDrag = true
     var dragRegrip = true
     var dragRegripWindow = 0.25
@@ -164,7 +174,84 @@ struct GestureSettings: Codable, Equatable {
     var resolvedDoubleTapInterval: Double { min(0.6, max(0.05, doubleTapInterval ?? 0.30)) }
 }
 
-struct ProfileGestures: Codable {
+enum SwipeDirection: String, Codable, CaseIterable {
+    case left, right, up, down, topLeft, topRight, bottomLeft, bottomRight
+    var title: String {
+        switch self {
+        case .left: return "Left"
+        case .right: return "Right"
+        case .up: return "Up"
+        case .down: return "Down"
+        case .topLeft: return "Top left"
+        case .topRight: return "Top right"
+        case .bottomLeft: return "Bottom left"
+        case .bottomRight: return "Bottom right"
+        }
+    }
+}
+
+struct DoubleTapSwipeSettings: Codable, Equatable {
+    var enabled = false
+    var swipeWindow = 0.35
+    var swipeDistance = 60.0
+    // Used only by tap → swipe: the second contact must finish this quickly.
+    var fastSwipeDuration: Double? = nil
+    var resolvedFastDuration: Double { min(0.3, max(0.06, fastSwipeDuration ?? 0.18)) }
+    static var singleTapDefaults: Self { Self(swipeWindow: 0.2) }
+    var left: RecordedShortcut?
+    var right: RecordedShortcut?
+    var up: RecordedShortcut?
+    var down: RecordedShortcut?
+    var topLeft: RecordedShortcut?
+    var topRight: RecordedShortcut?
+    var bottomLeft: RecordedShortcut?
+    var bottomRight: RecordedShortcut?
+    var appExplorerDirections: [SwipeDirection]? = nil
+    var isConfigured: Bool { enabled && SwipeDirection.allCases.contains { action(for: $0) != .none } }
+    func action(for direction: SwipeDirection) -> TapAction {
+        if appExplorerDirections?.contains(direction) == true { return .appExplorer }
+        return self[direction] == nil ? .none : .shortcut
+    }
+    mutating func setAction(_ action: TapAction, for direction: SwipeDirection) {
+        var directions = appExplorerDirections ?? []
+        directions.removeAll { $0 == direction }
+        if action == .appExplorer { directions.append(direction) }
+        appExplorerDirections = directions.isEmpty ? nil : SwipeDirection.allCases.filter(directions.contains)
+        if action != .shortcut { self[direction] = nil }
+    }
+    var resolvedWindow: Double { min(0.8, max(0.1, swipeWindow)) }
+    var resolvedDistance: Double { min(240, max(20, swipeDistance)) }
+
+    subscript(_ direction: SwipeDirection) -> RecordedShortcut? {
+        get {
+            switch direction {
+            case .left: return left
+            case .right: return right
+            case .up: return up
+            case .down: return down
+            case .topLeft: return topLeft
+            case .topRight: return topRight
+            case .bottomLeft: return bottomLeft
+            case .bottomRight: return bottomRight
+            }
+        }
+        set {
+            switch direction {
+            case .left: left = newValue
+            case .right: right = newValue
+            case .up: up = newValue
+            case .down: down = newValue
+            case .topLeft: topLeft = newValue
+            case .topRight: topRight = newValue
+            case .bottomLeft: bottomLeft = newValue
+            case .bottomRight: bottomRight = newValue
+            }
+        }
+    }
+}
+
+struct ProfileGestures: Codable, Equatable {
+    var twoFingerSwipe: DoubleTapSwipeSettings? = nil
     var gestures: GestureSettings
     var oneFingerTap: TapAction
     var twoFingerTap: TapAction
@@ -175,6 +262,12 @@ struct ProfileGestures: Codable {
     var twoFingerDoubleTap: TapAction?
     var oneFingerDoubleShortcut: RecordedShortcut?
     var twoFingerDoubleShortcut: RecordedShortcut?
+    var doubleTapSwipe: DoubleTapSwipeSettings? = nil
+    var singleTapSwipe: DoubleTapSwipeSettings? = nil
+    var oneFingerTripleTap: TapAction? = nil
+    var twoFingerTripleTap: TapAction? = nil
+    var oneFingerTripleShortcut: RecordedShortcut? = nil
+    var twoFingerTripleShortcut: RecordedShortcut? = nil
 }
 
 struct AdditionalProfile: Codable, Identifiable {
@@ -197,6 +290,8 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    var appOverrides: [AppGestureOverride]? = nil
+    var resolvedAppOverrides: [AppGestureOverride] { appOverrides ?? AppGestureOverride.defaults }
     var enabled = true
     var launchAtLogin = false
     var normal = MotionProfile.normal
@@ -245,9 +340,17 @@ struct StoredSettings: Codable {
             result.twoFingerDoubleTap = primary.twoFingerDoubleTap
             result.oneFingerDoubleShortcut = primary.oneFingerDoubleShortcut
             result.twoFingerDoubleShortcut = primary.twoFingerDoubleShortcut
+            result.doubleTapSwipe = primary.doubleTapSwipe
+            result.singleTapSwipe = primary.singleTapSwipe
+            result.twoFingerSwipe = primary.twoFingerSwipe
+            result.oneFingerTripleTap = primary.oneFingerTripleTap
+            result.twoFingerTripleTap = primary.twoFingerTripleTap
+            result.oneFingerTripleShortcut = primary.oneFingerTripleShortcut
+            result.twoFingerTripleShortcut = primary.twoFingerTripleShortcut
             result.gestures.tapToClick = primary.gestures.tapToClick
             result.gestures.tapMaxDuration = primary.gestures.tapMaxDuration
             result.gestures.tapMaxMovement = primary.gestures.tapMaxMovement
+            result.gestures.keepCursorStillForTaps = primary.gestures.keepCursorStillForTaps
             result.gestures.doubleTapInterval = primary.gestures.doubleTapInterval
         }
         return result
@@ -357,7 +460,11 @@ final class SettingsStore: ObservableObject {
         motion(for: activeProfileID)
     }
 
-    var activeGestures: ProfileGestures { settings.effectiveGestures(for: activeProfileID) }
+    @Published var foregroundBundleID: String?
+    var activeGestures: ProfileGestures {
+        let base = settings.effectiveGestures(for: activeProfileID)
+        return settings.resolvedAppOverrides.first { $0.enabled && $0.bundleID == foregroundBundleID }?.applying(to: base) ?? base
+    }
 
     func updateGestures(_ value: ProfileGestures, for id: UInt32) {
         var profiles = settings.profileGestures ?? [:]

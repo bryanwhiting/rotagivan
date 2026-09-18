@@ -5,3 +5,10 @@ backups/
 Rotagivan/.signing/
 YAML/.build/
 YAML/.swiftpm/
+node_modules/
+.wrangler/
+.env
+.env.*
+.dev.vars*
+SyncBackend/worker-configuration.d.ts
+SyncBackend/dist/

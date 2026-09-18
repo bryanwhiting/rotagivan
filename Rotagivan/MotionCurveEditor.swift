@@ -77,10 +77,12 @@ struct MotionCurveEditor: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary).frame(height: 14)
             Text("LOG-NORMAL · CONTINUOUS BLEND")
                 .font(.system(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(.secondary)
-            parameter("Fine speed", value: endpoint(fast: false))
-                .help("Sensitivity for very slow movement. Fine cannot exceed Fast.")
-            parameter("Fast speed", value: endpoint(fast: true))
-                .help("Sensitivity approached at high speed. Fast cannot fall below Fine.")
+            parameter("Fine speed", value: endpoint(fast: false), fractionDigits: 1)
+                .help("Sensitivity for very slow movement. The curved 0–100 scale gives finer adjustment at low speeds. Fine cannot exceed Fast.")
+            parameter("Fast speed", value: endpoint(fast: true), fractionDigits: 1)
+                .help("Sensitivity approached at high speed. Uses the same low-speed precision scale as Fine. Fast cannot fall below Fine.")
+            Text("Precision scale · finer steps at low speeds")
+                .font(.caption2).foregroundStyle(.secondary)
             if c.fineGain == 0 {
                 Label(c.fastGain == 0 ? "Cursor movement is disabled: both speeds are zero."
                     : "Fine speed is zero. Slow movements may barely move the cursor. Raise Fine speed or lower the transition center.", systemImage: "exclamationmark.triangle")
@@ -228,20 +230,21 @@ struct MotionCurveEditor: View {
                 y: inset + (1-level) * (size.height-2*inset))
     }
 
-    private func parameter(_ title: String, value: Binding<Double>) -> some View {
+    private func parameter(_ title: String, value: Binding<Double>, fractionDigits: Int = 0) -> some View {
         HStack(spacing: 8) {
             Text(title).font(.system(size: 11)).frame(width: 105, alignment: .leading)
             Slider(value: value, in: 0...100).tint(.teal).accessibilityLabel(title)
-            TextField(title, value: value, format: .number.precision(.fractionLength(0)))
+            TextField(title, value: value, format: .number.precision(.fractionLength(fractionDigits)))
                 .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
-                .monospacedDigit().frame(width: 42).accessibilityLabel(title + " value")
+                .monospacedDigit().frame(width: 52).accessibilityLabel(title + " value")
         }
     }
 
     private func endpoint(fast: Bool) -> Binding<Double> {
-        Binding(get: { (fast ? c.fastGain : c.fineGain) / CursorResponse.maximumGain * 100 }, set: { percent in
+        Binding(get: { SettingsScale.cursorGain.percentage(for: fast ? c.fastGain : c.fineGain) }, set: { percent in
+            guard percent.isFinite else { return }
             var value = c
-            value.setEndpoint(fast: fast, gain: percent / 100 * CursorResponse.maximumGain)
+            value.setEndpoint(fast: fast, gain: SettingsScale.cursorGain.value(for: percent))
             curve = value
         })
     }
@@ -291,7 +294,7 @@ private struct LiveCursorOverlay: View {
                 }.stroke(Color.teal.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 Circle().fill(Color.teal.opacity(0.2)).frame(width: 19, height: 19).position(point)
                 Circle().fill(Color.teal).frame(width: 6, height: 6).position(point)
-                Text("Input \(Int((sample.speed / inputRange * 100).rounded()))% · Gain \(Int((sample.gain / CursorResponse.maximumGain * 100).rounded()))%")
+                Text("Input \(Int((sample.speed / inputRange * 100).rounded()))% · Sensitivity \(SettingsScale.cursorGain.percentage(for: sample.gain), format: .number.precision(.fractionLength(1)))")
                     .font(.system(size: 9)).monospacedDigit().foregroundStyle(.secondary)
                     .padding(12)
             }

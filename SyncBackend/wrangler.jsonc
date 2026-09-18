@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rotagivan-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "d1_databases": [{ "binding": "DB", "database_name": "rotagivan-sync", "database_id": "ee0c70b0-bb83-484f-aa43-f01b3e568d21", "migrations_dir": "migrations" }],
+  "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "18579001", "simple": { "limit": 10, "period": 60 } }],
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "triggers": { "crons": ["17 3 * * *"] }
+}

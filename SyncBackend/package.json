@@ -1,0 +1,6 @@
+{
+  "name": "rotagivan-sync", "private": true, "type": "module",
+  "scripts": {"dev":"wrangler dev","types":"wrangler types","check":"wrangler types && tsc --noEmit","test":"vitest run","deploy":"node scripts/cloudflare.mjs deploy"},
+  "devDependencies": {"@cloudflare/vitest-pool-workers":"^0.22.0","@cloudflare/workers-types":"^5.20260918.1","@types/node":"^22.20.3","@vitest/runner":"^4.1.11","@vitest/snapshot":"^4.1.11","typescript":"^7.0.2","vitest":"^4.1.11","wrangler":"^4.134.0"},
+  "overrides": {"@cloudflare/vitest-pool-workers":{"miniflare":"5.20260917.0-alpha","wrangler":"$wrangler"}}
+}

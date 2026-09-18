@@ -66,6 +66,14 @@ struct AppConfiguration: Codable {
     }
 
     func validate() throws {
+        let apps = settings.appOverrides ?? []
+        guard apps.count <= 100, Set(apps.map(\.bundleID)).count == apps.count,
+              apps.allSatisfy({ !$0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.name.isEmpty &&
+                  Set($0.bindings.map(\.trigger)).count == $0.bindings.count &&
+                  $0.bindings.allSatisfy { ($0.action != .shortcut || $0.shortcut != nil) &&
+                      ($0.trigger.direction == nil || [.none, .shortcut, .appExplorer].contains($0.action)) } }) else {
+            throw ConfigurationError("App overrides need unique bundle IDs and gestures, and keyboard actions need a recorded shortcut.")
+        }
         guard formatVersion == 1 else { throw ConfigurationError("Unsupported formatVersion \(formatVersion). This app supports 1.") }
         let extra = settings.additionalProfiles ?? []
         let ids = [UInt32(1), 2] + extra.map(\.id)
@@ -90,7 +98,8 @@ struct AppConfiguration: Codable {
             let taps = settings.gestures(for: id)
             let pairs: [(TapAction?, RecordedShortcut?)] = [
                 (taps.oneFingerTap, taps.oneFingerShortcut), (taps.twoFingerTap, taps.twoFingerShortcut),
-                (taps.oneFingerDoubleTap, taps.oneFingerDoubleShortcut), (taps.twoFingerDoubleTap, taps.twoFingerDoubleShortcut)
+                (taps.oneFingerDoubleTap, taps.oneFingerDoubleShortcut), (taps.twoFingerDoubleTap, taps.twoFingerDoubleShortcut),
+                (taps.oneFingerTripleTap, taps.oneFingerTripleShortcut), (taps.twoFingerTripleTap, taps.twoFingerTripleShortcut)
             ]
             guard pairs.allSatisfy({ $0.0 != .shortcut || $0.1 != nil }) else {
                 throw ConfigurationError("Profile \(id) has a keyboard tap action without a recorded shortcut.")
@@ -155,10 +164,21 @@ private indirect enum ConfigurationValue: Codable {
             let allowed: String
             switch key {
             case "": allowed = "formatVersion settings shortcuts"
-            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision"
+            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides"
+            case "appOverrides": allowed = "bundleID name enabled bindings"
+            case "bindings": allowed = "trigger action shortcut"
+            case "shortcut": allowed = "keyCode modifiers keyLabel"
             case "shortcuts": allowed = "normal precision actions additional profileActions holdToActivate"
             case "normal", "precision", "motion":
-                allowed = path.hasPrefix("config.shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
+                allowed = path.hasPrefix("config.shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
+            case "scrollResponse":
+                allowed = "slowMultiplier fastMultiplier transitionSpeed"
+                guard Set(allowed.split(separator:" ").map(String.init)).isSubset(of:Set(values.keys)) else {
+                    throw ConfigurationError("\(path) must include Slow speed, Fast speed, and Transition point.")
+                }
+                if case .number(let slow)? = values["slowMultiplier"], case .number(let fast)? = values["fastMultiplier"], slow > fast {
+                    throw ConfigurationError("\(path): Slow speed cannot exceed Fast speed.")
+                }
             case "cursorResponse":
                 allowed = "fineGain fastGain transitionCenter transitionWidth smoothing fineRelease fastRelease releaseShape"
                 guard Set(allowed.split(separator: " ").map(String.init)).isSubset(of: Set(values.keys)) else {
@@ -167,9 +187,10 @@ private indirect enum ConfigurationValue: Codable {
                 if case .number(let fine)? = values["fineGain"], case .number(let fast)? = values["fastGain"], fine > fast {
                     throw ConfigurationError("\(path): Fine speed cannot exceed Fast speed.")
                 }
-            case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval"
-            case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut"
-            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut": allowed = "keyCode modifiers keyLabel"
+            case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval"
+            case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
+            case "doubleTapSwipe", "singleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
+            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
             case "additionalProfiles": allowed = "id name motion"
             case "actions", "additional", "profileActions": allowed = "keyCode modifiers enabled holdToActivate keyLabel"
@@ -192,6 +213,10 @@ private indirect enum ConfigurationValue: Codable {
             for (i, value) in values.enumerated() { try value.validate(key: key, path: path + "[\(i)]") }
         case .number(let number):
             let ranges: [String: ClosedRange<Double>] = [
+                "swipeWindow": 0.1...0.8, "swipeDistance": 20...240,
+                "fastSwipeDuration": 0.06...0.3,
+                "slowMultiplier": 0...ScrollResponse.maximumMultiplier, "fastMultiplier": 0...ScrollResponse.maximumMultiplier,
+                "transitionSpeed": ScrollResponse.minimumTransition...ScrollResponse.maximumTransition,
                 "fineGain": 0...CursorResponse.maximumGain, "fastGain": 0...CursorResponse.maximumGain,
                 "transitionCenter": CursorResponse.minimumCenter...CursorResponse.maximumCenter,
                 "transitionWidth": CursorResponse.minimumWidth...CursorResponse.maximumWidth,

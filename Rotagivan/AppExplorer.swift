@@ -33,13 +33,17 @@ extension AppExplorerPresenting {
     private(set) var groupPath: [SwipeDirection] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
-    private static let logger = Logger(subsystem: "local.rotagivan", category: "AppExplorer")
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var applicationURL: (String) -> URL? = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     var openApplication: (URL, NSWorkspace.OpenConfiguration) -> Void = { url, configuration in
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
-            if let error { AppExplorerController.logger.error("Application open failed: \(error.localizedDescription, privacy: .public)") }
+            if let error {
+                // Launch Services may invoke this callback off the main actor.
+                // Keep logging local so it never accesses actor-isolated state.
+                let logger = Logger(subsystem: "local.rotagivan", category: "AppExplorer")
+                logger.error("Application open failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
     var onDismiss: (() -> Void)?

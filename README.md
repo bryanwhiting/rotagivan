@@ -231,6 +231,18 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+Click **Edit** in the Explorer HUD, or press **E** while it is open, to customize
+favorites right there. The inline editor starts in the current group and offers
+the same app picker, URL editor, named groups, rename, and removal controls.
+Changes save immediately. **Done** returns to the explorer; you do not need to
+open General settings. In Recent mode, Edit customizes your fixed Favorites.
+
+While editing, the HUD stays open without its navigation timeout. Trackpad taps
+temporarily become normal clicks and gesture shortcuts pause, without changing
+your saved profiles. Native file pickers and naming sheets keep the editor open.
+Releasing the hotkey that opened the HUD does not cancel editing. Finish or close
+the editor to restore your gesture bindings; switching to another app closes it.
+
 Choose **App Explorer** from a tap action's **…** menu, or from a direction's
 action menu under **Single tap, then quick swipe** / **Double-tap, then swipe**.
 For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.

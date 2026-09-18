@@ -3,6 +3,7 @@ import CoreGraphics
 
 @MainActor private final class ExplorerStub: AppExplorerPresenting {
     var isVisible = false
+    var isEditing = false
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var input = AppExplorerSelection(waitingForLift: false)
@@ -15,6 +16,7 @@ import CoreGraphics
     }
     func process(_ report: TrackpadReport) {
         if contextIsValid?() == false { dismiss(); return }
+        if isEditing { return }
         switch input.process(report) {
         case .select(let direction): selections.append(direction); dismiss()
         case .back, .cancel: dismiss()
@@ -113,6 +115,24 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        check { f in
+            f.hid.explorerHold(true)
+            f.explorer.isEditing = true
+            f.engine.isEditingInterface = true
+            f.hid.foregroundAppChanged("local.rotagivan")
+            precondition(f.explorer.isVisible, "Focusing the editor must not dismiss it")
+            f.hid.explorerHold(false)
+            precondition(f.explorer.isVisible && !f.explorer.alternateHeld, "Release the opening hotkey while editing")
+            f.send(0.1, x: 500); f.send(0.14)
+            precondition(f.poster.actions == 1, "HID passes safe pointer/tap input through while editing")
+            var settings = f.store.settings.appExplorer ?? AppExplorerSettings()
+            settings.setFavorite(AppExplorerFavorite(direction: .left, name: "Work", children: []), at: .left)
+            f.store.settings.appExplorer = settings
+            f.send(0.2)
+            precondition(f.explorer.isVisible, "Saving favorites must not invalidate the editor")
+            f.hid.foregroundAppChanged("com.apple.finder")
+            precondition(!f.explorer.isVisible, "Switching to another app closes the editor")
+        }
         check { f in
             f.hid.explorerHold(true)
             precondition(f.explorer.isVisible && f.explorer.alternateHeld)

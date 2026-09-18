@@ -4,6 +4,7 @@ import OSLog
 
 @MainActor protocol AppExplorerPresenting: AnyObject {
     var isVisible: Bool { get }
+    var isEditing: Bool { get }
     var onDismiss: (() -> Void)? { get set }
     var contextIsValid: (() -> Bool)? { get set }
     func show(waitingForLift: Bool)
@@ -11,7 +12,10 @@ import OSLog
     func dismiss()
     func setAlternateHeld(_ held: Bool)
 }
-extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
+extension AppExplorerPresenting {
+    var isEditing: Bool { false }
+    func setAlternateHeld(_ held: Bool) {}
+}
 
 @MainActor final class AppExplorerController: AppExplorerPresenting {
     private let workspace = NSWorkspace.shared
@@ -40,7 +44,10 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     }
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
+    weak var editingStore: SettingsStore?
+    var onEditingChanged: ((Bool) -> Void)?
     var isVisible: Bool { panel != nil }
+    var isEditing: Bool { model.isEditing }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -50,7 +57,9 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
             MainActor.assumeIsolated {
                 guard let self, let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
                 self.record(app)
-                if self.isVisible && app.processIdentifier != self.sourcePID { self.dismiss() }
+                if self.isVisible && (self.isEditing
+                    ? app.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                    : app.processIdentifier != self.sourcePID) { self.dismiss() }
             }
         })
         for notification in [NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification, NSWorkspace.activeSpaceDidChangeNotification] {
@@ -77,6 +86,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         guard !isVisible else { return }
         selectionGeneration &+= 1
         groupPath = []
+        model.canEdit = editingStore != nil
         contactIsDown = waitingForLift
         sourcePID = workspace.frontmostApplication?.processIdentifier
         loadEntries()
@@ -93,9 +103,10 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onCancel = { [weak self] in self?.dismiss() }
+        panel.onEdit = { [weak self] in self?.beginEditing() }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
-            onBack: { [weak self] in self?.goBack() }))
+            onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() }))
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
@@ -110,7 +121,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if Date() >= self.deadline || self.contextIsValid?() == false { self.dismiss() }
+                if (!self.isEditing && Date() >= self.deadline) || self.contextIsValid?() == false { self.dismiss() }
             }
         }
         self.timer = timer
@@ -120,7 +131,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     func setAlternateHeld(_ held: Bool) {
         guard alternateHeld != held else { return }
         alternateHeld = held
-        if isVisible {
+        if isVisible && !isEditing {
             // The HID owner reopens with the actual contact state. Never carry
             // a partial selection across modes or discard a fresh first swipe.
             dismiss()
@@ -163,6 +174,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         guard isVisible else { return }
         contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
         guard contextIsValid?() != false else { dismiss(); return }
+        guard !isEditing else { return }
         switch input.process(report) {
         case .waiting: break
         case .highlight(let direction):
@@ -175,7 +187,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     }
 
     private func choose(_ direction: SwipeDirection) {
-        guard isVisible else { return }
+        guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
         if entry?.isGroup == true {
@@ -203,7 +215,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     }
 
     func goBack() {
-        guard isVisible else { return }
+        guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false, !groupPath.isEmpty else { dismiss(); return }
         groupPath.removeLast()
         refreshGroup()
@@ -215,6 +227,53 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         model.selected = nil
         input = AppExplorerSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(15)
+    }
+
+    func beginEditing() {
+        guard let store = editingStore, let previous = panel, !isEditing,
+              contextIsValid?() != false else { return }
+        selectionGeneration &+= 1
+        model.isEditing = true
+        model.selected = nil
+        onEditingChanged?(true)
+        // Use an activating panel for text fields and native picker sheets.
+        // Recreate it in place; toggling NSPanel's nonactivating style at runtime
+        // can leave AppKit's key-focus behavior inconsistent.
+        let frame = previous.frame
+        let previousScreen = previous.screen
+        previous.onCancel = nil
+        previous.orderOut(nil); previous.close()
+        let editor = ExplorerPanel(contentRect: NSRect(x: frame.midX - 340, y: frame.midY - 250, width: 680, height: 500),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        editor.isReleasedWhenClosed = false
+        editor.title = "Edit App Explorer"
+        editor.isOpaque = false; editor.backgroundColor = .clear; editor.hasShadow = true
+        editor.level = .floating; editor.hidesOnDeactivate = false
+        editor.allowsEditing = true
+        editor.onCancel = { [weak self] in self?.dismiss() }
+        editor.contentView = NSHostingView(rootView: ExplorerInlineEditor(store: store, groupPath: groupPath,
+            onGroupPathChange: { [weak self] in self?.groupPath = $0 }, onDone: { [weak self] in self?.finishEditing() }))
+        if let screen = previousScreen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - 680)),
+                                          y: max(visible.minY, min(editor.frame.minY, visible.maxY - 500))))
+        }
+        panel = editor
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
+        NSApp.activate()
+        editor.makeKeyAndOrderFront(nil)
+    }
+
+    func finishEditing() {
+        guard isEditing else { return }
+        let path = groupPath
+        let waitingForLift = contactIsDown
+        dismiss()
+        show(waitingForLift: waitingForLift)
+        if model.mode == .favorites, configuration().favorites(at: path) != nil {
+            groupPath = path
+            refreshGroup()
+        }
     }
 
     static func activationConfiguration() -> NSWorkspace.OpenConfiguration {
@@ -231,6 +290,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         guard let panel else { return }
         selectionGeneration &+= 1
         self.panel = nil
+        if model.isEditing { model.isEditing = false; onEditingChanged?(false) }
         panel.orderOut(nil)
         panel.close()
         timer?.invalidate(); timer = nil
@@ -244,11 +304,17 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
 
 private final class ExplorerPanel: NSPanel {
     var onCancel: (() -> Void)?
+    var onEdit: (() -> Void)?
+    var allowsEditing = false
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-    override func resignKey() { super.resignKey(); onCancel?() }
+    override func resignKey() { super.resignKey(); if !allowsEditing { onCancel?() } }
     override func cancelOperation(_ sender: Any?) { onCancel?() }
     override func keyDown(with event: NSEvent) {
+        if allowsEditing { super.keyDown(with: event); return }
+        if event.keyCode == 14, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            onEdit?(); return
+        }
         if event.keyCode == 53 { onCancel?() }
         // Do not leak typing into the application behind the HUD.
     }
@@ -279,6 +345,8 @@ struct ExplorerEntry {
     @Published var selected: SwipeDirection?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
+    @Published var canEdit = false
+    @Published var isEditing = false
 }
 
 struct AppExplorerView: View {
@@ -286,6 +354,7 @@ struct AppExplorerView: View {
     var onSelect: (SwipeDirection) -> Void
     var onCancel: () -> Void
     var onBack: () -> Void = {}
+    var onEdit: () -> Void = {}
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
 
     var body: some View {
@@ -297,6 +366,10 @@ struct AppExplorerView: View {
                         .font(.system(size: 9, weight: .medium)).tracking(1).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
+                if model.canEdit {
+                    Button(action: onEdit) { Label("Edit", systemImage: "pencil") }
+                        .buttonStyle(.borderless).help("Customize favorites and groups here (E)")
+                }
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
                     .buttonStyle(.plain).accessibilityLabel("Close App Explorer")
             }
@@ -320,7 +393,7 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Add favorites in General → App Explorer." : "Open another app to see it here.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · Esc to close" : "Swipe to choose · lift to open · tap to go back"))
+            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Click Edit or press E to add favorites." : "Open another app · E to edit favorites") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(26)

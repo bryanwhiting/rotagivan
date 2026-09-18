@@ -171,6 +171,51 @@ import SwiftUI
         controller.show(waitingForLift: false)
         precondition(controller.groupPath.isEmpty, "Reopening always starts at the root")
         controller.dismiss()
-        print("Native UI passed: settings, named groups, nested HUD, center-back, root cancellation, trigger drain, app/URL dispatch, and invalidation.")
+        controller.editingStore = store
+        controller.configuration = { store.settings.appExplorer ?? AppExplorerSettings() }
+        var editingChanges: [Bool] = []
+        controller.onEditingChanged = { editingChanges.append($0) }
+        controller.show(waitingForLift: false)
+        swipeLeft()
+        precondition(controller.groupPath == [.left])
+        let selectionPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+        let editKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: selectionPanel.windowNumber, context: nil, characters: "e", charactersIgnoringModifiers: "e", isARepeat: false, keyCode: 14)!
+        selectionPanel.keyDown(with: editKey)
+        precondition(controller.isVisible && controller.isEditing && editingChanges == [true])
+        let editPanel = NSApp.windows.first { $0.title == "Edit App Explorer" && $0.isVisible }!
+        precondition(!editPanel.styleMask.contains(.nonactivatingPanel), "Editor must allow native text focus")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let editView = editPanel.contentView!
+        editView.layoutSubtreeIfNeeded()
+        let editBitmap = editView.bitmapImageRepForCachingDisplay(in: editView.bounds)!
+        editView.cacheDisplay(in: editView.bounds, to: editBitmap)
+        try editBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/inline-editor.png"))
+        let previousOpenCount = openedApps.count
+        swipeLeft()
+        precondition(controller.isEditing && controller.groupPath == [.left] && openedApps.count == previousOpenCount,
+            "Raw edit-mode contacts cannot navigate or launch favorites")
+        let picker = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        picker.isReleasedWhenClosed = false
+        let field = NSTextField(frame: NSRect(x: 20, y: 35, width: 280, height: 24))
+        picker.contentView?.addSubview(field)
+        editPanel.beginSheet(picker)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(picker.makeFirstResponder(field) && controller.isEditing, "Opening a native picker/sheet must preserve edit mode and text focus")
+        editPanel.endSheet(picker); picker.orderOut(nil); picker.close()
+        var editedSettings = store.settings.appExplorer!
+        editedSettings.setFavorite(AppExplorerFavorite(direction: .down, name: "New URL", url: "https://example.com/new"), at: .down, in: [.left])
+        store.settings.appExplorer = editedSettings
+        controller.finishEditing()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(controller.isVisible && !controller.isEditing && controller.groupPath == [.left] && editingChanges == [true, false])
+        precondition(store.settings.appExplorer?.favorite(at: [.left, .down])?.name == "New URL")
+        controller.process(report(500))
+        controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 500, y: 600, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+        controller.process(report(nil))
+        precondition(!controller.isVisible && openedURLs.last?.absoluteString == "https://example.com/new", "Edited slot works immediately")
+        controller.show(waitingForLift: false); controller.beginEditing(); controller.dismiss()
+        precondition(!controller.isEditing && editingChanges.suffix(2) == [true, false], "Closing editor always restores input mode")
+        print("Native UI passed: inline editing, E shortcut, group preservation, native sheet/text focus, save and resume, nested HUD and app/URL dispatch.")
     }
 }

@@ -78,6 +78,38 @@ private final class FakePoster: GestureEventPosting {
     }
 
     @MainActor static func main() throws {
+        try check { f in
+            var taps = f.store.settings.gestures(for: 1)
+            taps.oneFingerTap = .appExplorer
+            taps.gestures.tapToClick = false
+            f.store.updateGestures(taps, for: 1)
+            let before = try JSONEncoder().encode(f.store.settings)
+            var openings = 0
+            f.engine.onAppExplorer = { openings += 1 }
+            f.engine.isEditingInterface = true
+            f.send(0, [(500,500)]); f.send(0.03)
+            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .leftClick && openings == 0,
+                "UI editing gets an immediate click even with disabled/custom profile taps")
+            f.store.foregroundBundleID = "com.google.Chrome"
+            f.send(0.1, [(500,500),(700,500)]); f.send(0.14, [(600,500),(800,500)]); f.send(0.18)
+            precondition(f.poster.scrolls > 0 && f.poster.taps.count == 1, "Editing must not fire navigation shortcuts")
+            f.engine.isEditingInterface = false
+            f.send(1, [(500,500)]); f.send(1.03)
+            precondition(f.poster.taps.count == 1, "Restore disabled profile tapping on exit")
+            let decoded = try JSONDecoder().decode(StoredSettings.self, from: before)
+            precondition(decoded.gestures(for: 1) == f.store.settings.gestures(for: 1), "Temporary editing behavior is not persisted")
+        }
+        check { f in
+            f.doubleTap() // Queue a swipe action before entering the editor.
+            f.engine.isEditingInterface = true
+            f.send(0.2, [(500,500)]); f.send(0.24, [(600,500)]); f.send(0.28)
+            precondition(f.poster.taps.isEmpty && f.poster.moves > 0, "Entering editing cancels queued shortcuts but allows pointer movement")
+            f.engine.isEditingInterface = false
+            f.send(1, [(500,500)]); f.send(1.03)
+            f.send(1.1, [(500,500)]); f.send(1.13)
+            f.send(1.2, [(500,500)]); f.send(1.24, [(600,500)]); f.send(1.28)
+            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut, "Gesture actions resume after editing")
+        }
         for chrome in [false,true] {
             check { f in
                 f.store.foregroundBundleID = chrome ? "com.google.Chrome" : "com.apple.finder"

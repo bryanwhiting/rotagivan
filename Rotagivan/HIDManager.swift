@@ -57,6 +57,17 @@ final class NavigatorHIDManager: ObservableObject {
             let explorer: any AppExplorerPresenting = explorer ?? AppExplorerController()
             self.explorer = explorer
             (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
+            (explorer as? AppExplorerController)?.editingStore = store
+            (explorer as? AppExplorerController)?.onEditingChanged = { [weak self] editing in
+                guard let self else { return }
+                self.gestures.isEditingInterface = editing
+                self.suppressUntilLift = self.contactsDown
+                if !editing {
+                    self.explorerProfileID = self.store.activeProfileID
+                    self.explorerSettings = self.store.activeGestures
+                    self.explorerConfiguration = self.store.settings.appExplorer
+                }
+            }
             self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
@@ -65,6 +76,7 @@ final class NavigatorHIDManager: ObservableObject {
             }
             explorer.contextIsValid = { [weak self] in
                 guard let self else { return false }
+                if self.explorer?.isEditing == true { return self.store.settings.enabled && !self.calibrationCapturing }
                 return self.store.settings.enabled && self.store.activeProfileID == self.explorerProfileID &&
                     self.store.activeGestures == self.explorerSettings && !self.calibrationCapturing &&
                     self.store.settings.appExplorer == self.explorerConfiguration
@@ -78,6 +90,10 @@ final class NavigatorHIDManager: ObservableObject {
 
     func foregroundAppChanged(_ bundleID: String?) {
         guard store.foregroundBundleID != bundleID else { return }
+        if explorer?.isEditing == true, bundleID == "local.rotagivan" {
+            store.foregroundBundleID = bundleID
+            return
+        }
         explorer?.dismiss()
         gestures.reset()
         suppressUntilLift = contactsDown
@@ -85,6 +101,7 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     private func openAppExplorer() {
+        guard explorer?.isEditing != true else { return }
         guard store.settings.enabled, !calibrationCapturing else { return }
         explorerProfileID = store.activeProfileID
         explorerSettings = store.activeGestures
@@ -101,7 +118,7 @@ final class NavigatorHIDManager: ObservableObject {
             gestures.reset()
             openAppExplorer()
         } else {
-            explorer?.dismiss()
+            if explorer?.isEditing != true { explorer?.dismiss() }
             explorer?.setAlternateHeld(false)
         }
     }
@@ -326,7 +343,7 @@ final class NavigatorHIDManager: ObservableObject {
         contactsDown = report.buttonDown || report.contacts.contains(where: { $0.touching })
         if explorer?.isVisible == true {
             explorer?.process(report)
-            return
+            if explorer?.isEditing != true { return }
         }
         if calibrationCapturing, let session = calibrationSession {
             advanceCalibration(at: receivedAt)

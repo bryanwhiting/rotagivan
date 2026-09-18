@@ -4,6 +4,21 @@ import Foundation
 @MainActor
 final class GestureEngine {
     var onAppExplorer: (() -> Void)?
+    var isEditingInterface = false {
+        didSet { if oldValue != isEditingInterface { reset() } }
+    }
+    // Temporary UI interaction, never persisted to profiles: normal pointer and
+    // scroll response, immediate click taps, and no app/keyboard swipe actions.
+    private var activeGestures: ProfileGestures {
+        guard isEditingInterface else { return store.activeGestures }
+        var settings = store.activeGestures.gestures
+        settings.tapToClick = true
+        settings.tapMaxDuration = max(0.25, settings.tapMaxDuration)
+        settings.tapMaxMovement = max(30, settings.tapMaxMovement)
+        settings.keepCursorStillForTaps = true
+        settings.touchAndHoldDrag = false
+        return ProfileGestures(gestures: settings, oneFingerTap: .leftClick, twoFingerTap: .rightClick)
+    }
     private static let tapDragHoldDelay = 0.12
     private static let tapDragMovementThreshold = 4.0
     // Repositioning for a drag takes longer than a quick double tap. This
@@ -155,7 +170,7 @@ final class GestureEngine {
 
         if singleSwipe != nil && (current.count > 1 ||
             report.contacts.contains(where: { $0.touching && !$0.confident }) ||
-            touchProfileID != store.activeProfileID || singleSwipeConfiguration != store.activeGestures ||
+            touchProfileID != store.activeProfileID || singleSwipeConfiguration != activeGestures ||
             (!current.isEmpty && current.first.map { previousContacts[$0.id] == nil } == true)) {
             clearSingleSwipe()
             cancelPendingTap()
@@ -176,10 +191,10 @@ final class GestureEngine {
         }
 
         if let pending = pendingTap, pending.profileID != store.activeProfileID ||
-            pending.configuration != store.activeGestures { cancelPendingTap() }
+            pending.configuration != activeGestures { cancelPendingTap() }
         if let deferred = deferredDoubleTap,
-           deferred.profileID != store.activeProfileID || !store.activeGestures.gestures.tapToClick ||
-            deferred.configuration != store.activeGestures {
+           deferred.profileID != store.activeProfileID || !activeGestures.gestures.tapToClick ||
+            deferred.configuration != activeGestures {
             cancelTapSwipe()
         }
         let swipe = swipeRecognizer.update(current, at: now)
@@ -224,7 +239,7 @@ final class GestureEngine {
         }
         if poster.dragging { twoFingerNavigation = TwoFingerNavigationRecognizer() }
         else {
-            let settings = store.activeGestures.twoFingerSwipe
+            let settings = activeGestures.twoFingerSwipe
             let navigation = twoFingerNavigation.update(report, settings: settings, profileID: store.activeProfileID, at: now)
             if navigation.consumed {
                 store.cursorTelemetry.endTouch()
@@ -275,7 +290,7 @@ final class GestureEngine {
         touchStart = now
         touchOrigin = centroid(contacts)
         touchProfileID = store.activeProfileID
-        let taps = store.activeGestures
+        let taps = activeGestures
         let hasTapAction = taps.oneFingerTap != .none || (taps.oneFingerDoubleTap ?? .none) != .none ||
             (taps.oneFingerTripleTap ?? .none) != .none ||
             taps.doubleTapSwipe?.isConfigured == true || taps.singleTapSwipe?.isConfigured == true
@@ -312,10 +327,10 @@ final class GestureEngine {
             pendingDragEnd?.invalidate()
             pendingDragEnd = nil
             pendingDragEndAt = nil
-        } else if contacts.count == 1, store.activeGestures.gestures.tapToClick,
-                  store.activeGestures.oneFingerTap == .leftClick,
-                  store.activeGestures.gestures.touchAndHoldDrag {
-            let pickupWindow = max(Self.tapDragPickupWindow, store.activeGestures.gestures.resolvedDoubleTapInterval)
+        } else if contacts.count == 1, activeGestures.gestures.tapToClick,
+                  activeGestures.oneFingerTap == .leftClick,
+                  activeGestures.gestures.touchAndHoldDrag {
+            let pickupWindow = max(Self.tapDragPickupWindow, activeGestures.gestures.resolvedDoubleTapInterval)
             let followsCompletedClick = lastTapProfileID == store.activeProfileID &&
                 now.timeIntervalSince(lastTap) <= pickupWindow
             let followsPendingLeftClick = pendingTap?.fingerCount == 1 &&
@@ -364,7 +379,7 @@ final class GestureEngine {
         }
         // The new touch has its own origin: landing elsewhere never moves the
         // cursor. Small report-by-report movements add up to a deliberate drag.
-        let tapSettings = store.activeGestures.gestures
+        let tapSettings = activeGestures.gestures
         let dragMovementThreshold = holdingTapMotion
             ? max(Self.tapDragMovementThreshold, tapSettings.tapMaxMovement.nextUp)
             : Self.tapDragMovementThreshold
@@ -412,7 +427,7 @@ final class GestureEngine {
         let rawDX = matching.map { $0.0.x - $0.1.x }.reduce(0, +) / Double(matching.count)
         let rawDY = matching.map { $0.0.y - $0.1.y }.reduce(0, +) / Double(matching.count)
         maximumMovement += hypot(rawDX, rawDY)
-        guard maximumMovement > store.activeGestures.gestures.tapMaxMovement else { return }
+        guard maximumMovement > activeGestures.gestures.tapMaxMovement else { return }
         let profile = store.activeProfile
         let dt = profile.scrollResponse == nil ? max(0.001, now.timeIntervalSince(lastReportTime)) : cursorInterval
         if scrollProfileID != store.activeProfileID || scrollResponseSnapshot != profile.scrollResponse {
@@ -457,13 +472,13 @@ final class GestureEngine {
             }
             // A short second contact remains a normal double tap. A failed
             // swipe must not leave an unscheduled first tap in memory.
-            if maximumMovement > store.activeGestures.gestures.tapMaxMovement ||
-                now.timeIntervalSince(touchStart) > store.activeGestures.gestures.tapMaxDuration {
+            if maximumMovement > activeGestures.gestures.tapMaxMovement ||
+                now.timeIntervalSince(touchStart) > activeGestures.gestures.tapMaxDuration {
                 if let pending = pendingTap { flushPendingTap(pending) }
                 cancelPendingTap()
             }
         }
-        let gestures = store.activeGestures.gestures
+        let gestures = activeGestures.gestures
         let duration = now.timeIntervalSince(touchStart)
         let isTap = gestures.tapToClick && touchProfileID == store.activeProfileID &&
             duration <= gestures.tapMaxDuration && maximumMovement <= gestures.tapMaxMovement
@@ -515,7 +530,7 @@ final class GestureEngine {
     }
 
     private func registerTap(fingerCount: Int, at now: Date) {
-        let active = store.activeGestures
+        let active = activeGestures
         let doubleTapInterval = active.gestures.resolvedDoubleTapInterval
         let action = fingerCount == 2 ? active.twoFingerTap : active.oneFingerTap
         let shortcut = fingerCount == 2 ? active.twoFingerShortcut : active.oneFingerShortcut
@@ -617,7 +632,7 @@ final class GestureEngine {
 
     private func schedulePendingTap(_ pending: PendingTap, interval: TimeInterval) {
         var captured = pending
-        captured.configuration = store.activeGestures
+        captured.configuration = activeGestures
         pendingTap = captured
         pendingTapTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -625,7 +640,7 @@ final class GestureEngine {
                 self.pendingTap = nil
                 self.pendingTapTimer = nil
                 if self.store.settings.enabled, pending.profileID == self.store.activeProfileID,
-                   pending.configuration == self.store.activeGestures, self.store.activeGestures.gestures.tapToClick {
+                   pending.configuration == self.activeGestures, self.activeGestures.gestures.tapToClick {
                     self.flushPendingTap(pending)
                 }
             }
@@ -666,8 +681,8 @@ final class GestureEngine {
         let deferred = deferredDoubleTap
         cancelTapSwipe()
         guard let deferred, deferred.profileID == store.activeProfileID,
-              store.activeGestures.gestures.tapToClick,
-              store.settings.enabled, store.activeGestures == deferred.configuration else { return }
+              activeGestures.gestures.tapToClick,
+              store.settings.enabled, activeGestures == deferred.configuration else { return }
         for tap in deferred.fallback { flushPendingTap(tap) }
     }
 
@@ -684,9 +699,9 @@ final class GestureEngine {
         if singleSwipe != nil { return }
         guard tapDragCandidate, !poster.dragging else { return }
         guard tapDragProfileID == store.activeProfileID, !hadTwoFingers,
-              store.settings.enabled, store.activeGestures.gestures.tapToClick,
-              store.activeGestures.gestures.touchAndHoldDrag,
-              store.activeGestures.oneFingerTap == .leftClick else {
+              store.settings.enabled, activeGestures.gestures.tapToClick,
+              activeGestures.gestures.touchAndHoldDrag,
+              activeGestures.oneFingerTap == .leftClick else {
             cancelTapDragCandidate()
             return
         }
@@ -723,7 +738,7 @@ final class GestureEngine {
     private func expireSingleSwipe() {
         guard singleSwipe != nil else { return }
         let valid = store.settings.enabled && touchProfileID == store.activeProfileID &&
-            singleSwipeConfiguration == store.activeGestures
+            singleSwipeConfiguration == activeGestures
         clearSingleSwipe()
         if valid {
             startTapDrag()

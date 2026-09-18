@@ -55,8 +55,10 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
 "$test_dir/ScrollResponseIntegrationTests"
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
-  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
-  -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -o "$test_dir/CalibrationIntegrationTests"
+  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift \
+  Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
+  Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
+  -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"
 xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \

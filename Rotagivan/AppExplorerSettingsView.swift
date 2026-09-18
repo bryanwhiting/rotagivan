@@ -12,14 +12,20 @@ struct AppExplorerSettingsView: View {
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var settings: AppExplorerSettings { store.settings.appExplorer ?? AppExplorerSettings() }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
+    var compact = false
+    var onGroupPathChange: (([SwipeDirection]) -> Void)? = nil
 
-    init(store: SettingsStore, groupPath: [SwipeDirection] = []) {
+    init(store: SettingsStore, groupPath: [SwipeDirection] = [], compact: Bool = false,
+         onGroupPathChange: (([SwipeDirection]) -> Void)? = nil) {
         self.store = store
         _groupPath = State(initialValue: groupPath)
+        self.compact = compact
+        self.onGroupPathChange = onGroupPathChange
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !compact {
             Label("App Explorer", systemImage: "safari").font(.headline)
             Picker("Default mode", selection: Binding(get: { settings.defaultMode }, set: { mode in
                 edit { $0.defaultMode = mode }
@@ -38,6 +44,7 @@ struct AppExplorerSettingsView: View {
             Text("Your App Explorer gesture opens the default mode. Hold this shortcut to open the other mode; swipe and lift to choose before releasing the key. Releasing without a selection cancels.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let error = shortcuts.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            }
             HStack(spacing: 5) {
                 Button("Favorites") { groupPath = [] }.buttonStyle(.link)
                 ForEach(groupPath.indices, id: \.self) { index in
@@ -117,6 +124,7 @@ struct AppExplorerSettingsView: View {
         .onChange(of: settings) { _, _ in
             while !groupPath.isEmpty && settings.favorites(at: groupPath) == nil { groupPath.removeLast() }
         }
+        .onChange(of: groupPath) { _, path in onGroupPathChange?(path) }
     }
 
     private func slot(_ direction: SwipeDirection) -> some View {
@@ -190,6 +198,27 @@ struct AppExplorerSettingsView: View {
               let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, id != "local.rotagivan" else { return }
         let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
         edit { $0.setFavorite(AppExplorerFavorite(direction: direction, bundleID: id, name: name), at: direction, in: path) }
+    }
+}
+
+struct ExplorerInlineEditor: View {
+    @ObservedObject var store: SettingsStore
+    var groupPath: [SwipeDirection]
+    var onGroupPathChange: ([SwipeDirection]) -> Void
+    var onDone: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("Edit App Explorer", systemImage: "pencil").font(.title3.weight(.semibold))
+                Spacer()
+                Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+            }
+            AppExplorerSettingsView(store: store, groupPath: groupPath, compact: true,
+                onGroupPathChange: onGroupPathChange)
+            Text("Changes save automatically · taps click while editing · swipe shortcuts resume when you finish")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(26).frame(width: 680)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
     }
 }
 

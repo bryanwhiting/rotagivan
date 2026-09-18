@@ -436,5 +436,51 @@ import SwiftUI
         precondition(controller.displayedEntries.allSatisfy { $0.tilingDirection == nil }, "Direct mode does not leak into future App Explorer openings")
         controller.dismiss()
         print("Direct Window Manager passed: independent of Explorer mode/favorites, trigger drain, center close, tiling dispatch and mode reset.")
+        let chord = RecordedShortcut(keyCode: 64, modifiers: (1 << 19) | (1 << 20), keyLabel: "F17")
+        try render(ExplorerShortcutEditor(direction: .up, name: "Voice input", shortcut: chord, onSave: { _ in }, onCancel: {}),
+            size: CGSize(width: 440, height: 245), path: CommandLine.arguments[1] + "/shortcut-editor.png")
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .left, name: "Tools", children: [
+                AppExplorerFavorite(direction: .up, name: "Voice input", shortcut: chord)
+            ])
+        ])
+        var sentKeys: [RecordedShortcut] = []
+        let actualPID: pid_t = 4242 // Deterministic focus source; no real key events are posted.
+        var simulatedPID = actualPID
+        controller.frontmostPID = { simulatedPID }
+        controller.sendShortcut = { key in
+            precondition(!controller.isVisible, "Close the HUD before sending keys")
+            sentKeys.append(key)
+        }
+        func swipeUp() {
+            controller.process(report(500))
+            controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 500, y: 400, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+            controller.process(report(nil))
+        }
+        for cancel in 0..<4 {
+            simulatedPID = actualPID
+            controller.contextIsValid = { true }
+            controller.show(waitingForLift: false); swipeLeft()
+            precondition(controller.displayedEntries.first?.shortcut == chord)
+            swipeUp(); controller.process(report(nil))
+            let count = sentKeys.count
+            precondition(!controller.isVisible && count == (cancel == 0 ? 0 : 1), "Dispatch waits for panel teardown")
+            switch cancel {
+            case 1: simulatedPID = -1 // Foreground changed before the queued key event.
+            case 2: controller.contextIsValid = { false }
+            case 3: controller.show(waitingForLift: false) // Newer HUD supersedes selection.
+            default: break
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            precondition(sentKeys.count == (cancel == 0 ? count + 1 : count), "Shortcut case \(cancel): before \(count), after \(sentKeys.count)")
+            controller.dismiss()
+        }
+        precondition(sentKeys == [chord], "Nested swipe-up sends exactly one unchanged chord, with no actual key events in tests")
+        controller.contextIsValid = { true }
+        simulatedPID = actualPID
+        controller.show(waitingForLift: false); swipeLeft(); centerTap(); controller.dismiss()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(sentKeys.count == 1, "Back and cancel never send a shortcut")
+        print("Explorer shortcut native HUD passed: nested swipe-up, dispatch after teardown, exact chord, no duplicates, focus/context/new-HUD cancellation and back safety.")
     }
 }

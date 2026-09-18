@@ -18,6 +18,7 @@ struct AppExplorerFavorite: Codable, Equatable {
     // Optional so existing groups retain their manually assigned slots.
     var groupMode: AppExplorerMode? = nil
     var action: AppExplorerAction? = nil
+    var shortcut: RecordedShortcut? = nil
     var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
@@ -25,6 +26,9 @@ struct AppExplorerFavorite: Codable, Equatable {
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        if let shortcut {
+            return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil
+        }
         if action != nil { return bundleID == nil && url == nil && children == nil && groupMode == nil }
         if isGroup { return bundleID == nil && url == nil }
         guard groupMode == nil else { return false }
@@ -232,6 +236,12 @@ struct RecordedShortcut: Codable, Equatable {
     var keyCode: UInt16
     var modifiers: UInt64
     var keyLabel: String
+    var isValidExplorerShortcut: Bool {
+        let allowedModifiers: UInt64 = (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)
+        return keyCode <= 127 && modifiers & ~allowedModifiers == 0 &&
+            !keyLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && keyLabel.count <= 128 &&
+            !keyLabel.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
 }
 
 struct MotionProfile: Codable, Equatable {

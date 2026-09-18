@@ -29,6 +29,9 @@ extension AppExplorerPresenting {
     private var input = AppExplorerSelection(waitingForLift: false)
     private let model = ExplorerModel()
     private var sourcePID: pid_t?
+    private let shortcutPoster = EventPoster()
+    var sendShortcut: ((RecordedShortcut) -> Void)?
+    var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
     private var deadline = Date.distantPast
     private var alternateHeld = false
     private(set) var groupPath: [SwipeDirection] = []
@@ -108,7 +111,7 @@ extension AppExplorerPresenting {
         tilingTarget = nil
         model.canEdit = editingStore != nil
         contactIsDown = waitingForLift
-        sourcePID = workspace.frontmostApplication?.processIdentifier
+        sourcePID = frontmostPID()
         if windowManager {
             tilingTarget = sourcePID.flatMap(captureWindow)
             model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
@@ -180,6 +183,10 @@ extension AppExplorerPresenting {
         }
         if model.mode == .favorites && !recentGroup {
             model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
+                if let shortcut = favorite.shortcut {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                        icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
+                }
                 if favorite.isWindowManager {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                         icon: nil, url: nil, isWindowManager: favorite.isValidDestination)
@@ -255,6 +262,20 @@ extension AppExplorerPresenting {
         }
         dismiss()
         guard let entry else { return }
+        if let shortcut = entry.shortcut {
+            guard shortcut.isValidExplorerShortcut, let targetPID = sourcePID else { return }
+            let generation = selectionGeneration
+            // Close the HUD before sending keys; cancel if focus or context changes.
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation,
+                      self.contextIsValid?() != false, self.frontmostPID() == targetPID else { return }
+                if let sendShortcut = self.sendShortcut { sendShortcut(shortcut) }
+                else { self.shortcutPoster.performTap(.shortcut, shortcut: shortcut) }
+                }
+            }
+            return
+        }
         if entry.isWebURL {
             if let url = entry.url, AppExplorerFavorite.webURL(url.absoluteString) != nil { _ = openWebURL(url) }
             return
@@ -402,13 +423,15 @@ struct ExplorerEntry {
     var isRecentGroup: Bool
     var isWindowManager: Bool
     var tilingDirection: SwipeDirection?
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil) {
+    var shortcut: RecordedShortcut?
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
         self.isRecentGroup = isRecentGroup
         self.isWindowManager = isWindowManager
         self.tilingDirection = tilingDirection
+        self.shortcut = shortcut
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -490,7 +513,9 @@ struct AppExplorerView: View {
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    if let direction = entry.tilingDirection {
+                    if entry.shortcut != nil {
+                        Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                    } else if let direction = entry.tilingDirection {
                         WindowTileIcon(direction: direction)
                     } else if entry.isWindowManager {
                         Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
@@ -502,7 +527,8 @@ struct AppExplorerView: View {
                         Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
                     }
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if let shortcut = entry.shortcut { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
+                    else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.url == nil && entry.tilingDirection == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
@@ -516,7 +542,7 @@ struct AppExplorerView: View {
             .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil))
+        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil && entry?.shortcut == nil))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }

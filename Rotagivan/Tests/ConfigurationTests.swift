@@ -95,6 +95,19 @@ struct ConfigurationTests {
         invalidTiling.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", action: .windowManager), at: .down)
         rejected(try ConfigurationYAML.encode(invalidTiling), "mixed window manager destination")
         print("Window Manager YAML roundtrip and action validation passed.")
+        var keyExplorer = grouped
+        let explorerChord = RecordedShortcut(keyCode: 64, modifiers: (1 << 19) | (1 << 20), keyLabel: "F17")
+        keyExplorer.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Voice input", shortcut: explorerChord), at: .down, in: [.left, .up])
+        let keyYAML = try keyExplorer.yaml()
+        let keyRestored = try AppConfiguration.parse(keyYAML)
+        precondition(keyRestored.settings.appExplorer == keyExplorer.settings.appExplorer)
+        var badKeyExplorer = keyExplorer
+        badKeyExplorer.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .up, name: "Invalid", shortcut: RecordedShortcut(keyCode: 128, modifiers: 0, keyLabel: "Bad")), at: .up)
+        rejected(try ConfigurationYAML.encode(badKeyExplorer), "invalid Explorer shortcut")
+        badKeyExplorer = keyExplorer
+        badKeyExplorer.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: explorerChord), at: .up)
+        rejected(try ConfigurationYAML.encode(badKeyExplorer), "mixed Explorer URL/shortcut")
+        print("Explorer shortcut YAML roundtrip and validation passed.")
         var invalidGroup = grouped
         invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
         rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")

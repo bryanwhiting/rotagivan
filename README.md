@@ -293,6 +293,15 @@ shortcut is required. When opened directly, center tap closes the tiling HUD.
 The binding follows the active layer, supports tap overrides for specific apps,
 and exports/syncs with your configuration. Existing bindings are not changed.
 
+Choose **Set shortcut…** from a slot's **•••** menu to assign a keyboard shortcut
+instead of an app or URL. Record the chord or use **••• → Set shortcut manually…**
+if another app intercepts it. Give it an optional name (for example, “Go back”).
+Swipe to the slot and lift: Explorer closes, then sends the shortcut using the
+same keyboard-event path as tap actions. A changed foreground app or layer cancels
+the pending dispatch. Shortcut slots work inside groups, support drag/swap and
+**Edit shortcut…**, and export/sync with your settings. Recent-app groups remain
+automatically populated rather than accepting fixed shortcut slots.
+
 Web favorites load their site's favicon (with a globe fallback) and support an optional custom name; swipe and lift to
 open the URL in your default browser. Only full `http://` and `https://` links
 without embedded usernames/passwords are accepted. URLs export and sync with

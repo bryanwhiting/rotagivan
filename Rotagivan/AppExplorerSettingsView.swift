@@ -4,6 +4,7 @@ struct AppExplorerSettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var shortcuts = ShortcutSettings.shared
     @State private var editingURLPath: [SwipeDirection]?
+    @State private var editingShortcutPath: [SwipeDirection]?
     @State private var editingApplicationPath: [SwipeDirection]?
     @State private var groupPath: [SwipeDirection]
     @State private var editingGroupPath: [SwipeDirection]?
@@ -103,7 +104,7 @@ struct AppExplorerSettingsView: View {
             .onPreferenceChange(ExplorerSlotFramesKey.self) { slotFrames = $0 }
             Text(isRecentGroup
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
-                : "Drag an icon or name to another slot to swap; drop into an empty slot to move. Use ••• to choose apps, URLs, or groups. Changes save automatically. Tap the center in the HUD to go back.")
+                : "Drag an icon or name to another slot to swap; drop into an empty slot to move. Use ••• to choose apps, URLs, shortcuts, or groups. Changes save automatically. Tap the center in the HUD to go back.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .sheet(isPresented: Binding(get: { editingApplicationPath != nil }, set: { if !$0 { editingApplicationPath = nil } })) {
@@ -119,6 +120,23 @@ struct AppExplorerSettingsView: View {
                     store.settings.appExplorer = next
                     groupError = nil; editingApplicationPath = nil
                 }, onCancel: { editingApplicationPath = nil })
+            }
+        }
+        .sheet(isPresented: Binding(get: { editingShortcutPath != nil }, set: { if !$0 { editingShortcutPath = nil } })) {
+            if let path = editingShortcutPath, let direction = path.last {
+                let favorite = settings.favorite(at: path)
+                ExplorerShortcutEditor(direction: direction,
+                    name: favorite?.shortcut != nil ? (favorite?.name ?? "") : "",
+                    shortcut: favorite?.shortcut, onSave: { favorite in
+                        var next = settings
+                        guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
+                            groupError = "The destination group changed. Reopen the shortcut editor and try again."
+                            editingShortcutPath = nil
+                            return
+                        }
+                        store.settings.appExplorer = next
+                        groupError = nil; editingShortcutPath = nil
+                    }, onCancel: { editingShortcutPath = nil })
             }
         }
         .sheet(isPresented: Binding(get: { editingURLPath != nil }, set: { if !$0 { editingURLPath = nil } })) {
@@ -182,6 +200,7 @@ struct AppExplorerSettingsView: View {
                     } else {
                         Button("Choose app or URL…") { editingApplicationPath = groupPath + [direction] }
                         Button(favorite?.url != nil ? "Edit URL…" : "Set URL…") { editingURLPath = groupPath + [direction] }
+                        Button(favorite?.shortcut != nil ? "Edit shortcut…" : "Set shortcut…") { editingShortcutPath = groupPath + [direction] }
                         Divider()
                         Button("Window Manager") {
                             edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Window Manager", action: .windowManager), at: direction, in: groupPath) }
@@ -221,6 +240,8 @@ struct AppExplorerSettingsView: View {
                     if let icon {
                         Image(nsImage: icon).resizable().renderingMode(.original)
                             .scaledToFit().frame(width: 16, height: 16)
+                    } else if favorite.shortcut != nil {
+                        Image(systemName: "keyboard").foregroundStyle(.teal).frame(width: 16, height: 16)
                     } else if favorite.isWindowManager {
                         Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal).frame(width: 16, height: 16)
                     } else if !favorite.isGroup, favorite.url != nil {
@@ -410,6 +431,36 @@ struct ExplorerGroupNameEditor: View {
                     .keyboardShortcut(.defaultAction).disabled(trimmedName.isEmpty || trimmedName.count > 512)
             }
         }.padding(24).frame(width: 400).background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+struct ExplorerShortcutEditor: View {
+    let direction: SwipeDirection
+    @State var name: String
+    @State var shortcut: RecordedShortcut?
+    var onSave: (AppExplorerFavorite) -> Void
+    var onCancel: () -> Void
+    @State private var action: TapAction = .shortcut
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("\(direction.title) · Keyboard shortcut", systemImage: "keyboard").font(.headline)
+            TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
+            TapActionEditor(title: "Shortcut to send", action: $action, shortcut: $shortcut, keyboardOnly: true)
+            Text("Swipe to this slot and lift to send the shortcut to the app you were using. Use ••• → Set shortcut manually if another app intercepts the keys while recording.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save") {
+                    guard let shortcut, shortcut.isValidExplorerShortcut else { return }
+                    let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let favorite = AppExplorerFavorite(direction: direction, name: title.isEmpty ? shortcut.displayName : title, shortcut: shortcut)
+                    guard favorite.isValidDestination else { return }
+                    onSave(favorite)
+                }.keyboardShortcut(.defaultAction).disabled(shortcut?.isValidExplorerShortcut != true || name.count > 512)
+            }
+        }.padding(24).frame(width: 440).background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

@@ -46,6 +46,7 @@ struct TapActionEditor: View {
     @Binding var action: TapAction
     @Binding var shortcut: RecordedShortcut?
     var shortcutsOnly = false
+    var keyboardOnly = false
     @State private var showManual = false
     @State private var draft = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
 
@@ -71,17 +72,19 @@ struct TapActionEditor: View {
                         showManual = true
                     }
                     Divider()
-                    if !shortcutsOnly {
+                    if !shortcutsOnly && !keyboardOnly {
                         Button("Left click") { action = .leftClick }
                         Button("Double left click") { action = .doubleLeftClick }
                         Button("Triple left click") { action = .tripleLeftClick }
                         Button("Right click") { action = .rightClick }
                     }
+                    if !keyboardOnly {
                     Button("App Explorer") { action = .appExplorer; shortcut = nil }
                     if !shortcutsOnly {
                         Button("Window Manager") { action = .windowManager; shortcut = nil }
                     }
                     Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
+                    }
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.borderlessButton).frame(width: 24)
                     .help("Manual shortcut entry and other tap actions")

@@ -58,6 +58,26 @@ import Foundation
         TrackpadReport(contacts: x.map { [FingerContact(id: id, x: $0, y: y, touching: true, confident: confident)] } ?? [], buttonDown: button, scanTime: 0)
     }
     static func main() throws {
+        let chord = RecordedShortcut(keyCode: 64, modifiers: (1 << 19) | (1 << 20), keyLabel: "F17")
+        let keyFavorite = AppExplorerFavorite(direction: .up, name: "Voice input", shortcut: chord)
+        precondition(keyFavorite.isValidDestination)
+        var keySettings = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Tools", children: [keyFavorite])])
+        precondition(keySettings.hasValidFavorites)
+        precondition(keySettings.swapFavorites(from: .up, to: .right, in: [.left]))
+        precondition(keySettings.favorite(at: [.left, .right])?.shortcut == chord)
+        let keyRoundtrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(keySettings))
+        precondition(keyRoundtrip == keySettings)
+        for invalidChord in [RecordedShortcut(keyCode: 128, modifiers: 0, keyLabel: "Bad"),
+                             RecordedShortcut(keyCode: 64, modifiers: 1 << 63, keyLabel: "F17"),
+                             RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: ""),
+                             RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17\n")] {
+            precondition(!AppExplorerFavorite(direction: .up, name: "Invalid", shortcut: invalidChord).isValidDestination)
+        }
+        precondition(!AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Mixed", shortcut: chord).isValidDestination)
+        precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: chord).isValidDestination)
+        precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", children: [], shortcut: chord).isValidDestination)
+        precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", action: .windowManager, shortcut: chord).isValidDestination)
+        print("Explorer shortcut destinations passed: nested persistence, swaps, invalid keys/modifiers/labels and mixed-type rejection.")
         try testSlotSwaps()
         var settings = AppExplorerSettings()
         precondition(settings.mode(holdingShortcut: false) == .favorites)

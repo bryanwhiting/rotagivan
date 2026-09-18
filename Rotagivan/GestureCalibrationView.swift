@@ -98,7 +98,7 @@ struct GestureCalibrationView: View {
                 .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.title3.weight(.semibold))
-                Text("Calibrating the \(session.profileName) profile")
+                Text("Calibrating the \(session.profileName) layer")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

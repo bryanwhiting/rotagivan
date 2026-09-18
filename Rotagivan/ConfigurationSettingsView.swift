@@ -19,7 +19,7 @@ struct ConfigurationSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Configuration").font(.headline)
-            Text("One YAML file contains all profiles, motion, scrolling, taps, dragging, hotkeys, and slider calibration. Permissions stay on this Mac.")
+            Text("One YAML file contains all layers, motion, scrolling, taps, dragging, hotkeys, and slider calibration. Permissions stay on this Mac.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Copy YAML") { perform {
@@ -48,7 +48,7 @@ struct ConfigurationSettingsView: View {
             }
         }
         .sheet(isPresented: $showingImport) { importer }
-        .confirmationDialog("Restore the bundled defaults? This replaces every profile and shortcut. You can undo it.", isPresented: $confirmDefaults) {
+        .confirmationDialog("Restore the bundled defaults? This replaces every layer and shortcut. You can undo it.", isPresented: $confirmDefaults) {
             Button("Restore defaults", role: .destructive) { perform {
                 try apply(AppConfiguration.factory())
                 status = "Bundled defaults restored."
@@ -76,7 +76,7 @@ struct ConfigurationSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
                 .accessibilityLabel("YAML configuration")
             if let candidate {
-                Text("Valid • \(2 + (candidate.settings.additionalProfiles?.count ?? 0)) profiles • Default: \(candidate.settings.profileName(for: candidate.settings.resolvedDefaultProfileID, fallback: candidate.settings.resolvedDefaultProfileID == 1 ? "Normal" : "Precision"))")
+                Text("Valid • \(2 + (candidate.settings.additionalProfiles?.count ?? 0)) layers • Default: \(candidate.settings.profileName(for: candidate.settings.resolvedDefaultProfileID, fallback: candidate.settings.resolvedDefaultProfileID == 1 ? "Normal" : "Precision"))")
                     .font(.caption).foregroundStyle(.green)
             }
             if let error {
@@ -96,7 +96,7 @@ struct ConfigurationSettingsView: View {
         }
         .padding(24).frame(width: 620, height: 510)
         .onChange(of: text) { _, _ in candidate = nil; error = nil }
-        .confirmationDialog("Replace all profiles and shortcuts with this YAML? Your current configuration will be saved for Undo.", isPresented: $confirmImport) {
+        .confirmationDialog("Replace all layers and shortcuts with this YAML? Your current configuration will be saved for Undo.", isPresented: $confirmImport) {
             Button("Replace configuration", role: .destructive) {
                 guard let candidate else { return }
                 perform {

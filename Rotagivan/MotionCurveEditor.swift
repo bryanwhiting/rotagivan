@@ -73,7 +73,7 @@ struct MotionCurveEditor: View {
                 Spacer()
                 Text("Fast").foregroundStyle(.orange)
             }.font(.system(size: 10, weight: .medium))
-            Text(!showLivePreview ? "Live preview paused" : isActive ? "Move your finger to see the live response" : "Activate this profile to see live motion")
+            Text(!showLivePreview ? "Live preview paused" : isActive ? "Move your finger to see the live response" : "Activate this layer to see live motion")
                 .font(.system(size: 10)).foregroundStyle(.secondary).frame(height: 14)
             Text("LOG-NORMAL · CONTINUOUS BLEND")
                 .font(.system(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(.secondary)

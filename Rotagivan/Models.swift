@@ -617,7 +617,7 @@ final class SettingsStore: ObservableObject {
     @discardableResult
     func addProfile() -> UInt32 {
         let id = max(99, settings.additionalProfiles?.map(\.id).max() ?? 99) + 1
-        let profile = AdditionalProfile(id: id, name: "Profile \(profiles.count + 1)", motion: motion(for: defaultProfileID))
+        let profile = AdditionalProfile(id: id, name: "Layer \(profiles.count + 1)", motion: motion(for: defaultProfileID))
         settings.additionalProfiles = (settings.additionalProfiles ?? []) + [profile]
         updateGestures(settings.gestures(for: defaultProfileID), for: id)
         var baselines = settings.sliderBaselines ?? [:]

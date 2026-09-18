@@ -21,7 +21,7 @@ struct SyncSettingsView: View {
                 Spacer()
                 if sync.busy { ProgressView().controlSize(.small) }
             }
-            Text("Settings save on this Mac first. Sign in on another Mac to sync your profiles and shortcuts.")
+            Text("Settings save on this Mac first. Sign in on another Mac to sync your layers and shortcuts.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("~/.config/rotagivan/settings.yaml").font(.system(.caption, design: .monospaced)).textSelection(.enabled)

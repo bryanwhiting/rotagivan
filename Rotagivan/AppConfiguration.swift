@@ -85,16 +85,16 @@ struct AppConfiguration: Codable {
         let valid = Set(ids)
         guard extra.count <= 98, valid.count == ids.count,
               extra.allSatisfy({ $0.id >= 100 && $0.id < UInt32.max - 100 && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
-            throw ConfigurationError("Profiles need unique IDs (additional IDs start at 100); at most 100 profiles are supported.")
+            throw ConfigurationError("Layers need unique IDs (additional IDs start at 100); at most 100 layers are supported.")
         }
-        guard valid.contains(settings.defaultProfileID ?? 1) else { throw ConfigurationError("The default profile does not exist.") }
+        guard valid.contains(settings.defaultProfileID ?? 1) else { throw ConfigurationError("The default layer does not exist.") }
         let references = Array((settings.profileNames ?? [:]).keys)
             + Array((settings.profileGestures ?? [:]).keys)
             + Array((settings.sliderBaselines ?? [:]).keys)
             + Array(settings.customTapProfiles ?? [])
             + Array(shortcuts.profileActions.keys)
         guard references.allSatisfy(valid.contains), shortcuts.additional.keys.allSatisfy({ valid.contains($0) && $0 >= 100 }) else {
-            throw ConfigurationError("A setting or shortcut refers to a profile that does not exist.")
+            throw ConfigurationError("A setting or shortcut refers to a layer that does not exist.")
         }
         guard shortcuts.actions.count == 3, shortcuts.profileActions.values.allSatisfy({ $0.count == 3 }) else {
             throw ConfigurationError("Each click/drag shortcut list must contain exactly three entries.")
@@ -107,7 +107,7 @@ struct AppConfiguration: Codable {
                 (taps.oneFingerTripleTap, taps.oneFingerTripleShortcut), (taps.twoFingerTripleTap, taps.twoFingerTripleShortcut)
             ]
             guard pairs.allSatisfy({ $0.0 != .shortcut || $0.1 != nil }) else {
-                throw ConfigurationError("Profile \(id) has a keyboard tap action without a recorded shortcut.")
+                throw ConfigurationError("Layer \(id) has a keyboard tap action without a recorded shortcut.")
             }
         }
         // Also validate programmatically captured configurations before export.
@@ -211,11 +211,11 @@ private indirect enum ConfigurationValue: Codable {
             for (name, value) in values { try value.validate(key: name, path: path + "." + name) }
         case .array(let values):
             if path.hasSuffix("." + key), ["profileNames", "profileGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
-                guard values.count % 2 == 0 else { throw ConfigurationError("\(path) must contain alternating profile IDs and values.") }
+                guard values.count % 2 == 0 else { throw ConfigurationError("\(path) must contain alternating layer IDs and values.") }
                 var seen = Set<Double>()
                 for i in stride(from: 0, to: values.count, by: 2) {
                     guard case .number(let id) = values[i], id >= 1, id < Double(UInt32.max - 100), id.rounded() == id,
-                          seen.insert(id).inserted else { throw ConfigurationError("\(path) has an invalid or duplicate profile ID.") }
+                          seen.insert(id).inserted else { throw ConfigurationError("\(path) has an invalid or duplicate layer ID.") }
                 }
             }
             for (i, value) in values.enumerated() { try value.validate(key: key, path: path + "[\(i)]") }

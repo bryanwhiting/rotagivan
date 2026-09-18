@@ -13,7 +13,7 @@ struct AppOverridesView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("App overrides").font(.title3.weight(.semibold))
-                    Text("Only the actions listed here change. Everything else inherits from your active profile.")
+                    Text("Only the actions listed here change. Everything else inherits from your active layer.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -47,14 +47,14 @@ struct AppOverridesView: View {
                             Button {
                                 update { $0.bindings.removeAll { $0.trigger == binding.trigger } }
                             } label: { Image(systemName: "arrow.uturn.backward") }
-                                .help("Remove override and inherit from the active profile")
-                                .accessibilityLabel("Inherit \(binding.trigger.title) from profile")
+                                .help("Remove override and inherit from the active layer")
+                                .accessibilityLabel("Inherit \(binding.trigger.title) from layer")
                                 .padding(.bottom, 3)
                         }
                         if binding.id != app.bindings.last?.id { Divider() }
                     }
                     if app.bindings.isEmpty {
-                        Text("All tap and swipe actions inherit from the active profile.")
+                        Text("All tap and swipe actions inherit from the active layer.")
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Menu {
@@ -68,9 +68,9 @@ struct AppOverridesView: View {
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
                 .disabled(!app.enabled)
             } else {
-                Text("No app overrides. Your profiles apply everywhere.").foregroundStyle(.secondary)
+                Text("No app overrides. Your layers apply everywhere.").foregroundStyle(.secondary)
             }
-            Text("Quick two-finger horizontal swipes use the assigned action on lift. Vertical and slow movements scroll normally; a brief horizontal gesture-detection delay is expected. Tap and tap-then-swipe rules respect Enable tap actions in the active profile. Motion and timing settings are not overridden.")
+            Text("Quick two-finger horizontal swipes use the assigned action on lift. Vertical and slow movements scroll normally; a brief horizontal gesture-detection delay is expected. Tap and tap-then-swipe rules respect Enable tap actions in the active layer. Motion and timing settings are not overridden.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !apps.contains(where: { $0.bundleID == "com.google.Chrome" }) {
                 Button("Add Chrome Back / Forward preset") {

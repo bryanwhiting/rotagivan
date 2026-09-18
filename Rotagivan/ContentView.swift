@@ -6,9 +6,9 @@ struct ContentView: View {
     @ObservedObject var hid: NavigatorHIDManager
     @ObservedObject var sync: SettingsSync
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selection = "Profiles"
+    @State private var selection = "Layers"
 
-    private let sections = [("Profiles", "rectangle.split.2x1"), ("Apps", "app.badge"), ("General", "slider.horizontal.3")]
+    private let sections = [("Layers", "rectangle.split.2x1"), ("Apps", "app.badge"), ("General", "slider.horizontal.3")]
 
     private enum ProfileSection {
         case motion, scrolling, tapping, dragging
@@ -44,14 +44,14 @@ struct ContentView: View {
                     default: profiles
                     }
                 }
-                .frame(width: selection == "Profiles" ? 720 : (selection == "Apps" ? 640 : 510))
+                .frame(width: selection == "Layers" ? 720 : (selection == "Apps" ? 640 : 510))
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity)
             }
             Spacer(minLength: 0)
             Divider()
             HStack {
-                Text("\(store.activeProfileName) profile active")
+                Text("\(store.activeProfileName) layer active")
                 Spacer()
                 Text(AppVersion.display)
                 Text("Changes save automatically")
@@ -84,14 +84,14 @@ struct ContentView: View {
     private var profiles: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Profiles").font(.headline)
+                Text("Layers").font(.headline)
                 Spacer()
                 Button {
                     let id = store.addProfile()
                     ShortcutSettings.shared.additional[id] = ProfileShortcut()
                     ShortcutSettings.shared.profileActions[id] = ShortcutSettings.shared.actions(for: store.defaultProfileID)
                 } label: {
-                    Label("Add profile", systemImage: "plus")
+                    Label("Add layer", systemImage: "plus")
                 }
             }
             ScrollViewReader { proxy in
@@ -123,7 +123,7 @@ struct ContentView: View {
             }
             }
             Divider()
-            Text("New profiles copy \(store.profiles[0].name). Hold temporarily overrides the selected profile; tap again to return to the previous profile.")
+            Text("New layers copy \(store.profiles[0].name). Hold temporarily overrides the selected layer; tap again to return to the previous layer.")
                 .font(.caption).foregroundStyle(.secondary)
             ShortcutEditor(errorsOnly: true)
         }
@@ -183,7 +183,7 @@ struct ContentView: View {
                     }
                     .font(.caption)
                     .menuStyle(.borderlessButton)
-                    .help("Copy this section from another profile")
+                    .help("Copy this section from another layer")
                 }
             }
             content()
@@ -212,7 +212,7 @@ struct ContentView: View {
                 store.settings.profileNames = names
             }), isDefaultProfile: id == store.defaultProfileID)
             HStack {
-            Text(id == store.defaultProfileID ? (store.activeProfileID == id ? "Default · Active profile" : "Default profile") : (store.activeProfileID == id ? "Active profile" : " "))
+            Text(id == store.defaultProfileID ? (store.activeProfileID == id ? "Default · Active layer" : "Default layer") : (store.activeProfileID == id ? "Active layer" : " "))
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             if id != store.defaultProfileID {
@@ -407,7 +407,7 @@ struct ContentView: View {
             } else {
                 Text("Inherit from default")
                     .foregroundStyle(.secondary)
-                Text("Uses tapping settings from \(store.profiles[0].name). Enable custom settings to override them while this profile is active.")
+                Text("Uses tapping settings from \(store.profiles[0].name). Enable custom settings to override them while this layer is active.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -645,7 +645,7 @@ struct ShortcutEditor: View {
                     if id == 1 { shortcutRow(profile ?? "Normal", value: $shortcuts.normal) }
                     else if id == 2 { shortcutRow(profile ?? "Precision", value: $shortcuts.precision) }
                     else {
-                        shortcutRow(profile ?? "Profile", value: Binding(get: { shortcuts.additional[id] ?? ProfileShortcut() }, set: { shortcuts.additional[id] = $0 }))
+                        shortcutRow(profile ?? "Layer", value: Binding(get: { shortcuts.additional[id] ?? ProfileShortcut() }, set: { shortcuts.additional[id] = $0 }))
                     }
                 } else {
                     if profile == nil || profile == "Normal" { shortcutRow("Normal", value: $shortcuts.normal) }
@@ -662,11 +662,11 @@ struct ShortcutEditor: View {
     private var defaultProfileHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let editableName {
-                TextField("Profile name", text: editableName)
+                TextField("Layer name", text: editableName)
                     .textFieldStyle(.roundedBorder).fontWeight(.semibold)
-                    .accessibilityLabel("Profile name")
+                    .accessibilityLabel("Layer name")
             } else { Text(profile ?? "Default").fontWeight(.semibold) }
-            Text("Used automatically when no other profile is active.")
+            Text("Used automatically when no other layer is active.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }.padding(.vertical, 4)
@@ -676,11 +676,11 @@ struct ShortcutEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if let editableName {
-                    TextField("Profile name", text: editableName)
+                    TextField("Layer name", text: editableName)
                         .textFieldStyle(.roundedBorder)
                         .fontWeight(.semibold)
-                        .accessibilityLabel("Profile name")
-                        .help("Rename this profile")
+                        .accessibilityLabel("Layer name")
+                        .help("Rename this layer")
                 } else {
                     Text(title).fontWeight(.semibold)
                 }

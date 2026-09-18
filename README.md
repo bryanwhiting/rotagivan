@@ -42,7 +42,7 @@ if its list appears stale. This resets the permission decision; it does not
 guarantee every old app entry disappears from the list.
 
 The reset is **on by default**, affects only this user's Rotagivan Accessibility
-permission, and leaves Input Monitoring, other apps, profiles, YAML, and login
+permission, and leaves Input Monitoring, other apps, layers, YAML, and login
 credentials untouched. Run it as your normal logged-in user, not with `sudo`.
 It cannot grant access automatically or override a managed Mac's policy. A
 reset also cannot fix an unstable signing identity: keep using the same local
@@ -64,11 +64,11 @@ Features:
 - Smooth log-normal cursor response with Fine/Fast sensitivity, transition center/width, live feedback, and release envelopes
 - Two-finger horizontal and vertical smooth scrolling
 - Adjustable kinetic scrolling
-- Configurable one/two-finger tap and double-tap actions, including a double-left-click action, with per-profile overrides
+- Configurable one/two-finger tap and double-tap actions, including a double-left-click action, with per-layer overrides
 - Optional one-finger double-tap-then-swipe shortcuts in eight directions
 - Tap-hold dragging and drag re-grip
-- Normal and Precision profiles
-- Configurable profile hotkeys with hold or press-to-switch behavior
+- Normal and Precision layers
+- Configurable layer hotkeys with hold or press-to-switch behavior
 - Configurable single-click, double-click and hold-to-drag keyboard shortcuts
 - Launch at login and menu-bar controls
 - Bundled tuned defaults and complete YAML configuration import/export
@@ -155,7 +155,7 @@ action, not a keyboard shortcut.
 
 **One-finger triple tap** and **Two-finger triple tap** can each trigger that
 action, another click action, or a recorded shortcut. They default to Nothing,
-so existing profiles keep their timing. When assigned, three taps of the same
+so existing layers keep their timing. When assigned, three taps of the same
 finger count replace the shorter actions. Each tap must satisfy the tap
 duration/radius, and successive releases must fit the existing **Double-tap
 delay**. A double tap waits that extra interval for a third tap; if none arrives,
@@ -178,7 +178,7 @@ available only when the one-finger tap action is **Left click**.
 
 ### Scroll response curve
 
-Each profile's **Scrolling** section now has a compact response graph and three
+Each layer's **Scrolling** section now has a compact response graph and three
 0–100 controls: **Slow speed**, **Fast speed**, and **Transition point**. The
 curve blends smoothly between the two sensitivities as finger speed increases.
 Raise the transition to retain the slow response longer; drag the dashed line
@@ -192,7 +192,7 @@ UI updates. The transition's blend width and brief velocity smoothing are fixed
 to keep the editor simple. New curves use hardware timing so callback delays
 do not cause accidental acceleration changes.
 
-Existing profiles retain their original scrolling until a curve control is
+Existing layers retain their original scrolling until a curve control is
 edited. Opening settings alone does not migrate or rewrite anything. Initial
 endpoints are derived from the previous speed/acceleration; the restore arrow
 returns to that previous behavior. **After-scroll coasting** and its coefficient
@@ -209,9 +209,9 @@ double-tap-then-swipe; or plain two-finger left/right swipes. Record a shortcut,
 choose App Explorer, or explicitly choose Nothing. Remove a row with the undo
 arrow to inherit that action again; disable or remove the app to inherit all.
 
-Rules apply only while that app is frontmost, on top of whichever profile is
-active. They do not change cursor/scroll tuning, tap timing, or saved profile
-actions. Tap-based overrides respect the profile's Enable tap actions setting.
+Rules apply only while that app is frontmost, on top of whichever layer is
+active. They do not change cursor/scroll tuning, tap timing, or saved layer
+actions. Tap-based overrides respect the layer's Enable tap actions setting.
 App changes cancel pending taps and in-progress gestures to avoid carrying an
 action into a different app. Rules are included in YAML and per-account sync.
 
@@ -219,7 +219,7 @@ Chrome is prefilled with **two fingers right → Back (⌘[)** and **two fingers
 left → Forward (⌘])**, matching [Chrome's Mac shortcuts](https://support.google.com/chrome/answer/157179).
 Delete the preset to opt out; an explicitly empty app-override list stays empty.
 Legacy settings without this new field use the preset without rewriting any
-existing profile values. Other apps initially inherit everything.
+existing layer values. Other apps initially inherit everything.
 
 Two-finger navigation is a quick horizontal flick (at least 80 sensor units,
 about 2.1 mm on Navigator, completed within 350 ms); the action fires once both
@@ -239,7 +239,7 @@ open General settings. In Recent mode, Edit customizes your fixed Favorites.
 
 While editing, the HUD stays open without its navigation timeout. Trackpad taps
 temporarily become normal clicks and gesture shortcuts pause, without changing
-your saved profiles. Native file pickers and naming sheets keep the editor open.
+your saved layers. Native file pickers and naming sheets keep the editor open.
 Releasing the hotkey that opened the HUD does not cancel editing. Finish or close
 the editor to restore your gesture bindings; switching to another app closes it.
 
@@ -281,7 +281,7 @@ center, goes back one level; at the root it closes the HUD. Group navigation
 never launches an app or clicks into the app behind it. Each new opening starts
 at the root. Swipe out and back to the center and lift, press Escape, or click
 close to cancel completely. It also closes after 15 seconds of navigation inactivity, on app
-switch/Space change, profile or tap-setting changes, sleep, or device disconnect.
+switch/Space change, layer or tap-setting changes, sleep, or device disconnect.
 
 Recency is learned from [macOS application activation notifications](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification)
 while Rotagivan runs. Only bundle IDs are stored locally; this history is not
@@ -289,11 +289,11 @@ included in exported YAML or cloud sync. On first use, unknown running apps fill
 remaining slots in launch-date order until their actual usage is observed.
 The current app, Rotagivan, and background-only helpers are excluded. If fewer
 than eight eligible apps are running, remaining tiles stay empty. Gesture
-assignments themselves do inherit, copy, export, and sync with profiles.
+assignments themselves do inherit, copy, export, and sync with layers.
 
 ### Two-finger tap and swipe combinations
 
-Under a profile's **Tapping** section, enable **Two-finger tap, then quick swipe**
+Under a layer's **Tapping** section, enable **Two-finger tap, then quick swipe**
 or **Two-finger double-tap, then swipe**. Tap with both fingers, lift both, then
 swipe with both fingers together. The double-tap variant requires two completed
 two-finger taps before the swipe. Assign a recorded shortcut or App Explorer to
@@ -308,13 +308,13 @@ scrolling and app-specific navigation continue to work.
 
 Stationary follow-up taps still use the existing two-finger double/triple-tap
 actions. If no swipe follows, the earlier tap action runs after its recognition
-window. These settings support profile inheritance, Tapping **Copy from**,
+window. These settings support layer inheritance, Tapping **Copy from**,
 per-app overrides, YAML export/import, and account sync. They do not alter the
 one-finger gesture settings.
 
 ### Single tap, then quick swipe
 
-In a profile's **Tapping** section, enable **Single tap, then quick swipe** and
+In a layer's **Tapping** section, enable **Single tap, then quick swipe** and
 record a shortcut for any of the eight directions. Perform two contacts:
 **tap → lift → quick swipe → lift**. The second contact can start somewhere
 else on the trackpad. Its movement does not move the cursor; the shortcut fires
@@ -338,11 +338,11 @@ the duration manually if the median cutoff misses your slower attempts.
 The feature is off until enabled with at least one binding. When configured,
 single-click output waits for a possible swipe, and held drags wait for the
 quick-swipe duration. Inheritance, Tapping **Copy from**, YAML, and account sync
-include these settings. Existing profiles and motion tuning are unchanged.
+include these settings. Existing layers and motion tuning are unchanged.
 
 ### Double-tap, then swipe
 
-In a profile's **Tapping** section, enable **Double-tap, then swipe** and record
+In a layer's **Tapping** section, enable **Double-tap, then swipe** and record
 a shortcut for Left, Right, Up, Down, Top left, Top right, Bottom left, or
 Bottom right (the menu also supports manual entry).
 Perform two completed one-finger taps, then touch again, swipe and lift. This
@@ -355,7 +355,7 @@ an unassigned diagonal does not fall back to a horizontal or vertical shortcut.
 **Swipe window** (100–800 ms, default 350) is the time after the second tap to
 begin the swipe. **Swipe distance** (shown in millimeters when connected) is independent
 of cursor sensitivity. Finish the swipe within 700 ms; ambiguous direction boundaries,
-extra fingers, sensor jumps, profile changes, and explicit dragging cancel it.
+extra fingers, sensor jumps, layer changes, and explicit dragging cancel it.
 When enabled, single taps wait for double-tap recognition and ordinary double
 taps wait for the swipe window. Without a swipe, the normal double-tap action
 runs (or two single-tap actions if no double action is configured). A short
@@ -366,7 +366,7 @@ Directions use eight 45-degree sectors. A narrow dead zone between adjacent
 sectors cancels uncertain swipes rather than choosing the wrong shortcut.
 Swipe calibration accepts all eight directions using the same classification.
 
-Secondary profiles inherit this gesture from the default profile unless
+Secondary layers inherit this gesture from the default layer unless
 **Set Custom Tap settings** is checked. The Tapping section's **Copy from**
 and whole-configuration YAML both include the new settings.
 
@@ -406,7 +406,7 @@ are not changed by this behavior.
 
 ### Calibrate gesture timing
 
-In a profile's **Tapping** section, choose **Calibrate double tap…**, or enable
+In a layer's **Tapping** section, choose **Calibrate double tap…**, or enable
 **Double-tap, then swipe** and choose **Calibrate double-tap + swipe…**.
 With the trackpad connected, the guide collects 10 valid one-finger attempts.
 Wait for the ready prompt between attempts. Invalid attempts do not count.
@@ -420,7 +420,7 @@ combined rhythm. Apply saves each interval independently (50–600 ms, rounded t
 milliseconds); both one- and two-finger triple taps use these timings. When a
 triple-tap action is configured, its first interval governs the first pair and
 its second interval governs the third tap. The ordinary double-tap setting is
-not overwritten. Older profiles fall back to the existing double-tap interval.
+not overwritten. Older layers fall back to the existing double-tap interval.
 
 Double-tap timing measures the first lift to the second lift. Swipe calibration
 also measures the second lift to the third touchdown; finish that third contact
@@ -434,9 +434,9 @@ shared double-tap delay also applies to two-finger double taps.
 
 Cancel, closing settings, or switching away from the app leaves settings
 unchanged and releases capture. Disconnecting, disabling, or changing the
-profile's tap settings cancels capture. Non-default profiles must enable
+layer's tap settings cancels capture. Non-default layers must enable
 **Set Custom Tap settings** to calibrate independently; otherwise they inherit
-the default profile's calibrated timing. Saved timing is included in YAML.
+the default layer's calibrated timing. Saved timing is included in YAML.
 
 ### Sharing settings
 
@@ -446,7 +446,7 @@ For import, paste the YAML text (or open a file), click **Validate**, then confi
 import** restores the previous complete configuration, including shortcuts; that
 backup survives restarts. Restoring defaults uses the same backup mechanism.
 
-The versioned file includes all profiles, names, selected default, cursor curves,
+The versioned file includes all layers, names, selected default, cursor curves,
 scrolling, tap/drag settings, recorded key bindings, activation/click/drag hotkeys,
 slider baselines, enabled state, and launch-at-login preference. Accessibility and
 Input Monitoring grants, signing credentials, debug data, and transient active
@@ -454,8 +454,10 @@ hotkeys are intentionally excluded. Login-item changes remain subject to macOS
 approval; global shortcut conflicts with other apps still depend on that Mac.
 
 Values are engine units, **not slider percentages**. The schema begins with
-`formatVersion: 1`, `settings:`, and `shortcuts:`. Profile-keyed collections retain
-the app's Codable representation: alternating profile IDs and values in a YAML
+`formatVersion: 1`, `settings:`, and `shortcuts:`. The UI calls these **layers**;
+existing YAML keys such as `additionalProfiles` and `profileGestures` stay unchanged
+for compatibility. Layer-keyed collections retain
+the app's Codable representation: alternating layer IDs and values in a YAML
 sequence. Start with an exported file when editing by hand. Imports reject
 unknown keys, duplicate keys/IDs, invalid ranges or references, multiple documents,
 aliases, and files over 1 MB.
@@ -482,13 +484,13 @@ To return to the original, quit Rotagivan and launch `/Applications/Navigator.ap
 
 ## Hacking guide
 
-- `Models.swift`: saved profiles and tuning defaults.
+- `Models.swift`: saved layers and tuning defaults.
 - `CursorResponse.swift`: shared log-normal CDF, scan timing, and release-envelope math.
 - `MotionCurveEditor.swift`: native parameter controls, live graph, and release editing.
 - `GestureEngine.swift`: contact-to-cursor/scroll/tap/drag behavior.
 - `EventPoster.swift`: macOS pointer and scroll events.
 - `HIDManager.swift` and `TrackpadReport.swift`: device connection and report decoding.
-- `HotKeyManager.swift`: configurable profile and mouse-action hotkeys.
+- `HotKeyManager.swift`: configurable layer and mouse-action hotkeys.
 - `ContentView.swift`: settings interface.
 
 Protocol references: the connected device's HID descriptor and [ZSA's firmware report format](https://github.com/zsa/qmk_modules/blob/main/navigator_trackpad/navigator_trackpad_ptp.c). Application code is independently written; no ZSA binary or artwork is bundled.
@@ -524,7 +526,7 @@ This changes the controls' scale, **not** the runtime acceleration curve. Existi
 gains are read through the inverse mapping, so their displayed numbers change
 while physical behavior is preserved. The former linear value 10 displays at
 about 46.25, and 54 displays at about 85.0. Zero and the existing maximum are
-unchanged; no slider baselines, profiles, presets, or saved gains are reset.
+unchanged; no slider baselines, layers, presets, or saved gains are reset.
 Other controls keep their existing scales.
 
 The dashed line marks the center and the shaded band spans the 10th–90th
@@ -533,9 +535,9 @@ range so parameter changes remain visible; the response continues beyond its
 right edge without a hard cutoff. The vertical display uses a square-root scale
 to give low sensitivities more room. Fast is an asymptote, not the graph endpoint.
 
-The live dot shows measured input and applied sensitivity for the active profile.
+The live dot shows measured input and applied sensitivity for the active layer.
 Live samples are buffered separately from settings. Only the marker and readout
-refresh, at 20 Hz; the response curve and profile controls do not rebuild for
+refresh, at 20 Hz; the response curve and layer controls do not rebuild for
 each input event. Switch **Live** off to pause the display without changing
 cursor behavior.
 Smoothing adjusts time-based filtering of both velocity and applied sensitivity.
@@ -547,9 +549,9 @@ Falloff after lift opens an audio-style envelope: choose Fine or Fast, drag the
 end for duration and the middle for decay shape. A zero tail stops immediately;
 the maximum tail is 450 ms. Tap/keyboard/physical drags do not coast after lift.
 Balanced, Precision, and Wide sweep presets are optional; Undo preset restores
-the preceding curve. Existing node profiles retain their endpoint gains, smoothing,
+the preceding curve. Existing node layers retain their endpoint gains, smoothing,
 and falloff parameters; the old halfway speed is estimated by interpolation and
-the transition is replaced with a broad sigma of 0.75. Pre-node profiles derive
+the transition is replaced with a broad sigma of 0.75. Pre-node layers derive
 the endpoints and center from legacy motion settings. New saves contain only
 distribution parameters. The shape changes intentionally; it does not reproduce
 the old nodes exactly. Scrolling and tapping settings are untouched.

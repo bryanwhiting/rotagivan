@@ -2,7 +2,7 @@ import Foundation
 
 @main
 struct ProfileStorageTests {
-    static func main() throws {
+    @MainActor static func main() throws {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
         var settings = StoredSettings()
@@ -47,6 +47,7 @@ struct ProfileStorageTests {
         settings.additionalProfiles?[0].motion.cursorSpeed = 0.75
         let restored = try decoder.decode(StoredSettings.self, from: encoder.encode(settings))
         precondition(restored.additionalProfiles?.first?.id == 100)
+        precondition(restored.additionalProfiles?.first?.name == "Profile 3", "User-chosen legacy names must not be renamed")
         precondition(restored.additionalProfiles?.first?.motion.cursorSpeed == 0.75)
         precondition(restored.normal.cursorSpeed == 0.37)
         settings.profileNames = [1: "Everyday", 2: "Fine control", 100: "Design"]
@@ -127,5 +128,18 @@ struct ProfileStorageTests {
         print("Profile gestures passed: legacy inheritance, independent tapping/dragging, persistence.")
         print("Profile naming tests passed: built-in and custom names, persistence, legacy and blank-name fallbacks.")
         print("Profile storage tests passed: legacy decoding, additional-profile round trip, independent settings.")
+        let suite = "Rotagivan.LayerNamingTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set(true, forKey: "migration.rotagivan.v1")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        store.settings = StoredSettings()
+        let added = store.addProfile()
+        precondition(store.profiles.first { $0.id == added }?.name == "Layer 3")
+        let saved = try JSONSerialization.jsonObject(with: encoder.encode(store.settings)) as! [String: Any]
+        precondition(saved["additionalProfiles"] != nil && saved["additionalLayers"] == nil, "Keep existing YAML and sync schema")
+        let savedModel = try decoder.decode(StoredSettings.self, from: encoder.encode(store.settings))
+        precondition(savedModel.additionalProfiles?.first?.name == "Layer 3")
+        print("Layer terminology passed: new default names, preserved legacy names and unchanged storage keys.")
     }
 }

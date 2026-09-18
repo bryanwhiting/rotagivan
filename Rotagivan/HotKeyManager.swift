@@ -237,7 +237,7 @@ final class HotKeyManager {
         ShortcutSettings.shared.error = nil
         let configured: [(id: UInt32, name: String, shortcut: ProfileShortcut)] =
             [(1, "Normal", normal), (2, "Precision", precision)] +
-            additional.sorted { $0.key < $1.key }.map { ($0.key, "Profile \($0.key - 97)", $0.value) }
+            additional.sorted { $0.key < $1.key }.map { ($0.key, "Layer \($0.key - 97)", $0.value) }
         let all = configured.filter { $0.id != defaultProfileID }
         let enabled = all.map(\.shortcut).filter(\.enabled)
         profileCombinations = Set(enabled.map { "\($0.keyCode):\($0.modifiers)" })
@@ -246,7 +246,7 @@ final class HotKeyManager {
             registerActions()
         }
         if Set(enabled.map { "\($0.keyCode):\($0.modifiers)" }).count != enabled.count {
-            ShortcutSettings.shared.error = "Choose a unique shortcut for each profile and mouse action."
+            ShortcutSettings.shared.error = "Choose a unique shortcut for each layer and mouse action."
             return
         }
         for (id, name, shortcut) in all where shortcut.enabled {
@@ -279,7 +279,7 @@ final class HotKeyManager {
             let name = ["Click at cursor", "Double-click at cursor", "Keyboard drag"][index]
             let combination = "\(shortcut.keyCode):\(shortcut.modifiers)"
             guard used.insert(combination).inserted else {
-                ShortcutSettings.shared.error = "\(name) conflicts with another shortcut in this profile."
+                ShortcutSettings.shared.error = "\(name) conflicts with another shortcut in this layer."
                 continue
             }
             guard shortcut.keyCode >= 64 || shortcut.modifiers != 0 else {
@@ -297,7 +297,7 @@ final class HotKeyManager {
                 (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
                 (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
             guard used.insert("\(shortcut.keyCode):\(modifiers)").inserted else {
-                ShortcutSettings.shared.error = "App Explorer conflicts with a profile or mouse shortcut."; return
+                ShortcutSettings.shared.error = "App Explorer conflicts with a layer or mouse shortcut."; return
             }
             guard shortcut.keyCode >= 64 || modifiers != 0 else {
                 ShortcutSettings.shared.error = "App Explorer letter shortcuts need a modifier."; return

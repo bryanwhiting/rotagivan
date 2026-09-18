@@ -157,7 +157,7 @@ final class NavigatorHIDManager: ObservableObject {
             !store.profiles.contains(where: { $0.id == session.profileID }) ||
             store.settings.gestures(for: session.profileID) != calibrationSettings ||
             (session.profileID != store.defaultProfileID && !(store.settings.customTapProfiles ?? []).contains(session.profileID)) {
-            session.cancel(reason: "The profile or its tap settings changed. Start a new calibration.")
+            session.cancel(reason: "The layer or its tap settings changed. Start a new calibration.")
         }
         if session.cancellationReason == nil && !session.isComplete { session.tick(at: time) }
         if session.isComplete || session.cancellationReason != nil { finishCalibrationCapture() }

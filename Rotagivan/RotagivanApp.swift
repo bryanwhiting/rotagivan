@@ -36,7 +36,7 @@ struct RotagivanApp: App {
         } label: {
             HStack(spacing: 4) {
             Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
-                .accessibilityLabel("Rotagivan — \(store.activeProfileName) profile")
+                .accessibilityLabel("Rotagivan — \(store.activeProfileName) layer")
             Text(AppVersion.version)
             }
         }
@@ -123,7 +123,7 @@ struct NavigatorPanel: View {
             }))
             .toggleStyle(.switch).controlSize(.small)
 
-            Picker("Edit profile", selection: $editingProfileID) {
+            Picker("Edit layer", selection: $editingProfileID) {
                 ForEach(store.profiles, id: \.id) { profile in
                     Text(profile.name).tag(profile.id)
                 }
@@ -138,7 +138,7 @@ struct NavigatorPanel: View {
                 ScrollCurveEditor(profile:Binding(get:{store.motion(for:editingProfileID)},set:{store.updateMotion($0,for:editingProfileID)}),showGraph:false)
                     .padding(.top,8)
             }
-            Text("\(store.activeProfileName) profile active")
+            Text("\(store.activeProfileName) layer active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             DisclosureGroup("Click & drag shortcuts") {

@@ -7,7 +7,7 @@ enum WindowTile {
         switch direction {
         case .left: return "Left half"
         case .right: return "Right half"
-        case .up: return "Maximize"
+        case .up: return "Top half"
         case .down: return "Bottom half"
         case .topLeft: return "Top-left quarter"
         case .topRight: return "Top-right quarter"
@@ -20,7 +20,7 @@ enum WindowTile {
     static func frame(_ direction: SwipeDirection, in area: CGRect) -> CGRect {
         let halfWidth = floor(area.width / 2), halfHeight = floor(area.height / 2)
         switch direction {
-        case .up: return area
+        case .up: return CGRect(x: area.minX, y: area.minY, width: area.width, height: halfHeight)
         case .left: return CGRect(x: area.minX, y: area.minY, width: halfWidth, height: area.height)
         case .right: return CGRect(x: area.minX + halfWidth, y: area.minY, width: area.width - halfWidth, height: area.height)
         case .down: return CGRect(x: area.minX, y: area.minY + halfHeight, width: area.width, height: area.height - halfHeight)

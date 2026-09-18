@@ -15,9 +15,11 @@ for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
     "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
-xcrun swiftc "${common[@]}" Rotagivan/EventPoster.swift Rotagivan/Tests/ClickTests.swift \
-  -framework AppKit -framework CoreGraphics -o "$test_dir/ClickTests"
-"$test_dir/ClickTests"
+for test in ClickTests ParagraphSelectionTests; do
+  xcrun swiftc "${common[@]}" Rotagivan/EventPoster.swift "Rotagivan/Tests/$test.swift" \
+    -framework AppKit -framework CoreGraphics -o "$test_dir/$test"
+  "$test_dir/$test"
+done
 xcrun swiftc Rotagivan/TrackpadReport.swift Rotagivan/Tests/ReportTests.swift -o "$test_dir/ReportTests"
 "$test_dir/ReportTests"
 xcrun swiftc Rotagivan/TrackpadDistance.swift Rotagivan/Tests/TrackpadDistanceTests.swift -o "$test_dir/TrackpadDistanceTests"

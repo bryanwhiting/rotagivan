@@ -17,6 +17,33 @@ extension GestureEventPosting {
 }
 
 final class EventPoster: GestureEventPosting {
+    // Quartz does not infer a multi-click from separately posted single clicks.
+    // Keep the count across ordinary taps, without delaying the first click.
+    struct ClickSequence {
+        private var previous: (position: CGPoint, time: TimeInterval, button: CGMouseButton,
+                               target: pid_t?, flags: CGEventFlags, count: Int)?
+
+        mutating func reset() { previous = nil }
+
+        mutating func events(position: CGPoint, button: CGMouseButton = .left, count: Int = 1,
+                             at time: TimeInterval, interval: TimeInterval,
+                             target: pid_t? = nil, flags: CGEventFlags = []) -> [CGEvent] {
+            let requested = max(1, min(3, count))
+            let modifiers = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+            var first = 1
+            if requested == 1, let previous, previous.button == button,
+               previous.target == target, previous.flags == modifiers,
+               time >= previous.time, time - previous.time <= interval,
+               hypot(position.x - previous.position.x, position.y - previous.position.y) <= 4,
+               previous.count < 3 {
+                first = previous.count + 1
+            }
+            previous = (position, time, button, target, modifiers, first + requested - 1)
+            return EventPoster.clickEvents(position: position, button: button, count: requested, startingAt: first)
+        }
+    }
+
+    private var clickSequence = ClickSequence()
     private let source = CGEventSource(stateID: .hidSystemState)
     private let shortcutQueue = DispatchQueue(label: "local.rotagivan.shortcut-output")
     private(set) var dragging = false
@@ -78,6 +105,9 @@ final class EventPoster: GestureEventPosting {
 
     func performTap(_ action: TapAction, shortcut: RecordedShortcut? = nil) {
         guard !dragging else { return }
+        if ![TapAction.leftClick, .doubleLeftClick, .tripleLeftClick, .rightClick].contains(action) {
+            clickSequence.reset()
+        }
         switch action {
         case .leftClick: click()
         case .doubleLeftClick: click(button: .left, count: 2)
@@ -111,14 +141,19 @@ final class EventPoster: GestureEventPosting {
     func click(button: CGMouseButton = .left, count: Int = 1) {
         guard !dragging else { return }
         let position = quartzMouseLocation()
-        Self.clickEvents(position: position, button: button, count: count).forEach { $0.post(tap: .cghidEventTap) }
+        clickSequence.events(position: position, button: button, count: count,
+            at: ProcessInfo.processInfo.systemUptime, interval: NSEvent.doubleClickInterval,
+            target: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            flags: CGEventSource.flagsState(.combinedSessionState))
+            .forEach { $0.post(tap: .cghidEventTap) }
     }
 
-    static func clickEvents(position: CGPoint, button: CGMouseButton = .left, count: Int) -> [CGEvent] {
+    static func clickEvents(position: CGPoint, button: CGMouseButton = .left, count: Int, startingAt: Int = 1) -> [CGEvent] {
         var events: [CGEvent] = []
         let down: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
         let up: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
-        for click in 1...max(1, min(3, count)) {
+        let first = max(1, min(3, startingAt))
+        for click in first..<(first + max(1, min(3, count))) {
             for type in [down, up] {
                 let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: button)
                 event?.setIntegerValueField(.mouseEventClickState, value: Int64(click))
@@ -130,6 +165,7 @@ final class EventPoster: GestureEventPosting {
 
     func beginDrag() {
         guard !dragging else { return }
+        clickSequence.reset()
         dragging = true
         CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: quartzMouseLocation(), mouseButton: .left)?.post(tap: .cghidEventTap)
     }
@@ -142,6 +178,7 @@ final class EventPoster: GestureEventPosting {
 
     func scroll(dx: Double, dy: Double, momentum: Bool = false) {
         guard dx.isFinite, dy.isFinite else { return }
+        if dx != 0 || dy != 0 { clickSequence.reset() }
         let accumulatedX = dx + scrollRemainder.dx
         let accumulatedY = dy + scrollRemainder.dy
         let emittedX = accumulatedX.rounded(.towardZero)

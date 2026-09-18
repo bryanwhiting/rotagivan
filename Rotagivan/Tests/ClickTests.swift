@@ -4,6 +4,30 @@ import CoreGraphics
 struct ClickTests {
     static func main() {
         let point = CGPoint(x: 120, y: 240)
+        var sequence = EventPoster.ClickSequence()
+        func tap(_ time: Double, at location: CGPoint = CGPoint(x: 120, y: 240),
+                 button: CGMouseButton = .left, count: Int = 1,
+                 target: Int32 = 1, flags: CGEventFlags = []) -> [Int64] {
+            sequence.events(position: location, button: button, count: count, at: time,
+                interval: 0.5, target: target, flags: flags)
+                .map { $0.getIntegerValueField(.mouseEventClickState) }
+        }
+        precondition(tap(0) == [1, 1])
+        precondition(tap(0.15) == [2, 2])
+        precondition(tap(0.3) == [3, 3], "Three ordinary taps must select a paragraph, not send three single clicks")
+        precondition(tap(0.4) == [1, 1])
+        precondition(tap(1) == [1, 1], "Slow taps are independent")
+        precondition(tap(1.1, at: CGPoint(x: 140, y: 240)) == [1, 1], "Clicks elsewhere are independent")
+        precondition(tap(1.2, at: CGPoint(x: 140, y: 240), target: 2) == [1, 1])
+        precondition(tap(1.3, at: CGPoint(x: 140, y: 240), target: 2, flags: .maskShift) == [1, 1])
+        precondition(tap(1.4, at: CGPoint(x: 140, y: 240), button: .right, target: 2, flags: .maskShift) == [1, 1])
+        sequence.reset()
+        precondition(tap(2, count: 2) == [1, 1, 2, 2])
+        precondition(tap(2.1) == [3, 3], "An explicit double-click followed by a plain tap must reach three")
+        precondition(tap(2.2, count: 3) == [1, 1, 2, 2, 3, 3], "Explicit triple-click actions remain self-contained")
+        sequence.reset()
+        precondition(tap(2.3) == [1, 1])
+        print("Ordinary tap sequences, native multi-click counts, timeout, position, context, and explicit actions passed.")
         let single = EventPoster.clickEvents(position: point, count: 1)
         precondition(single.map(\.type) == [.leftMouseDown, .leftMouseUp])
         let double = EventPoster.clickEvents(position: point, count: 2)

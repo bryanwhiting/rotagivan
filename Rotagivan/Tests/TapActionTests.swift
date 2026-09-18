@@ -138,6 +138,14 @@ struct TapActionTests {
             precondition(fixture.poster.dragStarts == 0)
         }
         print("One- and two-finger physical taps each request one double-left-click action without arming drag.")
+        let ordinary = TapFixture(oneFinger: .leftClick, twoFinger: .rightClick)
+        ordinary.tap(0)
+        ordinary.tap(0.1)
+        ordinary.tap(0.2)
+        precondition(ordinary.poster.taps.map { $0.0 } == [.leftClick, .leftClick, .leftClick],
+                     "Ordinary quick taps must reach native click counting even with tap-to-drag enabled")
+        precondition(ordinary.poster.dragStarts == 0)
+        ordinary.finish()
         for twoFingers in [false, true] {
             for swipeEnabled in [false, true] {
                 check { f in

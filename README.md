@@ -17,11 +17,14 @@ zsh Rotagivan/build.sh
 zsh Rotagivan/test.sh
 
 # Install and launch:
-osascript -e 'quit app "Navigator"'
-rm -rf /Applications/Rotagivan.app
-cp -R Rotagivan/build/Rotagivan.app /Applications/
-open /Applications/Rotagivan.app
+./launch.sh
 ```
+
+`launch.sh` quits Rotagivan gracefully, waits for it to exit, copies the signed
+build into `/Applications` with `ditto`, verifies its signature, and reopens the
+installed copy. It works from any directory, preserves your settings, and does
+not rebuild or re-sign the app. Use `./launch.sh --check` for a read-only check.
+If a copy will not quit, it stops instead of overwriting a running app.
 
 Built app path:
 
@@ -59,7 +62,9 @@ chmod +x Rotagivan/build.sh
 Rotagivan/build.sh
 ```
 
-Copy `Rotagivan.app` from `Rotagivan/build/` into `/Applications`, quit the official Navigator app, then launch the clone. macOS will ask for Accessibility access so the clone can post pointer and scroll events.
+Run `./launch.sh` after building to install and open Rotagivan. Quit the official
+Navigator app separately before using Rotagivan. On first installation, macOS
+will ask for Accessibility access so Rotagivan can post pointer and scroll events.
 
 Do not run both apps together: each would receive and respond to the same touch reports.
 

@@ -1,8 +1,33 @@
-// Renders isolated settings and a completed calibration; emits no input events.
+// Renders isolated settings; synthetic mouse events stay inside its own windows.
 import AppKit
 import SwiftUI
 
 @main struct ExplorerCalibrationUISmoke {
+    @MainActor static func drag(in window: NSWindow, from: NSPoint, to: NSPoint, cancel: Bool = false) {
+        let start = ProcessInfo.processInfo.systemUptime
+        func send(_ type: NSEvent.EventType, _ point: NSPoint, _ step: Int) {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: start + Double(step) * 0.02, windowNumber: window.windowNumber,
+                context: nil, eventNumber: step, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+            NSApp.sendEvent(event)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        send(.leftMouseDown, from, 0)
+        for step in 1...10 {
+            let fraction = Double(step) / 10
+            send(.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * fraction,
+                                            y: from.y + (to.y - from.y) * fraction), step)
+        }
+        if cancel {
+            let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: start + 0.21, windowNumber: window.windowNumber, context: nil,
+                characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+            window.sendEvent(escape)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        send(.leftMouseUp, to, 11)
+    }
+
     @MainActor static func render<V: View>(_ root: V, size: CGSize, path: String) throws {
         let view = NSHostingView(rootView: root)
         let window = NSPanel(contentRect: NSRect(origin: .zero, size: size),
@@ -192,6 +217,35 @@ import SwiftUI
         editView.cacheDisplay(in: editView.bounds, to: editBitmap)
         try editBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/inline-editor.png"))
         let previousOpenCount = openedApps.count
+        let beforeDrag = store.settings.appExplorer!
+        // Centers of the middle-row labels in this fixed 680 x 500 editor fixture.
+        // Dispatch locally to the window; never move the user's cursor or require TCC access.
+        let labelY = editView.isFlipped ? 268.0 : editView.bounds.height - 268.0
+        let sourcePoint = editView.convert(NSPoint(x: 130, y: labelY), to: nil)
+        let targetPoint = editView.convert(NSPoint(x: 550, y: labelY), to: nil)
+        drag(in: editPanel, from: sourcePoint, to: targetPoint)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .right])?.name == "Development",
+                     "Actual mouse drag must swap group with URL")
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.name == "Docs")
+        precondition(controller.isEditing && openedApps.count == previousOpenCount, "Dragging must not launch apps or leave edit mode")
+        drag(in: editPanel, from: targetPoint, to: sourcePoint)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.children == beforeDrag.favorite(at: [.left, .left])?.children)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .right])?.url == beforeDrag.favorite(at: [.left, .right])?.url)
+        let beforeCancelledDrag = store.settings.appExplorer!
+        drag(in: editPanel, from: sourcePoint, to: NSPoint(x: -20, y: sourcePoint.y))
+        precondition(store.settings.appExplorer == beforeCancelledDrag, "Dropping outside the grid cancels")
+        drag(in: editPanel, from: sourcePoint, to: NSPoint(x: 340, y: sourcePoint.y))
+        precondition(store.settings.appExplorer == beforeCancelledDrag, "Dropping on the center cancels")
+        drag(in: editPanel, from: sourcePoint, to: targetPoint, cancel: true)
+        precondition(store.settings.appExplorer == beforeCancelledDrag, "Escape cancels without saving")
+        let emptyPoint = NSPoint(x: sourcePoint.x, y: sourcePoint.y - 94)
+        drag(in: editPanel, from: sourcePoint, to: emptyPoint)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .left]) == nil)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .bottomLeft])?.name == "Development")
+        drag(in: editPanel, from: emptyPoint, to: sourcePoint)
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.name == "Development")
+        precondition(store.settings.appExplorer!.favorite(at: [.left, .bottomLeft]) == nil)
+        print("Native mouse dragging passed: swap/reverse, empty move, outside/center/Escape cancellation, no app activation.")
         swipeLeft()
         precondition(controller.isEditing && controller.groupPath == [.left] && openedApps.count == previousOpenCount,
             "Raw edit-mode contacts cannot navigate or launch favorites")

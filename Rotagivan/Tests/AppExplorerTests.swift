@@ -1,10 +1,64 @@
 import Foundation
 
 @main struct AppExplorerTests {
+    static func testSlotSwaps() throws {
+        let app = AppExplorerFavorite(direction: .left, bundleID: "com.apple.finder", name: "Finder")
+        let web = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com")
+        let group = AppExplorerFavorite(direction: .up, name: "Work", children: [app, web])
+        let recent = AppExplorerFavorite(direction: .down, name: "Recent", children: [], groupMode: .recent)
+        let original = AppExplorerSettings(favorites: [app, web, group, recent])
+        var settings = original
+        let drag = ExplorerSlotDrag(source: .left, path: [], settings: settings)!
+        precondition(drag.apply(to: .right, in: [], settings: &settings))
+        precondition(settings.favorite(at: [.right])?.bundleID == app.bundleID)
+        precondition(settings.favorite(at: [.left])?.url == web.url)
+        precondition(settings.favorites.count == 4)
+        let swapped = settings
+        precondition(!drag.apply(to: .right, in: [], settings: &settings), "One drag cannot commit twice")
+        precondition(settings == swapped)
+        precondition(settings.swapFavorites(from: .right, to: .bottomRight))
+        precondition(settings.favorite(at: [.right]) == nil && settings.favorite(at: [.bottomRight])?.bundleID == app.bundleID)
+        precondition(settings.swapFavorites(from: .up, to: .down))
+        precondition(settings.favorite(at: [.down])?.children == group.children, "Whole group contents move together")
+        precondition(settings.favorite(at: [.up])?.isRecentGroup == true)
+        precondition(settings.swapFavorites(from: .left, to: .right, in: [.down]))
+        precondition(settings.favorite(at: [.down, .right])?.bundleID == app.bundleID)
+        precondition(settings.favorite(at: [.down, .left])?.url == web.url)
+        let stable = settings
+        for path: [SwipeDirection] in [[.up], [.topLeft], [.down, .right]] {
+            precondition(!settings.swapFavorites(from: .left, to: .right, in: path))
+            precondition(ExplorerSlotDrag(source: .left, path: path, settings: settings) == nil)
+        }
+        precondition(!settings.swapFavorites(from: .left, to: .left))
+        precondition(!settings.swapFavorites(from: .topLeft, to: .left))
+        precondition(settings == stable, "Invalid, empty, recent, and self drops do not mutate settings")
+        let nested = ExplorerSlotDrag(source: .left, path: [.down], settings: settings)!
+        precondition(!nested.apply(to: .right, in: [], settings: &settings), "Cannot drop across a changed group")
+        settings.favorites[0].name = "Changed by sync"
+        let changed = settings
+        precondition(!nested.apply(to: .right, in: [.down], settings: &settings))
+        precondition(settings == changed, "Concurrent changes are never overwritten")
+        let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
+        precondition(restored == settings)
+        for source in SwipeDirection.allCases {
+            for destination in SwipeDirection.allCases where source != destination {
+                var full = AppExplorerSettings(favorites: SwipeDirection.allCases.map {
+                    AppExplorerFavorite(direction: $0, bundleID: "test.\($0.rawValue)", name: $0.title)
+                })
+                precondition(full.swapFavorites(from: source, to: destination))
+                precondition(full.favorite(at: [destination])?.bundleID == "test.\(source.rawValue)")
+                precondition(full.favorite(at: [source])?.bundleID == "test.\(destination.rawValue)")
+                precondition(full.hasValidFavorites && full.favorites.count == 8)
+            }
+        }
+        print("Slot swaps passed: all 56 pairs, empty moves, nested groups, recents read-only, persistence, and stale-drag cancellation.")
+    }
+
     static func report(_ x: Double? = nil, _ y: Double = 500, id: UInt8 = 0, confident: Bool = true, button: Bool = false) -> TrackpadReport {
         TrackpadReport(contacts: x.map { [FingerContact(id: id, x: $0, y: y, touching: true, confident: confident)] } ?? [], buttonDown: button, scanTime: 0)
     }
     static func main() throws {
+        try testSlotSwaps()
         var settings = AppExplorerSettings()
         precondition(settings.mode(holdingShortcut: false) == .favorites)
         precondition(settings.mode(holdingShortcut: true) == .recent)

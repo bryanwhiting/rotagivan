@@ -77,6 +77,20 @@ struct AppExplorerSettings: Codable, Equatable {
         return valid(favorites, depth: 0)
     }
     @discardableResult
+    mutating func swapFavorites(from source: SwipeDirection, to destination: SwipeDirection,
+                                in path: [SwipeDirection] = []) -> Bool {
+        guard source != destination, hasValidFavorites,
+              let slots = favorites(at: path),
+              let moving = slots.first(where: { $0.direction == source }) else { return false }
+        let displaced = slots.first { $0.direction == destination }
+        var next = self
+        guard next.setFavorite(moving, at: destination, in: path),
+              next.setFavorite(displaced, at: source, in: path), next.hasValidFavorites else { return false }
+        self = next
+        return true
+    }
+
+    @discardableResult
     mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: SwipeDirection, in path: [SwipeDirection] = []) -> Bool {
         func replace(_ entries: inout [AppExplorerFavorite], path: ArraySlice<SwipeDirection>) -> Bool {
             if let head = path.first {
@@ -92,6 +106,25 @@ struct AppExplorerSettings: Codable, Equatable {
             return true
         }
         return replace(&favorites, path: path[...])
+    }
+}
+
+// A drag is local to one grid and one settings snapshot. A sync or edit during
+// the gesture must not move a different app that happens to occupy that slot.
+struct ExplorerSlotDrag {
+    let source: SwipeDirection
+    let path: [SwipeDirection]
+    let snapshot: AppExplorerSettings
+
+    init?(source: SwipeDirection, path: [SwipeDirection], settings: AppExplorerSettings) {
+        guard settings.hasValidFavorites,
+              settings.favorites(at: path)?.contains(where: { $0.direction == source }) == true else { return nil }
+        self.source = source; self.path = path; self.snapshot = settings
+    }
+
+    func apply(to destination: SwipeDirection, in currentPath: [SwipeDirection], settings: inout AppExplorerSettings) -> Bool {
+        guard currentPath == path, settings == snapshot else { return false }
+        return settings.swapFavorites(from: source, to: destination, in: path)
     }
 }
 

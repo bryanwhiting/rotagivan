@@ -237,6 +237,14 @@ the same app picker, URL editor, named groups, rename, and removal controls.
 Changes save immediately. **Done** returns to the explorer; you do not need to
 open General settings. In Recent mode, Edit customizes your fixed Favorites.
 
+In **Edit**, drag an app's icon or name onto another direction to swap their
+positions. Drop onto an empty slot to move it. URLs and whole groups move the
+same way, including inside nested groups; dropping onto a group swaps its slot,
+not its contents. Targets highlight while dragging, and dropping outside a slot
+or onto the center cancels. The **••• → Move or swap with** menu offers the same
+operation without dragging. Changes save and sync automatically. Recent-app
+contents remain automatically ordered, but their group tile can be moved.
+
 While editing, the HUD stays open without its navigation timeout. Trackpad taps
 temporarily become normal clicks and gesture shortcuts pause, without changing
 your saved layers. Native file pickers and naming sheets keep the editor open.

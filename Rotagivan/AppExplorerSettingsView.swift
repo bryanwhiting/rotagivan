@@ -60,14 +60,24 @@ struct AppExplorerSettingsView: View {
 
     private func slot(_ direction: SwipeDirection) -> some View {
         let favorite = settings.favorites.first { $0.direction == direction }
+        let icon = Self.applicationIcon(for: favorite)
         return VStack(spacing: 5) {
             Text(direction.title).font(.caption).foregroundStyle(.secondary)
             Menu {
                 Button("Choose app…") { choose(direction) }
                 Button(favorite?.url != nil ? "Edit URL…" : "Set URL…") { editingURLDirection = direction }
             } label: {
-                Label(favorite?.name ?? "Choose…", systemImage: favorite?.url != nil ? "globe" : "app")
-                    .lineLimit(1)
+                Label {
+                    Text(favorite?.name ?? "Choose…").lineLimit(1)
+                } icon: {
+                    if let icon {
+                        Image(nsImage: icon).resizable().renderingMode(.original)
+                            .scaledToFit().frame(width: 16, height: 16)
+                    } else {
+                        Image(systemName: favorite?.url != nil ? "globe" : "app")
+                            .frame(width: 16, height: 16)
+                    }
+                }
             }.padding(.horizontal, 6)
                 .help(favorite?.url ?? "Choose an app or URL for \(direction.title)")
             if favorite != nil {
@@ -80,6 +90,16 @@ struct AppExplorerSettingsView: View {
 
     private func edit(_ update: (inout AppExplorerSettings) -> Void) {
         var next = settings; update(&next); store.settings.appExplorer = next
+    }
+
+    static func applicationIcon(for favorite: AppExplorerFavorite?) -> NSImage? {
+        guard let favorite, favorite.url == nil, let bundleID = favorite.bundleID,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        // Native menu labels use NSImage's intrinsic size, not just the SwiftUI
+        // frame. Copy before sizing so the workspace's cached icon is untouched.
+        let icon = NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage
+        icon?.size = NSSize(width: 16, height: 16)
+        return icon
     }
     private func choose(_ direction: SwipeDirection) {
         let picker = NSOpenPanel()

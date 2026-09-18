@@ -26,6 +26,27 @@ installed copy. It works from any directory, preserves your settings, and does
 not rebuild or re-sign the app. Use `./launch.sh --check` for a read-only check.
 If a copy will not quit, it stops instead of overwriting a running app.
 
+For a stale Accessibility permission on the Mac where you are installing:
+
+```sh
+./launch.sh --reset-accessibility
+```
+
+This installs and verifies the build, runs `tccutil reset Accessibility
+local.rotagivan` while Rotagivan is closed, then opens the app and Accessibility
+settings. Manually enable `/Applications/Rotagivan.app` (add it with **+** if
+needed), then reconnect or relaunch Rotagivan. Close and reopen System Settings
+if its list appears stale. This resets the permission decision; it does not
+guarantee every old app entry disappears from the list.
+
+The reset is **opt-in**, affects only this user's Rotagivan Accessibility
+permission, and leaves Input Monitoring, other apps, profiles, YAML, and login
+credentials untouched. Run it as your normal logged-in user, not with `sudo`.
+It cannot grant access automatically or override a managed Mac's policy. A
+reset also cannot fix an unstable signing identity: keep using the same local
+signing certificate for future builds on that Mac. To validate without making
+changes, use `./launch.sh --check --reset-accessibility`.
+
 Built app path:
 
 ```sh

@@ -13,12 +13,16 @@ struct AppExplorerFavorite: Codable, Equatable {
     var url: String? = nil
     // A non-nil array is a named group, including an empty group.
     var children: [AppExplorerFavorite]? = nil
+    // Optional so existing groups retain their manually assigned slots.
+    var groupMode: AppExplorerMode? = nil
     var isGroup: Bool { children != nil }
+    var isRecentGroup: Bool { isGroup && groupMode == .recent }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
         if isGroup { return bundleID == nil && url == nil }
+        guard groupMode == nil else { return false }
         if url != nil { return bundleID == nil && resolvedWebURL != nil }
         guard let bundleID else { return false }
         return !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bundleID != "local.rotagivan"
@@ -37,6 +41,7 @@ struct AppExplorerFavorite: Codable, Equatable {
 }
 
 struct AppExplorerSettings: Codable, Equatable {
+    static let recentDirections: [SwipeDirection] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
     static let maximumGroupDepth = 4
     static let maximumFavorites = 256
     var defaultMode: AppExplorerMode = .favorites
@@ -45,8 +50,10 @@ struct AppExplorerSettings: Codable, Equatable {
     func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
     func favorites(at path: [SwipeDirection]) -> [AppExplorerFavorite]? {
         var current = favorites
-        for direction in path {
-            guard let children = current.first(where: { $0.direction == direction })?.children else { return nil }
+        for (index, direction) in path.enumerated() {
+            guard let group = current.first(where: { $0.direction == direction }),
+                  let children = group.children else { return nil }
+            if group.isRecentGroup { return index == path.count - 1 ? [] : nil }
             current = children
         }
         return current
@@ -74,6 +81,7 @@ struct AppExplorerSettings: Codable, Equatable {
         func replace(_ entries: inout [AppExplorerFavorite], path: ArraySlice<SwipeDirection>) -> Bool {
             if let head = path.first {
                 guard let index = entries.firstIndex(where: { $0.direction == head }),
+                      !entries[index].isRecentGroup,
                       var children = entries[index].children else { return false }
                 guard replace(&children, path: path.dropFirst()) else { return false }
                 entries[index].children = children

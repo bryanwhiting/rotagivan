@@ -98,6 +98,17 @@ struct ConfigurationTests {
         precondition(singleSwipeRoundtrip.settings.gestures(for: 1).gestures.tripleTapSecondInterval == 0.24)
         precondition(singleSwipeRoundtrip.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval == withSingleSwipe.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval)
         var invalidExplorer = withSingleSwipe
+        var recentExplorer = withSingleSwipe
+        recentExplorer.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .left, name: "Recent apps", children: [], groupMode: .recent), at: .left)
+        let recentExport = try recentExplorer.yaml()
+        let recentImport = try AppConfiguration.parse(recentExport)
+        precondition(tryEqual(recentExplorer, recentImport))
+        precondition(recentImport.settings.appExplorer!.favorite(at: [.left])!.isRecentGroup)
+        rejected(recentExport.replacingOccurrences(of: "groupMode: recent", with: "groupMode: unknown"), "unknown recent group mode")
+        var invalidRecent = recentExplorer
+        invalidRecent.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .left, bundleID: "com.apple.Safari", name: "Invalid", groupMode: .recent), at: .left)
+        rejected(try ConfigurationYAML.encode(invalidRecent), "recent mode on an app instead of a group")
+        print("Recent-group YAML roundtrip and destination validation passed.")
         invalidExplorer.settings.appExplorer!.favorites.append(invalidExplorer.settings.appExplorer!.favorites[0])
         rejected(try ConfigurationYAML.encode(invalidExplorer), "duplicate explorer slot")
         for destination in ["file:///tmp/unsafe", "javascript:alert(1)", "https://user:password@example.com", "https://"] {

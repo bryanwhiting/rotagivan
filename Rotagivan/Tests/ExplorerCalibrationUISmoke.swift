@@ -216,6 +216,40 @@ import SwiftUI
         precondition(!controller.isVisible && openedURLs.last?.absoluteString == "https://example.com/new", "Edited slot works immediately")
         controller.show(waitingForLift: false); controller.beginEditing(); controller.dismiss()
         precondition(!controller.isEditing && editingChanges.suffix(2) == [true, false], "Closing editor always restores input mode")
-        print("Native UI passed: inline editing, E shortcut, group preservation, native sheet/text focus, save and resume, nested HUD and app/URL dispatch.")
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .left, name: "Recent apps", children: [], groupMode: .recent)
+        ])
+        try render(AppExplorerSettingsView(store: store, groupPath: [.left]).padding(24).frame(width: 680, height: 600)
+            .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 600),
+            path: CommandLine.arguments[1] + "/recent-group-settings.png")
+        controller.show(waitingForLift: false)
+        precondition(controller.displayedEntries.first?.isRecentGroup == true)
+        swipeLeft()
+        precondition(controller.isVisible && controller.groupPath == [.left], "Recent groups must remain nested, not switch root modes")
+        let recentEntries = controller.displayedEntries
+        precondition(recentEntries.count <= 8 && recentEntries.allSatisfy { !$0.isGroup && !$0.isWebURL })
+        for (index, entry) in recentEntries.enumerated() {
+            precondition(entry.direction == AppExplorerSettings.recentDirections[index])
+            precondition(entry.bundleID != "local.rotagivan")
+        }
+        controller.beginEditing()
+        precondition(controller.isEditing && controller.groupPath == [.left])
+        controller.finishEditing()
+        precondition(!controller.isEditing && controller.groupPath == [.left], "Done returns to the recent group")
+        centerTap()
+        precondition(controller.isVisible && controller.groupPath.isEmpty, "Center tap goes back, not close")
+        swipeLeft()
+        if let first = controller.displayedEntries.first {
+            let count = openedApps.count
+            swipeLeft()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            precondition(!controller.isVisible && openedApps.count == count + 1)
+            precondition(openedApps.last == first.url, "Left selects the most recently used eligible app")
+        } else {
+            centerTap()
+            precondition(controller.groupPath.isEmpty, "Empty recent groups still allow back navigation")
+        }
+        controller.dismiss()
+        print("Native UI passed: inline editing, E shortcut, group preservation, native sheet/text focus, save and resume, nested HUD and app/URL dispatch, recent-group ordering/back/edit/activation.")
     }
 }

@@ -257,6 +257,15 @@ button return to its parent. **Rename…** preserves all contents. Removing a
 group asks for confirmation and removes its descendants too. Groups may contain
 more groups (up to four levels and 256 total entries); names, contents, and
 positions export and sync along with the rest of the configuration.
+Choose **New Recent apps group** in a slot menu to add an automatically filled
+group, or open an existing group's editor and set **Group contents → Recent apps**.
+You can rename it, nest it inside other groups, and tap the HUD center to go back.
+Its slots are ranked **left, top-left, top, top-right, right, bottom-right, bottom,
+bottom-left**, from most to least recently used. It shows up to eight other running
+apps, excluding the current app and Rotagivan. The editor previews the rank in
+each direction. Switching an existing group to Recent apps preserves its assigned
+favorites; switch back to **Assigned favorites** to restore them. The group type
+syncs, but recent-app history stays local to each Mac.
 Web favorites have a globe icon and an optional custom name; swipe and lift to
 open the URL in your default browser. Only full `http://` and `https://` links
 without embedded usernames/passwords are accepted. URLs export and sync with
@@ -272,7 +281,7 @@ The hotkey also opens the HUD directly, without requiring the opening gesture.
 Shortcut conflicts are reported; recording temporarily suspends registrations.
 
 Finish the opening gesture and lift. A frosted HUD shows your favorites, or up
-to eight other running apps in Recent mode. Recents start at the top and continue
+to eight other running apps in Recent mode. Recents start at the left and continue
 clockwise. Make a **fresh swipe** toward an app, then **lift to
 switch**. The cursor stays still; highlighted app positions do not reorder while
 the HUD is open. You can also click a tile. Selecting a group keeps the HUD open

@@ -1,5 +1,12 @@
 # Version reporting
 
+## Delivery
+
+- After each completed, verified change, commit the task's changes and push to `origin/main` without waiting for a separate push request. Do not create a PR unless requested.
+- Preserve unrelated user changes, never force-push, and report any verification or push blocker instead of claiming delivery. Report the pushed version/build and commit when applicable.
+
+## Builds
+
 - For each user-requested app change, increment CFBundleShortVersionString (normally the patch component) and CFBundleVersion in Rotagivan/Info.plist before building. Multiple implementation edits for the same update share one version.
 - Keep version labels sourced from bundle metadata, not hardcoded UI strings.
 - Report the version and build in the final response, and explicitly distinguish built from installed. Never imply the user is testing a fix that has not been installed.

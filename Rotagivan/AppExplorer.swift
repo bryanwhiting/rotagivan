@@ -52,6 +52,7 @@ extension AppExplorerPresenting {
     var onEditingChanged: ((Bool) -> Void)?
     var isVisible: Bool { panel != nil }
     var isEditing: Bool { model.isEditing }
+    var displayedEntries: [ExplorerEntry] { model.entries }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -147,11 +148,14 @@ extension AppExplorerPresenting {
         model.mode = settings.mode(holdingShortcut: alternateHeld)
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
-        if model.mode == .favorites {
+        let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
+        model.showingRecents = model.mode == .recent || recentGroup
+        if model.mode == .favorites && !recentGroup {
             model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
                 if favorite.isGroup {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                        icon: nil, url: nil, isGroup: favorite.isValidDestination && groupPath.count < AppExplorerSettings.maximumGroupDepth)
+                        icon: nil, url: nil, isGroup: favorite.isValidDestination && groupPath.count < AppExplorerSettings.maximumGroupDepth,
+                        isRecentGroup: favorite.isRecentGroup)
                 }
                 if favorite.url != nil {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
@@ -332,10 +336,12 @@ struct ExplorerEntry {
     var url: URL?
     var isWebURL: Bool
     var isGroup: Bool
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false) {
+    var isRecentGroup: Bool
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
+        self.isRecentGroup = isRecentGroup
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -343,14 +349,15 @@ struct ExplorerEntry {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
-    // MRU starts at the top and proceeds clockwise. Positions freeze on open.
-    static let directions: [SwipeDirection] = [.up, .topRight, .right, .bottomRight, .down, .bottomLeft, .left, .topLeft]
+    // MRU starts at the left and proceeds clockwise. Positions freeze on open.
+    static let directions = AppExplorerSettings.recentDirections
     @Published var entries: [ExplorerEntry] = []
     @Published var selected: SwipeDirection?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
     @Published var canEdit = false
     @Published var isEditing = false
+    @Published var showingRecents = false
 }
 
 struct AppExplorerView: View {
@@ -397,7 +404,7 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Click Edit or press E to add favorites." : "Open another app · E to edit favorites") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))
+            Text(model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(26)
@@ -413,14 +420,14 @@ struct AppExplorerView: View {
             VStack(spacing: 5) {
                 if let entry {
                     if entry.isGroup {
-                        Image(systemName: "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else if entry.isWebURL {
                         Image(systemName: "globe").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else {
                         Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
                     }
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    if entry.isGroup { Text("Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.url == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)

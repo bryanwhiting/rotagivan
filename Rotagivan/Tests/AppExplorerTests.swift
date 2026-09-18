@@ -49,6 +49,30 @@ import Foundation
         precondition(groups.favorite(at: [.left, .down, .right]) == web, "Renaming preserves descendants")
         let groupRoundtrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(groups))
         precondition(groupRoundtrip == groups)
+        let originalGroup = groups.favorite(at: [.left])!
+        var recentGroup = originalGroup
+        recentGroup.groupMode = .recent
+        groups.setFavorite(recentGroup, at: .left)
+        precondition(groups.hasValidFavorites && groups.favorite(at: [.left])!.isRecentGroup)
+        precondition(groups.favorites(at: [.left]) == [])
+        precondition(groups.favorites(at: [.left, .down]) == nil, "Do not navigate into hidden favorites")
+        precondition(!groups.setFavorite(web, at: .up, in: [.left]), "Recent slots are automatic, not editable favorites")
+        let recentRoundtrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(groups))
+        precondition(recentRoundtrip == groups)
+        precondition(groups.favorite(at: [.left])?.children == originalGroup.children)
+        recentGroup.name = "Last used"
+        recentGroup.groupMode = .favorites
+        groups.setFavorite(recentGroup, at: .left)
+        precondition(groups.favorite(at: [.left, .down, .right]) == web, "Switching back restores all assigned favorites")
+        precondition(legacy.groupMode == nil && !legacy.isRecentGroup)
+        var invalidMode = legacy; invalidMode.groupMode = .recent
+        precondition(!invalidMode.isValidDestination, "Only groups have a contents mode")
+        precondition(AppExplorerSettings.recentDirections == [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft])
+        let ranked = AppExplorerRecents(["one", "two", "three", "four", "five", "six", "seven", "eight"])
+        let slots = Dictionary(uniqueKeysWithValues: zip(AppExplorerSettings.recentDirections,
+            ranked.ordered(available: ranked.identifiers, excluding: [])))
+        precondition(slots[.left] == "one" && slots[.topLeft] == "two" && slots[.up] == "three" && slots[.bottomLeft] == "eight")
+        print("Recent groups passed: clockwise ranking, legacy decoding, persistence, read-only slots, and reversible contents switching.")
         let unchanged = groups
         precondition(!groups.setFavorite(legacy, at: .right, in: [.right, .up]))
         precondition(groups == unchanged, "A stale group path cannot overwrite root favorites")

@@ -171,7 +171,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts"
             case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut"
-            case "favorites", "children": allowed = "direction bundleID name url children"
+            case "favorites", "children": allowed = "direction bundleID name url children groupMode"
             case "holdShortcut": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"

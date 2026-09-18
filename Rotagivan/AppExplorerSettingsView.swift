@@ -12,6 +12,7 @@ struct AppExplorerSettingsView: View {
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var settings: AppExplorerSettings { store.settings.appExplorer ?? AppExplorerSettings() }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
+    private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
     var compact = false
     var onGroupPathChange: (([SwipeDirection]) -> Void)? = nil
 
@@ -58,12 +59,27 @@ struct AppExplorerSettingsView: View {
                     Button("Rename…") { editingGroupPath = groupPath }
                 }
             }.font(.subheadline.weight(.medium))
+            if !groupPath.isEmpty {
+                Picker("Group contents", selection: Binding(get: {
+                    settings.favorite(at: groupPath)?.groupMode ?? .favorites
+                }, set: { mode in
+                    guard let direction = groupPath.last, var group = settings.favorite(at: groupPath) else { return }
+                    group.groupMode = mode
+                    edit { $0.setFavorite(group, at: direction, in: Array(groupPath.dropLast())) }
+                })) {
+                    Text("Assigned favorites").tag(AppExplorerMode.favorites)
+                    Text("Recent apps").tag(AppExplorerMode.recent)
+                }.pickerStyle(.segmented)
+            }
             if let groupError { Text(groupError).font(.caption).foregroundStyle(.red) }
             VStack(spacing: 6) {
                 ForEach(0..<3) { row in
                     HStack(spacing: 6) {
                         ForEach(0..<3) { column in
-                            if let direction = grid[row][column] { slot(direction) }
+                            if let direction = grid[row][column] {
+                                if isRecentGroup { recentSlot(direction) }
+                                else { slot(direction) }
+                            }
                             else {
                                 Button {
                                     if !groupPath.isEmpty { groupPath.removeLast() }
@@ -79,7 +95,9 @@ struct AppExplorerSettingsView: View {
                     }
                 }
             }
-            Text("Choose an app, web URL, or named Explorer group for each direction. Groups open another eight slots. In the HUD, tap without swiping—or click the center—to go back. Empty slots stay empty when syncing.")
+            Text(isRecentGroup
+                ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
+                : "Choose an app, web URL, or named Explorer group for each direction. Groups can contain assigned favorites or recent apps. In the HUD, tap without swiping—or click the center—to go back. Empty slots stay empty when syncing.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .sheet(isPresented: Binding(get: { editingURLPath != nil }, set: { if !$0 { editingURLPath = nil } })) {
@@ -101,7 +119,8 @@ struct AppExplorerSettingsView: View {
                         guard let direction = path.last else { return }
                         var next = settings
                         let group = AppExplorerFavorite(direction: direction, name: name,
-                            children: next.favorite(at: path)?.children ?? [])
+                            children: next.favorite(at: path)?.children ?? [],
+                            groupMode: next.favorite(at: path)?.groupMode)
                         guard next.setFavorite(group, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
                             groupError = "Groups support four levels and 256 total favorites. The parent group must still exist."
                             editingGroupPath = nil
@@ -142,6 +161,17 @@ struct AppExplorerSettingsView: View {
                     Divider()
                     Button("New Explorer group…") { editingGroupPath = groupPath + [direction] }
                         .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+                    Button("New Recent apps group") {
+                        var next = settings
+                        let group = AppExplorerFavorite(direction: direction, name: "Recent apps", children: [], groupMode: .recent)
+                        guard next.setFavorite(group, at: direction, in: groupPath), next.hasValidFavorites else {
+                            groupError = "The parent group must still exist and stay within the group limits."
+                            return
+                        }
+                        store.settings.appExplorer = next
+                        groupError = nil
+                        groupPath.append(direction)
+                    }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
                 }
             } label: {
                 Label {
@@ -151,7 +181,7 @@ struct AppExplorerSettingsView: View {
                         Image(nsImage: icon).resizable().renderingMode(.original)
                             .scaledToFit().frame(width: 16, height: 16)
                     } else {
-                        Image(systemName: favorite?.isGroup == true ? "folder.fill" : (favorite?.url != nil ? "globe" : "app"))
+                        Image(systemName: favorite?.isRecentGroup == true ? "clock.arrow.circlepath" : (favorite?.isGroup == true ? "folder.fill" : (favorite?.url != nil ? "globe" : "app")))
                             .frame(width: 16, height: 16)
                     }
                 }
@@ -168,6 +198,16 @@ struct AppExplorerSettingsView: View {
                     }
                 }.font(.caption2).buttonStyle(.link)
             }
+        }.frame(maxWidth: .infinity).frame(height: 88)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func recentSlot(_ direction: SwipeDirection) -> some View {
+        let rank = (AppExplorerSettings.recentDirections.firstIndex(of: direction) ?? 0) + 1
+        return VStack(spacing: 5) {
+            Text(direction.title).font(.caption).foregroundStyle(.secondary)
+            Text("\(rank)").font(.title2.weight(.semibold)).foregroundStyle(.teal)
+            Text(rank == 1 ? "Most recent" : "Recent app \(rank)").font(.caption)
         }.frame(maxWidth: .infinity).frame(height: 88)
             .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
     }
@@ -232,7 +272,7 @@ struct ExplorerGroupNameEditor: View {
         VStack(alignment: .leading, spacing: 14) {
             Label(isNew ? "New Explorer group" : "Rename Explorer group", systemImage: "folder.fill").font(.headline)
             TextField("Group name", text: $name).textFieldStyle(.roundedBorder)
-            Text("Give this group a name, then fill its eight directions with apps, URLs, or more groups.")
+            Text("Name this group. Its contents can be assigned favorites or automatically filled recent apps.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)

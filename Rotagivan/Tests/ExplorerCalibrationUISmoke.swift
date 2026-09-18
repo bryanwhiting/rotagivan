@@ -104,6 +104,73 @@ import SwiftUI
         controller.show(waitingForLift: false)
         precondition(controller.isVisible)
         controller.dismiss()
-        print("Favorites settings, triple-tap result, and both HUD modes passed native UI smoke checks.")
+        controller.setAlternateHeld(false)
+        settings.setFavorite(AppExplorerFavorite(direction: .left, name: "Work", children: [
+            AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/work"),
+            AppExplorerFavorite(direction: .left, name: "Development", children: [
+                AppExplorerFavorite(direction: .left, bundleID: "com.apple.finder", name: "Finder")
+            ]),
+            AppExplorerFavorite(direction: .up, name: "Empty group", children: [])
+        ]), at: .left)
+        store.settings.appExplorer = settings
+        try render(AppExplorerSettingsView(store: store).padding(24).frame(width: 680, height: 600)
+            .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 600), path: CommandLine.arguments[1] + "/group-settings.png")
+        try render(AppExplorerSettingsView(store: store, groupPath: [.left]).padding(24).frame(width: 680, height: 600)
+            .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 600), path: CommandLine.arguments[1] + "/inside-group-settings.png")
+        try render(ExplorerGroupNameEditor(name: "Work", isNew: false, onSave: { _ in }, onCancel: {}),
+            size: CGSize(width: 448, height: 220), path: CommandLine.arguments[1] + "/group-name.png")
+        var dismissals = 0
+        controller.onDismiss = { dismissals += 1 }
+        func swipeLeft() {
+            controller.process(report(500)); controller.process(report(400)); controller.process(report(nil))
+        }
+        func centerTap() { controller.process(report(500)); controller.process(report(nil)) }
+        controller.show(waitingForLift: true)
+        controller.process(report(500)); controller.process(report(400)); controller.process(report(nil))
+        precondition(controller.groupPath.isEmpty, "Drain trigger before entering a group")
+        swipeLeft()
+        precondition(controller.isVisible && controller.groupPath == [.left] && dismissals == 0)
+        controller.process(report(nil))
+        precondition(controller.groupPath == [.left], "Trailing lift cannot go back")
+        controller.process(report(500))
+        controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 500, y: 400, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+        controller.process(report(nil))
+        precondition(controller.groupPath == [.left, .up] && controller.isVisible, "Empty groups remain navigable")
+        centerTap()
+        precondition(controller.groupPath == [.left])
+        let groupHUD = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!.contentView!
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        groupHUD.layoutSubtreeIfNeeded()
+        let groupBitmap = groupHUD.bitmapImageRepForCachingDisplay(in: groupHUD.bounds)!
+        groupHUD.cacheDisplay(in: groupHUD.bounds, to: groupBitmap)
+        try groupBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/group-hud.png"))
+        swipeLeft()
+        precondition(controller.groupPath == [.left, .left] && controller.isVisible)
+        centerTap()
+        precondition(controller.groupPath == [.left] && dismissals == 0)
+        controller.process(report(500))
+        controller.goBack() // Clicking center while a contact remains down drains it.
+        controller.process(report(400)); controller.process(report(nil))
+        precondition(controller.groupPath.isEmpty && controller.isVisible)
+        centerTap()
+        precondition(!controller.isVisible && dismissals == 1)
+        controller.show(waitingForLift: false)
+        swipeLeft()
+        controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
+        precondition(!controller.isVisible && openedURLs.last?.absoluteString == "https://example.com/work")
+        controller.show(waitingForLift: false)
+        swipeLeft(); swipeLeft(); swipeLeft()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(!controller.isVisible && openedApps.count == 2, "Nested app dispatch still uses deferred activation")
+        controller.show(waitingForLift: false)
+        swipeLeft()
+        controller.contextIsValid = { false }
+        centerTap()
+        precondition(!controller.isVisible, "Changing profile or settings invalidates nested navigation")
+        controller.contextIsValid = { true }
+        controller.show(waitingForLift: false)
+        precondition(controller.groupPath.isEmpty, "Reopening always starts at the root")
+        controller.dismiss()
+        print("Native UI passed: settings, named groups, nested HUD, center-back, root cancellation, trigger drain, app/URL dispatch, and invalidation.")
     }
 }

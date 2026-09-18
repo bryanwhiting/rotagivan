@@ -237,8 +237,14 @@ For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.
 No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
 In **General → App Explorer**, choose the default mode (initially **Favorites**)
-and assign an application or web URL to each of the eight positions in the matching grid.
-Each slot menu offers **Choose app…** and **Set URL…** (or **Edit URL…**).
+and assign an application, web URL, or named group to each of the eight positions.
+Each empty/app/URL slot menu offers **Choose app…**, **Set URL…** (or **Edit URL…**),
+and **New Explorer group…**. Create a group, give it a name, and fill its own
+eight slots. **Edit group** opens its grid; breadcrumbs and the center **Back**
+button return to its parent. **Rename…** preserves all contents. Removing a
+group asks for confirmation and removes its descendants too. Groups may contain
+more groups (up to four levels and 256 total entries); names, contents, and
+positions export and sync along with the rest of the configuration.
 Web favorites have a globe icon and an optional custom name; swipe and lift to
 open the URL in your default browser. Only full `http://` and `https://` links
 without embedded usernames/passwords are accepted. URLs export and sync with
@@ -257,8 +263,12 @@ Finish the opening gesture and lift. A frosted HUD shows your favorites, or up
 to eight other running apps in Recent mode. Recents start at the top and continue
 clockwise. Make a **fresh swipe** toward an app, then **lift to
 switch**. The cursor stays still; highlighted app positions do not reorder while
-the HUD is open. You can also click a tile. Swipe back to the center and lift,
-press Escape, or click close to cancel. It also closes after 15 seconds, on app
+the HUD is open. You can also click a tile. Selecting a group keeps the HUD open
+and shows its eight slots. A fresh short tap without swiping, or a click on the
+center, goes back one level; at the root it closes the HUD. Group navigation
+never launches an app or clicks into the app behind it. Each new opening starts
+at the root. Swipe out and back to the center and lift, press Escape, or click
+close to cancel completely. It also closes after 15 seconds of navigation inactivity, on app
 switch/Space change, profile or tap-setting changes, sleep, or device disconnect.
 
 Recency is learned from [macOS application activation notifications](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification)

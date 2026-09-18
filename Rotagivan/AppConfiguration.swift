@@ -67,10 +67,8 @@ struct AppConfiguration: Codable {
 
     func validate() throws {
         if let explorer = settings.appExplorer {
-            guard explorer.favorites.count <= 8,
-                  Set(explorer.favorites.map(\.direction)).count == explorer.favorites.count,
-                  explorer.favorites.allSatisfy(\.isValidDestination) else {
-                throw ConfigurationError("App Explorer favorites need unique directions, a name, and either an app identifier or a valid HTTP(S) URL without embedded credentials.")
+            guard explorer.hasValidFavorites else {
+                throw ConfigurationError("App Explorer needs named apps, web URLs, or groups with unique directions: at most eight slots per group, four group levels, and 256 entries total. URLs must be HTTP(S) without embedded credentials.")
             }
         }
         let apps = settings.appOverrides ?? []
@@ -173,7 +171,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts"
             case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut"
-            case "favorites": allowed = "direction bundleID name url"
+            case "favorites", "children": allowed = "direction bundleID name url children"
             case "holdShortcut": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"

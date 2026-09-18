@@ -19,7 +19,7 @@ import Foundation
         let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
         precondition(restored == settings)
         let legacy = try JSONDecoder().decode(AppExplorerFavorite.self, from: Data(#"{"direction":"up","bundleID":"com.apple.Safari","name":"Safari"}"#.utf8))
-        precondition(legacy.url == nil && legacy.bundleID == "com.apple.Safari" && legacy.isValidDestination)
+        precondition(legacy.url == nil && legacy.children == nil && legacy.bundleID == "com.apple.Safari" && legacy.isValidDestination)
         let web = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/docs?q=one%20two#section")
         precondition(web.isValidDestination && web.bundleID == nil)
         settings.setFavorite(web, at: .up)
@@ -37,6 +37,48 @@ import Foundation
         precondition(!AppExplorerFavorite(direction: .up, name: "Missing destination").isValidDestination)
         settings.setFavorite(legacy, at: .up)
         precondition(settings.favorites[0].url == nil && settings.favorites[0].bundleID == "com.apple.Safari")
+        var groups = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Work", children: [])])
+        precondition(groups.hasValidFavorites)
+        precondition(groups.setFavorite(legacy, at: .up, in: [.left]))
+        precondition(groups.setFavorite(AppExplorerFavorite(direction: .down, name: "Research", children: [web]), at: .down, in: [.left]))
+        precondition(groups.favorites(at: [.left])?.count == 2)
+        precondition(groups.favorite(at: [.left, .down, .right]) == web)
+        var renamed = groups.favorite(at: [.left])!
+        renamed.name = "Projects"
+        groups.setFavorite(renamed, at: .left)
+        precondition(groups.favorite(at: [.left, .down, .right]) == web, "Renaming preserves descendants")
+        let groupRoundtrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(groups))
+        precondition(groupRoundtrip == groups)
+        let unchanged = groups
+        precondition(!groups.setFavorite(legacy, at: .right, in: [.right, .up]))
+        precondition(groups == unchanged, "A stale group path cannot overwrite root favorites")
+        groups.setFavorite(nil, at: .down, in: [.left])
+        precondition(groups.favorite(at: [.left, .up])?.bundleID == legacy.bundleID)
+        precondition(groups.favorite(at: [.left, .down]) == nil)
+        var invalidGroup = AppExplorerFavorite(direction: .left, name: "Mixed", children: [])
+        invalidGroup.url = "https://example.com"
+        precondition(!AppExplorerSettings(favorites: [invalidGroup]).hasValidFavorites)
+        precondition(!AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Duplicate", children: [web, web])]).hasValidFavorites)
+        var chain = legacy
+        for i in 0..<AppExplorerSettings.maximumGroupDepth {
+            chain = AppExplorerFavorite(direction: .left, name: "Level \(i)", children: [chain])
+        }
+        precondition(AppExplorerSettings(favorites: [chain]).hasValidFavorites)
+        chain = AppExplorerFavorite(direction: .left, name: "Too deep", children: [chain])
+        precondition(!AppExplorerSettings(favorites: [chain]).hasValidFavorites)
+        let eight = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, bundleID: "com.apple.Safari", name: "Safari") }
+        let sixtyFour = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: eight) }
+        let excessive = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: sixtyFour) }
+        precondition(!AppExplorerSettings(favorites: excessive).hasValidFavorites)
+        let time = Date(timeIntervalSince1970: 1_000)
+        var centerTap = AppExplorerSelection(waitingForLift: false)
+        _ = centerTap.process(report(500), at: time)
+        _ = centerTap.process(report(510), at: time.addingTimeInterval(0.02))
+        precondition(centerTap.process(report(), at: time.addingTimeInterval(0.05)) == .back)
+        precondition(centerTap.process(report(), at: time.addingTimeInterval(0.06)) == .waiting)
+        var hold = AppExplorerSelection(waitingForLift: false)
+        _ = hold.process(report(500), at: time)
+        precondition(hold.process(report(), at: time.addingTimeInterval(0.6)) == .cancel, "A hold is not a back tap")
         let directions: [(SwipeDirection, Double, Double)] = [(.up,500,400),(.topRight,600,400),(.right,600,500),(.bottomRight,600,600),(.down,500,600),(.bottomLeft,400,600),(.left,400,500),(.topLeft,400,400)]
         for (direction, x, y) in directions {
             var input = AppExplorerSelection(waitingForLift: true)
@@ -85,6 +127,6 @@ import Foundation
         precondition(swipe.action(for:.down) == .shortcut && swipe.down != nil)
         swipe.setAction(.none, for:.down)
         precondition(!swipe.isConfigured && swipe.down == nil)
-        print("App Explorer passed: eight directions, trigger drain, one selection on lift, center cancellation, invalid input, bounded MRU, and binding persistence.")
+        print("App Explorer passed: eight directions, center back tap, cancellation, group edits/rename, nested persistence, invalid/stale paths, depth/size limits, trigger drain and bounded MRU.")
     }
 }

@@ -17,7 +17,7 @@ import CoreGraphics
         if contextIsValid?() == false { dismiss(); return }
         switch input.process(report) {
         case .select(let direction): selections.append(direction); dismiss()
-        case .cancel: dismiss()
+        case .back, .cancel: dismiss()
         default: break
         }
     }

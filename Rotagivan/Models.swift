@@ -11,10 +11,14 @@ struct AppExplorerFavorite: Codable, Equatable {
     var bundleID: String? = nil
     var name: String
     var url: String? = nil
+    // A non-nil array is a named group, including an empty group.
+    var children: [AppExplorerFavorite]? = nil
+    var isGroup: Bool { children != nil }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        if isGroup { return bundleID == nil && url == nil }
         if url != nil { return bundleID == nil && resolvedWebURL != nil }
         guard let bundleID else { return false }
         return !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bundleID != "local.rotagivan"
@@ -33,13 +37,53 @@ struct AppExplorerFavorite: Codable, Equatable {
 }
 
 struct AppExplorerSettings: Codable, Equatable {
+    static let maximumGroupDepth = 4
+    static let maximumFavorites = 256
     var defaultMode: AppExplorerMode = .favorites
     var favorites: [AppExplorerFavorite] = []
     var holdShortcut: RecordedShortcut?
     func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
-    mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: SwipeDirection) {
-        favorites.removeAll { $0.direction == direction }
-        if var favorite { favorite.direction = direction; favorites.append(favorite) }
+    func favorites(at path: [SwipeDirection]) -> [AppExplorerFavorite]? {
+        var current = favorites
+        for direction in path {
+            guard let children = current.first(where: { $0.direction == direction })?.children else { return nil }
+            current = children
+        }
+        return current
+    }
+    func favorite(at path: [SwipeDirection]) -> AppExplorerFavorite? {
+        guard let direction = path.last else { return nil }
+        return favorites(at: Array(path.dropLast()))?.first { $0.direction == direction }
+    }
+    var hasValidFavorites: Bool {
+        var remaining = Self.maximumFavorites
+        func valid(_ entries: [AppExplorerFavorite], depth: Int) -> Bool {
+            guard depth <= Self.maximumGroupDepth, entries.count <= 8,
+                  Set(entries.map(\.direction)).count == entries.count else { return false }
+            for entry in entries {
+                remaining -= 1
+                guard remaining >= 0, entry.isValidDestination else { return false }
+                if let children = entry.children, !valid(children, depth: depth + 1) { return false }
+            }
+            return true
+        }
+        return valid(favorites, depth: 0)
+    }
+    @discardableResult
+    mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: SwipeDirection, in path: [SwipeDirection] = []) -> Bool {
+        func replace(_ entries: inout [AppExplorerFavorite], path: ArraySlice<SwipeDirection>) -> Bool {
+            if let head = path.first {
+                guard let index = entries.firstIndex(where: { $0.direction == head }),
+                      var children = entries[index].children else { return false }
+                guard replace(&children, path: path.dropFirst()) else { return false }
+                entries[index].children = children
+            } else {
+                entries.removeAll { $0.direction == direction }
+                if var favorite { favorite.direction = direction; entries.append(favorite) }
+            }
+            return true
+        }
+        return replace(&favorites, path: path[...])
     }
 }
 

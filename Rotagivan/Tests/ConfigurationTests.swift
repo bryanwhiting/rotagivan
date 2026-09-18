@@ -68,6 +68,27 @@ struct ConfigurationTests {
         withSingleSwipe.settings.profileGestures?[1] = gestures
         let singleSwipeYAML = try withSingleSwipe.yaml()
         let singleSwipeRoundtrip = try AppConfiguration.parse(singleSwipeYAML)
+        var grouped = withSingleSwipe
+        grouped.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .left, name: "Work", children: [
+            AppExplorerFavorite(direction: .up, name: "Research", children: [
+                AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/docs"),
+                AppExplorerFavorite(direction: .left, bundleID: "com.apple.Safari", name: "Safari")
+            ])
+        ]), at: .left)
+        let groupRoundtrip = try AppConfiguration.parse(grouped.yaml())
+        precondition(groupRoundtrip.settings.appExplorer == grouped.settings.appExplorer)
+        var invalidGroup = grouped
+        invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
+        rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")
+        invalidGroup = grouped
+        invalidGroup.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Unsafe nested URL", url: "file:///tmp/test"), at: .down, in: [.left, .up])
+        rejected(try ConfigurationYAML.encode(invalidGroup), "unsafe URL inside nested group")
+        invalidGroup = grouped
+        invalidGroup.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Duplicate", children: [
+            AppExplorerFavorite(direction: .up, name: "First", children: []),
+            AppExplorerFavorite(direction: .up, name: "Second", children: [])
+        ]), at: .down)
+        rejected(try ConfigurationYAML.encode(invalidGroup), "duplicate nested group directions")
         precondition(singleSwipeRoundtrip.settings.gestures(for: 1).twoFingerSingleTapSwipe == gestures.twoFingerSingleTapSwipe)
         precondition(singleSwipeRoundtrip.settings.gestures(for: 1).twoFingerDoubleTapSwipe == gestures.twoFingerDoubleTapSwipe)
         var invalidPair = withSingleSwipe

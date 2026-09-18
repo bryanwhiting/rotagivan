@@ -26,6 +26,8 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     private var sourcePID: pid_t?
     private var deadline = Date.distantPast
     private var alternateHeld = false
+    private(set) var groupPath: [SwipeDirection] = []
+    private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
     private static let logger = Logger(subsystem: "local.rotagivan", category: "AppExplorer")
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
@@ -74,6 +76,8 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     func show(waitingForLift: Bool) {
         guard !isVisible else { return }
         selectionGeneration &+= 1
+        groupPath = []
+        contactIsDown = waitingForLift
         sourcePID = workspace.frontmostApplication?.processIdentifier
         loadEntries()
         model.selected = nil
@@ -90,7 +94,8 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onCancel = { [weak self] in self?.dismiss() }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
-            onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() }))
+            onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
+            onBack: { [weak self] in self?.goBack() }))
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
@@ -125,8 +130,14 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     private func loadEntries() {
         let settings = configuration()
         model.mode = settings.mode(holdingShortcut: alternateHeld)
+        if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
+        model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         if model.mode == .favorites {
-            model.entries = settings.favorites.map { favorite in
+            model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
+                if favorite.isGroup {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                        icon: nil, url: nil, isGroup: favorite.isValidDestination && groupPath.count < AppExplorerSettings.maximumGroupDepth)
+                }
                 if favorite.url != nil {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                         icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
@@ -150,6 +161,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
 
     func process(_ report: TrackpadReport) {
         guard isVisible else { return }
+        contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
         guard contextIsValid?() != false else { dismiss(); return }
         switch input.process(report) {
         case .waiting: break
@@ -157,13 +169,20 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
             // Publish only a change of sector, not every hardware report.
             if model.selected != direction { model.selected = direction }
         case .select(let direction): choose(direction)
+        case .back: goBack()
         case .cancel: dismiss()
         }
     }
 
     private func choose(_ direction: SwipeDirection) {
+        guard isVisible else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if entry?.isGroup == true {
+            groupPath.append(direction)
+            refreshGroup()
+            return
+        }
         dismiss()
         guard let entry else { return }
         if entry.isWebURL {
@@ -181,6 +200,21 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
             guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false else { return }
             self.openApplication(url, Self.activationConfiguration())
         }
+    }
+
+    func goBack() {
+        guard isVisible else { return }
+        guard contextIsValid?() != false, !groupPath.isEmpty else { dismiss(); return }
+        groupPath.removeLast()
+        refreshGroup()
+    }
+
+    private func refreshGroup() {
+        selectionGeneration &+= 1
+        loadEntries()
+        model.selected = nil
+        input = AppExplorerSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
     }
 
     static func activationConfiguration() -> NSWorkspace.OpenConfiguration {
@@ -202,6 +236,8 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         timer?.invalidate(); timer = nil
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
         model.selected = nil
+        groupPath = []
+        model.groupNames = []
         onDismiss?()
     }
 }
@@ -225,9 +261,11 @@ struct ExplorerEntry {
     var icon: NSImage?
     var url: URL?
     var isWebURL: Bool
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false) {
+    var isGroup: Bool
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
+        self.isGroup = isGroup
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -240,20 +278,23 @@ struct ExplorerEntry {
     @Published var entries: [ExplorerEntry] = []
     @Published var selected: SwipeDirection?
     @Published var mode: AppExplorerMode = .favorites
+    @Published var groupNames: [String] = []
 }
 
 struct AppExplorerView: View {
     @ObservedObject var model: ExplorerModel
     var onSelect: (SwipeDirection) -> Void
     var onCancel: () -> Void
+    var onBack: () -> Void = {}
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
 
     var body: some View {
         VStack(spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded))
-                    Text(model.mode.title.uppercased()).font(.system(size: 9, weight: .medium)).tracking(2).foregroundStyle(.secondary)
+                    Text(model.groupNames.last ?? "App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded)).lineLimit(1)
+                    Text(([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased())
+                        .font(.system(size: 9, weight: .medium)).tracking(1).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
@@ -265,16 +306,21 @@ struct AppExplorerView: View {
                         ForEach(0..<3) { column in
                             if let direction = grid[row][column] { tile(direction) }
                             else {
-                                VStack(spacing: 7) {
-                                    Image(systemName: "safari").font(.system(size: 34, weight: .ultraLight)).foregroundStyle(.teal)
-                                    Text(model.selected?.title ?? "Swipe to explore").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                                }.frame(width: 130, height: 98)
+                                Button(action: onBack) {
+                                    VStack(spacing: 7) {
+                                        Image(systemName: model.groupNames.isEmpty ? "safari" : "arrow.uturn.backward")
+                                            .font(.system(size: 30, weight: .light)).foregroundStyle(.teal)
+                                        Text(model.groupNames.isEmpty ? "Tap to close" : "Tap to go back")
+                                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                                    }.frame(width: 130, height: 98).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                    .accessibilityLabel(model.groupNames.isEmpty ? "Close App Explorer" : "Back to parent group")
                             }
                         }
                     }
                 }
             }
-            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Choose favorites in General → App Explorer." : "Open another app to see it here.") : "Swipe to choose · lift to open · Esc to cancel")
+            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Add favorites in General → App Explorer." : "Open another app to see it here.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · Esc to close" : "Swipe to choose · lift to open · tap to go back"))
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(26)
@@ -289,13 +335,16 @@ struct AppExplorerView: View {
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    if entry.isWebURL {
+                    if entry.isGroup {
+                        Image(systemName: "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                    } else if entry.isWebURL {
                         Image(systemName: "globe").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else {
                         Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
                     }
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    if entry.url == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if entry.isGroup { Text("Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.url == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -307,7 +356,7 @@ struct AppExplorerView: View {
             .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil || entry?.url == nil)
+        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }

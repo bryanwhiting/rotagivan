@@ -4,18 +4,20 @@ import CoreGraphics
 /// Pure input gate: consume the trigger's remaining contact, then use a fresh
 /// one-finger displacement. No cursor events or app activation occur here.
 struct AppExplorerSelection {
-    enum Result: Equatable { case waiting, highlight(SwipeDirection?), select(SwipeDirection), cancel }
+    enum Result: Equatable { case waiting, highlight(SwipeDirection?), select(SwipeDirection), back, cancel }
     var waitingForLift: Bool
     private var contactID: UInt8?
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
     private var selected: SwipeDirection?
     private var finished = false
+    private var started = Date.distantPast
+    private var maximumTravel = 0.0
     static let minimumDistance = 60.0
 
     init(waitingForLift: Bool) { self.waitingForLift = waitingForLift }
 
-    mutating func process(_ report: TrackpadReport) -> Result {
+    mutating func process(_ report: TrackpadReport, at now: Date = Date()) -> Result {
         guard !finished else { return .waiting }
         let contacts = report.contacts.filter(\.touching)
         if waitingForLift {
@@ -28,12 +30,14 @@ struct AppExplorerSelection {
         guard let contact = contacts.first else {
             guard contactID != nil else { return .waiting }
             finished = true
-            return selected.map(Result.select) ?? .cancel
+            if let selected { return .select(selected) }
+            return maximumTravel <= 25 && now.timeIntervalSince(started) <= 0.35 ? .back : .cancel
         }
         let point = CGPoint(x: contact.x, y: contact.y)
         guard let contactID else {
             self.contactID = contact.id
             origin = point; last = point
+            started = now
             return .waiting
         }
         guard contact.id == contactID, hypot(point.x - last.x, point.y - last.y) < 400 else {
@@ -41,6 +45,7 @@ struct AppExplorerSelection {
         }
         last = point
         let dx = point.x - origin.x, dy = point.y - origin.y
+        maximumTravel = max(maximumTravel, hypot(dx, dy))
         let direction = hypot(dx, dy) >= Self.minimumDistance ? SwipeDirection.classify(dx: dx, dy: dy) : nil
         guard selected != direction else { return .waiting }
         selected = direction

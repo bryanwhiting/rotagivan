@@ -47,6 +47,9 @@ struct ConfigurationTests {
         precondition(!factory.shortcuts.precision.enabled)
         precondition(factory.settings.precision.cursorResponse != nil)
         var withSingleSwipe = factory
+        withSingleSwipe.settings.appExplorer = AppExplorerSettings(defaultMode: .favorites,
+            favorites: [AppExplorerFavorite(direction: .topLeft, bundleID: "com.apple.Safari", name: "Safari")],
+            holdShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 19, keyLabel: "F17"))
         withSingleSwipe.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0.25,fastMultiplier:2.5,transitionSpeed:1300)
         withSingleSwipe.settings.appOverrides = [.chrome]
         var gestures = withSingleSwipe.settings.gestures(for: 1)
@@ -56,9 +59,20 @@ struct ConfigurationTests {
         gestures.singleTapSwipe!.topRight = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
         gestures.singleTapSwipe!.setAction(.appExplorer, for: .down)
         gestures.oneFingerDoubleTap = .appExplorer
+        gestures.gestures.tripleTapFirstInterval = 0.14
+        gestures.gestures.tripleTapSecondInterval = 0.24
         withSingleSwipe.settings.profileGestures?[1] = gestures
         let singleSwipeYAML = try withSingleSwipe.yaml()
         let singleSwipeRoundtrip = try AppConfiguration.parse(singleSwipeYAML)
+        precondition(singleSwipeRoundtrip.settings.appExplorer == withSingleSwipe.settings.appExplorer)
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).gestures.tripleTapSecondInterval == 0.24)
+        precondition(singleSwipeRoundtrip.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval == withSingleSwipe.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval)
+        var invalidExplorer = withSingleSwipe
+        invalidExplorer.settings.appExplorer!.favorites.append(invalidExplorer.settings.appExplorer!.favorites[0])
+        rejected(try ConfigurationYAML.encode(invalidExplorer), "duplicate explorer slot")
+        var invalidTriple = withSingleSwipe
+        invalidTriple.settings.profileGestures?[1]?.gestures.tripleTapSecondInterval = 0.9
+        rejected(try ConfigurationYAML.encode(invalidTriple), "triple-tap timing outside bounds")
         precondition(singleSwipeRoundtrip.settings.precision.scrollResponse == withSingleSwipe.settings.precision.scrollResponse)
         var invalidScroll = withSingleSwipe
         invalidScroll.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:3,fastMultiplier:1)

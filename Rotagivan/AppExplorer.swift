@@ -8,7 +8,9 @@ import SwiftUI
     func show(waitingForLift: Bool)
     func process(_ report: TrackpadReport)
     func dismiss()
+    func setAlternateHeld(_ held: Bool)
 }
+extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
 
 @MainActor final class AppExplorerController: AppExplorerPresenting {
     private let workspace = NSWorkspace.shared
@@ -22,6 +24,8 @@ import SwiftUI
     private let model = ExplorerModel()
     private var sourcePID: pid_t?
     private var deadline = Date.distantPast
+    private var alternateHeld = false
+    var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var isVisible: Bool { panel != nil }
@@ -60,15 +64,7 @@ import SwiftUI
     func show(waitingForLift: Bool) {
         guard !isVisible else { return }
         sourcePID = workspace.frontmostApplication?.processIdentifier
-        let running = workspace.runningApplications.filter {
-            $0.activationPolicy == .regular && !$0.isTerminated &&
-            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
-            $0.bundleIdentifier != "local.rotagivan"
-        }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
-        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [])
-        model.entries = ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
-            ExplorerEntry(direction: ExplorerModel.directions[$0.offset], app: $0.element)
-        }
+        loadEntries()
         model.selected = nil
         input = AppExplorerSelection(waitingForLift: waitingForLift)
         let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 464),
@@ -90,8 +86,7 @@ import SwiftUI
         }
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)
-        // Global monitor is only an Escape fallback; selection uses raw HID,
-        // never a stream of synthetic mouse events or an event-tap UI update.
+        // Selection uses raw HID, not per-event SwiftUI pointer updates.
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { self?.dismiss() }
         }
@@ -104,6 +99,38 @@ import SwiftUI
         }
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func setAlternateHeld(_ held: Bool) {
+        guard alternateHeld != held else { return }
+        alternateHeld = held
+        if isVisible {
+            // The HID owner reopens with the actual contact state. Never carry
+            // a partial selection across modes or discard a fresh first swipe.
+            dismiss()
+        }
+    }
+
+    private func loadEntries() {
+        let settings = configuration()
+        model.mode = settings.mode(holdingShortcut: alternateHeld)
+        if model.mode == .favorites {
+            model.entries = settings.favorites.map { favorite in
+                let url = workspace.urlForApplication(withBundleIdentifier: favorite.bundleID)
+                return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
+                    name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url)
+            }
+            return
+        }
+        let running = workspace.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated &&
+            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
+            $0.bundleIdentifier != "local.rotagivan"
+        }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [])
+        model.entries = ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
+            ExplorerEntry(direction: ExplorerModel.directions[$0.offset], app: $0.element)
+        }
     }
 
     func process(_ report: TrackpadReport) {
@@ -121,10 +148,14 @@ import SwiftUI
 
     private func choose(_ direction: SwipeDirection) {
         guard contextIsValid?() != false else { dismiss(); return }
-        let app = model.entries.first { $0.direction == direction }?.app
+        let entry = model.entries.first { $0.direction == direction }
         dismiss()
-        guard let app, !app.isTerminated else { return }
-        app.activate(options: [])
+        guard let entry else { return }
+        if let app = workspace.runningApplications.first(where: { $0.bundleIdentifier == entry.bundleID && !$0.isTerminated }) {
+            app.activate(options: [])
+        } else if let url = entry.url {
+            workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        }
     }
 
     func dismiss() {
@@ -153,7 +184,16 @@ private final class ExplorerPanel: NSPanel {
 
 struct ExplorerEntry {
     var direction: SwipeDirection
-    var app: NSRunningApplication
+    var bundleID: String
+    var name: String
+    var icon: NSImage?
+    var url: URL?
+    init(direction: SwipeDirection, bundleID: String, name: String, icon: NSImage?, url: URL?) {
+        self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
+    }
+    init(direction: SwipeDirection, app: NSRunningApplication) {
+        self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
+    }
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
@@ -161,6 +201,7 @@ struct ExplorerEntry {
     static let directions: [SwipeDirection] = [.up, .topRight, .right, .bottomRight, .down, .bottomLeft, .left, .topLeft]
     @Published var entries: [ExplorerEntry] = []
     @Published var selected: SwipeDirection?
+    @Published var mode: AppExplorerMode = .favorites
 }
 
 struct AppExplorerView: View {
@@ -174,7 +215,7 @@ struct AppExplorerView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded))
-                    Text("RECENT APPS").font(.system(size: 9, weight: .medium)).tracking(2).foregroundStyle(.secondary)
+                    Text(model.mode.title.uppercased()).font(.system(size: 9, weight: .medium)).tracking(2).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
@@ -195,7 +236,7 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.entries.isEmpty ? "Open another app to see it here." : "Swipe toward an app · lift to switch · Esc to cancel")
+            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Choose favorites in General → App Explorer." : "Open another app to see it here.") : "Swipe toward an app · lift to switch · Esc to cancel")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(26)
@@ -209,9 +250,10 @@ struct AppExplorerView: View {
         let selected = model.selected == direction && entry != nil
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
-                if let app = entry?.app {
-                    Image(nsImage: app.icon ?? NSImage()).resizable().scaledToFit().frame(width: 42, height: 42)
-                    Text(app.localizedName ?? "Application").font(.system(size: 11, weight: .medium)).lineLimit(1)
+                if let entry {
+                    Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
+                    Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    if entry.url == nil { Text("Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -223,7 +265,7 @@ struct AppExplorerView: View {
             .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil)
-        .accessibilityLabel("\(direction.title): \(entry?.app.localizedName ?? "No app")")
+        .buttonStyle(.plain).disabled(entry == nil || entry?.url == nil)
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }
 }

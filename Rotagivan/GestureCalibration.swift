@@ -2,6 +2,7 @@ import Foundation
 
 enum GestureCalibrationMode: String, CaseIterable {
     case doubleTap
+    case tripleTap
     case doubleTapSwipe
     case singleTapSwipe
 }
@@ -10,6 +11,7 @@ struct GestureCalibrationSample: Equatable {
     let doubleTapInterval: Double
     let swipeWindow: Double?
     var swipeDuration: Double? = nil
+    var secondTapInterval: Double? = nil
 }
 
 /// A deterministic, side-effect-free recorder for gesture calibration.
@@ -39,6 +41,7 @@ struct GestureCalibrationRecorder {
         case ready
         case tapping(number: Int, firstLift: TimeInterval?, contact: ActiveContact)
         case waitingForSecondTap(firstLift: TimeInterval)
+        case waitingForThirdTap(secondLift: TimeInterval)
         case waitingForSwipe(secondLift: TimeInterval, doubleTapInterval: Double)
         case swiping(secondLift: TimeInterval, doubleTapInterval: Double, contact: ActiveContact)
     }
@@ -51,6 +54,7 @@ struct GestureCalibrationRecorder {
     private(set) var samples: [GestureCalibrationSample] = []
     private(set) var instruction: String
     private var phase: Phase = .quiet(since: nil)
+    private var firstTripleInterval: Double?
 
     var isComplete: Bool { samples.count == Self.requiredSampleCount }
 
@@ -62,6 +66,11 @@ struct GestureCalibrationRecorder {
         median(samples.compactMap(\.swipeWindow))
     }
     var medianSwipeDuration: Double? { median(samples.compactMap(\.swipeDuration)) }
+    var medianSecondTapInterval: Double? { median(samples.compactMap(\.secondTapInterval)) }
+    var combinedTripleInterval: Double? {
+        guard let first = medianDoubleTapInterval, let second = medianSecondTapInterval else { return nil }
+        return first + second
+    }
     private var maximumSwipeDuration: Double { mode == .singleTapSwipe ? 0.3 : Self.swipeMaxDuration }
     private var maximumSwipeWindow: Double { mode == .singleTapSwipe ? 0.8 : Self.swipeTrainingWindow }
 
@@ -152,6 +161,14 @@ struct GestureCalibrationRecorder {
             phase = .tapping(number: 2, firstLift: firstLift, contact: makeContact(finger, at: now))
             setTapInstruction(number: 2)
 
+        case .waitingForThirdTap(let secondLift):
+            guard !inputIsInvalid, now - secondLift <= Self.doubleTapTrainingWindow else {
+                reject(at: now, alreadyLifted: touching.isEmpty); return
+            }
+            guard let finger = touching.first else { return }
+            phase = .tapping(number: 3, firstLift: secondLift, contact: makeContact(finger, at: now))
+            setTapInstruction(number: 3)
+
         case let .waitingForSwipe(secondLift, doubleTapInterval):
             guard !inputIsInvalid, now - secondLift <= maximumSwipeWindow else {
                 reject(at: now, alreadyLifted: touching.isEmpty)
@@ -203,6 +220,10 @@ struct GestureCalibrationRecorder {
             if now - firstLift > Self.doubleTapTrainingWindow {
                 reject(at: now, alreadyLifted: true)
             }
+        case .waitingForThirdTap(let secondLift):
+            if now - secondLift > Self.doubleTapTrainingWindow {
+                reject(at: now, alreadyLifted: true)
+            }
         case .waitingForSwipe(let secondLift, _):
             if now - secondLift > maximumSwipeWindow {
                 reject(at: now, alreadyLifted: true)
@@ -229,6 +250,7 @@ struct GestureCalibrationRecorder {
         }
 
         if number == 1 {
+            firstTripleInterval = nil
             if mode == .singleTapSwipe {
                 phase = .waitingForSwipe(secondLift: now, doubleTapInterval: 0)
                 instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): swipe quickly, then lift (under 300 ms)."
@@ -248,7 +270,16 @@ struct GestureCalibrationRecorder {
             reject(at: now, alreadyLifted: true)
             return
         }
-        if mode == .doubleTap {
+        if mode == .tripleTap {
+            if number == 2 {
+                firstTripleInterval = doubleTapInterval
+                phase = .waitingForThirdTap(secondLift: now)
+                instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): complete the third tap."
+            } else if let firstTripleInterval {
+                accept(GestureCalibrationSample(doubleTapInterval: firstTripleInterval, swipeWindow: nil,
+                    secondTapInterval: doubleTapInterval), at: now)
+            } else { reject(at: now, alreadyLifted: true) }
+        } else if mode == .doubleTap {
             accept(GestureCalibrationSample(doubleTapInterval: doubleTapInterval, swipeWindow: nil), at: now)
         } else {
             phase = .waitingForSwipe(secondLift: now, doubleTapInterval: doubleTapInterval)
@@ -291,16 +322,17 @@ struct GestureCalibrationRecorder {
     }
 
     private mutating func reject(at now: TimeInterval, alreadyLifted: Bool) {
+        firstTripleInterval = nil
         phase = .quiet(since: alreadyLifted ? now : nil)
         instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): attempt not recorded; lift all fingers and pause."
     }
 
     private mutating func setReadyInstruction() {
-        instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): \(mode == .singleTapSwipe ? "tap once, then swipe quickly and lift." : "tap twice.")"
+        instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): \(mode == .singleTapSwipe ? "tap once, then swipe quickly and lift." : mode == .tripleTap ? "tap three times." : "tap twice.")"
     }
 
     private mutating func setTapInstruction(number: Int) {
-        instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): tap \(number) of \(mode == .singleTapSwipe ? 1 : 2)."
+        instruction = "Trial \(trialNumber) of \(Self.requiredSampleCount): tap \(number) of \(mode == .singleTapSwipe ? 1 : mode == .tripleTap ? 3 : 2)."
     }
 
     private mutating func setSwipeInstruction() {

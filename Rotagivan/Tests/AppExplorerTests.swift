@@ -5,6 +5,19 @@ import Foundation
         TrackpadReport(contacts: x.map { [FingerContact(id: id, x: $0, y: y, touching: true, confident: confident)] } ?? [], buttonDown: button, scanTime: 0)
     }
     static func main() throws {
+        var settings = AppExplorerSettings()
+        precondition(settings.mode(holdingShortcut: false) == .favorites)
+        precondition(settings.mode(holdingShortcut: true) == .recent)
+        settings.defaultMode = .recent
+        precondition(settings.mode(holdingShortcut: true) == .favorites)
+        settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari"), at: .right)
+        settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.finder", name: "Finder"), at: .up)
+        precondition(settings.favorites.first?.direction == .right, "Slots must not compact or reorder")
+        settings.setFavorite(nil, at: .right)
+        precondition(settings.favorites.count == 1 && settings.favorites[0].direction == .up)
+        settings.holdShortcut = RecordedShortcut(keyCode: 64, modifiers: 1 << 19, keyLabel: "F17")
+        let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
+        precondition(restored == settings)
         let directions: [(SwipeDirection, Double, Double)] = [(.up,500,400),(.topRight,600,400),(.right,600,500),(.bottomRight,600,600),(.down,500,600),(.bottomLeft,400,600),(.left,400,500),(.topLeft,400,400)]
         for (direction, x, y) in directions {
             var input = AppExplorerSelection(waitingForLift: true)

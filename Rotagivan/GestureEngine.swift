@@ -515,12 +515,14 @@ final class GestureEngine {
         let doubleShortcut = fingerCount == 2 ? active.twoFingerDoubleShortcut : active.oneFingerDoubleShortcut
         let tripleAction = (fingerCount == 2 ? active.twoFingerTripleTap : active.oneFingerTripleTap) ?? .none
         let tripleShortcut = fingerCount == 2 ? active.twoFingerTripleShortcut : active.oneFingerTripleShortcut
+        let firstInterval = tripleAction == .none ? doubleTapInterval : active.gestures.resolvedTripleTapFirstInterval
+        let secondInterval = active.gestures.resolvedTripleTapSecondInterval
         let swipeSettings = active.doubleTapSwipe ?? DoubleTapSwipeSettings()
         let canSwipe = fingerCount == 1 && swipeSettings.isConfigured
         let canSingleSwipe = fingerCount == 1 && active.singleTapSwipe?.isConfigured == true
 
         if let pendingTap {
-            if pendingTap.fingerCount == fingerCount, now.timeIntervalSince(pendingTap.date) <= doubleTapInterval {
+            if pendingTap.fingerCount == fingerCount, now.timeIntervalSince(pendingTap.date) <= (pendingTap.tapCount == 2 ? secondInterval : firstInterval) {
                 pendingTapTimer?.invalidate()
                 self.pendingTap = nil
                 pendingTapTimer = nil
@@ -539,8 +541,8 @@ final class GestureEngine {
                     lastTap = .distantPast
                     swipeRecognizer.arm(at: now, settings: swipeSettings,
                         tripleTapDuration: tripleAction == .none ? nil : active.gestures.tapMaxDuration,
-                        tripleTapRadius: active.gestures.tapMaxMovement, tripleTapInterval: doubleTapInterval)
-                    let wait = tripleAction == .none ? swipeSettings.resolvedWindow : max(swipeSettings.resolvedWindow, doubleTapInterval)
+                        tripleTapRadius: active.gestures.tapMaxMovement, tripleTapInterval: secondInterval)
+                    let wait = tripleAction == .none ? swipeSettings.resolvedWindow : max(swipeSettings.resolvedWindow, secondInterval)
                     let timer = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
                         MainActor.assumeIsolated {
                             guard let self else { return }
@@ -553,7 +555,7 @@ final class GestureEngine {
                 }
                 if tripleAction != .none {
                     lastTap = .distantPast
-                    schedulePendingTap(second, interval: doubleTapInterval)
+                    schedulePendingTap(second, interval: secondInterval)
                     return
                 }
                 flushPendingTap(second)
@@ -570,7 +572,7 @@ final class GestureEngine {
             return
         }
         let wait = canSingleSwipe ? max(active.singleTapSwipe!.resolvedWindow,
-            doubleAction != .none || tripleAction != .none || canSwipe ? doubleTapInterval : 0) : doubleTapInterval
+            doubleAction != .none || tripleAction != .none || canSwipe ? firstInterval : 0) : firstInterval
         schedulePendingTap(PendingTap(profileID: store.activeProfileID, fingerCount: fingerCount,
             action: action, shortcut: shortcut, date: now), interval: wait)
     }

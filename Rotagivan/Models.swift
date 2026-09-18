@@ -1,5 +1,28 @@
 import Foundation
 
+enum AppExplorerMode: String, Codable, CaseIterable {
+    case favorites, recent
+    var title: String { self == .favorites ? "Favorites" : "Recent apps" }
+    var alternate: Self { self == .favorites ? .recent : .favorites }
+}
+
+struct AppExplorerFavorite: Codable, Equatable {
+    var direction: SwipeDirection
+    var bundleID: String
+    var name: String
+}
+
+struct AppExplorerSettings: Codable, Equatable {
+    var defaultMode: AppExplorerMode = .favorites
+    var favorites: [AppExplorerFavorite] = []
+    var holdShortcut: RecordedShortcut?
+    func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
+    mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: SwipeDirection) {
+        favorites.removeAll { $0.direction == direction }
+        if var favorite { favorite.direction = direction; favorites.append(favorite) }
+    }
+}
+
 enum AppVersion {
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
     static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—" }
@@ -171,6 +194,10 @@ struct GestureSettings: Codable, Equatable {
     var secondFingerGracePeriod = 0.05
     // Optional preserves settings saved before the recognition-delay control.
     var doubleTapInterval: Double?
+    var tripleTapFirstInterval: Double?
+    var tripleTapSecondInterval: Double?
+    var resolvedTripleTapFirstInterval: Double { min(0.6, max(0.05, tripleTapFirstInterval ?? resolvedDoubleTapInterval)) }
+    var resolvedTripleTapSecondInterval: Double { min(0.6, max(0.05, tripleTapSecondInterval ?? resolvedDoubleTapInterval)) }
     var resolvedDoubleTapInterval: Double { min(0.6, max(0.05, doubleTapInterval ?? 0.30)) }
 }
 
@@ -306,6 +333,7 @@ struct StoredSettings: Codable {
     var defaultProfileID: UInt32?
     var sliderBaselines: [UInt32: ProfileSliderBaseline]?
     var sliderBaselineRevision: Int?
+    var appExplorer: AppExplorerSettings?
     var resolvedDefaultProfileID: UInt32 {
         let id = defaultProfileID ?? 1
         return id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) ? id : 1
@@ -352,6 +380,8 @@ struct StoredSettings: Codable {
             result.gestures.tapMaxMovement = primary.gestures.tapMaxMovement
             result.gestures.keepCursorStillForTaps = primary.gestures.keepCursorStillForTaps
             result.gestures.doubleTapInterval = primary.gestures.doubleTapInterval
+            result.gestures.tripleTapFirstInterval = primary.gestures.tripleTapFirstInterval
+            result.gestures.tripleTapSecondInterval = primary.gestures.tripleTapSecondInterval
         }
         return result
     }

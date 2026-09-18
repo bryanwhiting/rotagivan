@@ -206,9 +206,21 @@ action menu under **Single tap, then quick swipe** / **Double-tap, then swipe**.
 For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.
 No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
-Finish the opening gesture and lift. A frosted HUD shows up to eight other
-running foreground-capable apps. The most recently used is at the top, followed
-clockwise by the others. Make a **fresh swipe** toward an app, then **lift to
+In **General → App Explorer**, choose the default mode (initially **Favorites**)
+and assign an application to each of the eight positions in the matching grid.
+Favorites keep their exact slots, including empty or unavailable slots, and can
+launch apps that are not running. Bundle IDs, positions, mode, and the optional
+hold shortcut export and sync; absolute application paths are not saved.
+
+Record **Hold for recent apps** to open the alternate mode while holding a key.
+If Recent apps is your default, the shortcut instead opens Favorites. Swipe and
+lift to select before releasing the key; releasing without selection cancels.
+The hotkey also opens the HUD directly, without requiring the opening gesture.
+Shortcut conflicts are reported; recording temporarily suspends registrations.
+
+Finish the opening gesture and lift. A frosted HUD shows your favorites, or up
+to eight other running apps in Recent mode. Recents start at the top and continue
+clockwise. Make a **fresh swipe** toward an app, then **lift to
 switch**. The cursor stays still; highlighted app positions do not reorder while
 the HUD is open. You can also click a tile. Swipe back to the center and lift,
 press Escape, or click close to cancel. It also closes after 15 seconds, on app
@@ -323,6 +335,14 @@ Wait for the ready prompt between attempts. Invalid attempts do not count.
 Cursor movement, clicking, dragging, and gesture shortcuts are suppressed
 while collecting samples; press Escape to cancel at any time. Input resumes
 after the tenth attempt so you can review and apply the result.
+
+**Calibrate triple tap…** records ten three-tap attempts. It calculates separate
+medians for lift 1 → lift 2 and lift 2 → lift 3, then shows their sum as the
+combined rhythm. Apply saves each interval independently (50–600 ms, rounded to
+milliseconds); both one- and two-finger triple taps use these timings. When a
+triple-tap action is configured, its first interval governs the first pair and
+its second interval governs the third tap. The ordinary double-tap setting is
+not overwritten. Older profiles fall back to the existing double-tap interval.
 
 Double-tap timing measures the first lift to the second lift. Swipe calibration
 also measures the second lift to the third touchdown; finish that third contact

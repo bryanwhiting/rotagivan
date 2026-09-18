@@ -7,6 +7,8 @@ import CoreGraphics
     var contextIsValid: (() -> Bool)?
     var input = AppExplorerSelection(waitingForLift: false)
     var selections: [SwipeDirection] = []
+    var alternateHeld = false
+    func setAlternateHeld(_ held: Bool) { alternateHeld = held }
     func show(waitingForLift: Bool) {
         isVisible = true
         input = AppExplorerSelection(waitingForLift: waitingForLift)
@@ -111,6 +113,47 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        check { f in
+            f.hid.explorerHold(true)
+            precondition(f.explorer.isVisible && f.explorer.alternateHeld)
+            f.hid.explorerHold(true) // Repeat does not reset selection.
+            f.send(1, x: 500); f.send(1.1, x: 600)
+            f.hid.explorerHold(false)
+            precondition(!f.explorer.isVisible && !f.explorer.alternateHeld)
+            f.send(1.2)
+            precondition(f.poster.actions == 0 && f.poster.moves == 0 && f.explorer.selections.isEmpty)
+            f.hid.explorerHold(true)
+            f.send(2, x: 500); f.send(2.1, x: 600); f.send(2.2)
+            precondition(f.explorer.selections == [.right])
+            f.hid.explorerHold(false)
+            precondition(!f.explorer.isVisible)
+            f.store.settings.enabled = false
+            f.hid.explorerHold(true)
+            precondition(!f.explorer.isVisible)
+        }
+        check { f in
+            let before = f.store.settings.gestures(for: 1)
+            let session = f.begin(.tripleTap)
+            f.hid.explorerHold(true)
+            precondition(!f.explorer.isVisible, "Hotkey cannot interrupt calibration")
+            for index in 0..<10 {
+                let t = 1.0 + Double(index) * 3
+                let first = 0.10 + Double(index) * 0.01
+                let second = 0.20 + Double(index) * 0.01
+                f.send(t, x: 500); f.send(t + 0.03)
+                f.send(t + first, x: 800); f.send(t + first + 0.03)
+                f.send(t + first + second, x: 200); f.send(t + first + second + 0.03)
+            }
+            precondition(session.isComplete && !f.hid.isCalibrating)
+            precondition(f.poster.actions == 0 && f.poster.moves == 0)
+            precondition(f.store.settings.gestures(for: 1) == before, "Calibration must not save before Apply")
+            f.hid.applyCalibration()
+            let applied = f.store.settings.gestures(for: 1)
+            precondition(applied.gestures.tripleTapFirstInterval == 0.145)
+            precondition(applied.gestures.tripleTapSecondInterval == 0.245)
+            precondition(applied.gestures.doubleTapInterval == before.gestures.doubleTapInterval)
+            precondition(f.store.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval == 0.245)
+        }
         check { f in
             var taps = f.store.activeGestures
             taps.oneFingerDoubleTap = .rightClick

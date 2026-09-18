@@ -296,6 +296,8 @@ struct ContentView: View {
             target.gestures.tapMaxMovement = source.gestures.tapMaxMovement
             target.gestures.keepCursorStillForTaps = source.gestures.keepCursorStillForTaps
             target.gestures.doubleTapInterval = source.gestures.doubleTapInterval
+            target.gestures.tripleTapFirstInterval = source.gestures.tripleTapFirstInterval
+            target.gestures.tripleTapSecondInterval = source.gestures.tripleTapSecondInterval
             store.updateGestures(target, for: targetID)
             if targetID != store.defaultProfileID {
                 var customProfiles = store.settings.customTapProfiles ?? []
@@ -349,6 +351,12 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 doubleTapDelaySlider(id)
                 calibrationButton("Calibrate double tap…", profileID: id, mode: .doubleTap)
+                calibrationButton("Calibrate triple tap…", profileID: id, mode: .tripleTap)
+                if let first = store.settings.gestures(for: id).gestures.tripleTapFirstInterval,
+                   let second = store.settings.gestures(for: id).gestures.tripleTapSecondInterval {
+                    Text("Triple tap: \(Int(first * 1000)) + \(Int(second * 1000)) ms")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 tapImpactSpeedSlider(id)
                 Toggle("Keep cursor still while tapping", isOn: Binding(get: {
                     store.settings.gestures(for: id).gestures.resolvedKeepCursorStillForTaps
@@ -511,6 +519,8 @@ struct ContentView: View {
             }
             Divider()
             ConfigurationSettingsView(store: store, hid: hid)
+            Divider()
+            AppExplorerSettingsView(store: store)
             Divider()
             SyncSettingsView(sync: sync)
             Divider()

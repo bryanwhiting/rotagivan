@@ -139,6 +139,22 @@ struct TapActionTests {
         }
         print("One- and two-finger physical taps each request one double-left-click action without arming drag.")
         for twoFingers in [false, true] {
+            for swipeEnabled in [false, true] {
+                check { f in
+                    f.configureTriple(twoFingers: twoFingers)
+                    var taps = f.store.activeGestures
+                    taps.gestures.tripleTapFirstInterval = 0.15
+                    taps.gestures.tripleTapSecondInterval = 0.30
+                    if swipeEnabled {
+                        taps.doubleTapSwipe = DoubleTapSwipeSettings(enabled: true, left: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17"))
+                    }
+                    f.store.updateGestures(taps, for: 1)
+                    f.tap(0, twoFingers: twoFingers)
+                    f.tap(0.12, twoFingers: twoFingers)
+                    f.tap(0.37, twoFingers: twoFingers)
+                    precondition(f.poster.taps.map { $0.0 } == [.tripleLeftClick], "Use independently calibrated intervals, including swipe arbitration")
+                }
+            }
             check { f in
                 f.configureTriple(twoFingers: twoFingers)
                 f.tap(0, twoFingers: twoFingers); f.tap(0.02, twoFingers: twoFingers)

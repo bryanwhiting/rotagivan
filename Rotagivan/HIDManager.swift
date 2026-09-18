@@ -24,6 +24,8 @@ final class NavigatorHIDManager: ObservableObject {
     private var contactsDown = false
     private var suppressUntilLift = false
     private var explorer: (any AppExplorerPresenting)?
+    private var explorerHotkeyHeld = false
+    private var explorerConfiguration: AppExplorerSettings?
     private var explorerProfileID: UInt32?
     private var explorerSettings: ProfileGestures?
     private var appObserver: NSObjectProtocol?
@@ -54,6 +56,7 @@ final class NavigatorHIDManager: ObservableObject {
         if gestures == nil || explorer != nil {
             let explorer: any AppExplorerPresenting = explorer ?? AppExplorerController()
             self.explorer = explorer
+            (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
             self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
@@ -63,7 +66,8 @@ final class NavigatorHIDManager: ObservableObject {
             explorer.contextIsValid = { [weak self] in
                 guard let self else { return false }
                 return self.store.settings.enabled && self.store.activeProfileID == self.explorerProfileID &&
-                    self.store.activeGestures == self.explorerSettings && !self.calibrationCapturing
+                    self.store.activeGestures == self.explorerSettings && !self.calibrationCapturing &&
+                    self.store.settings.appExplorer == self.explorerConfiguration
             }
         }
     }
@@ -84,7 +88,22 @@ final class NavigatorHIDManager: ObservableObject {
         guard store.settings.enabled, !calibrationCapturing else { return }
         explorerProfileID = store.activeProfileID
         explorerSettings = store.activeGestures
+        explorerConfiguration = store.settings.appExplorer
         explorer?.show(waitingForLift: contactsDown)
+    }
+
+    func explorerHold(_ down: Bool) {
+        guard down != explorerHotkeyHeld else { return }
+        explorerHotkeyHeld = down
+        if down {
+            guard store.settings.enabled, !calibrationCapturing else { explorerHotkeyHeld = false; return }
+            explorer?.setAlternateHeld(true)
+            gestures.reset()
+            openAppExplorer()
+        } else {
+            explorer?.dismiss()
+            explorer?.setAlternateHeld(false)
+        }
     }
 
     func beginCalibration(profileID: UInt32, mode: GestureCalibrationMode) {
@@ -153,7 +172,10 @@ final class NavigatorHIDManager: ObservableObject {
         guard let session = calibrationSession, session.isComplete, session.cancellationReason == nil,
               let median = session.medianDoubleTapInterval else { return }
         var taps = store.settings.gestures(for: session.profileID)
-        if session.mode != .singleTapSwipe {
+        if session.mode == .tripleTap, let second = session.medianSecondTapInterval {
+            taps.gestures.tripleTapFirstInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
+            taps.gestures.tripleTapSecondInterval = min(600, max(50, (second * 1_000).rounded())) / 1_000
+        } else if session.mode != .singleTapSwipe {
             taps.gestures.doubleTapInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
         }
         if session.mode == .singleTapSwipe, let window = session.medianSwipeWindow, let duration = session.medianSwipeDuration {

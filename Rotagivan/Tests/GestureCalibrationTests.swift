@@ -6,6 +6,7 @@ struct GestureCalibrationTests {
 
     static func main() {
         testDoubleTapMedianAndTiming()
+        testTripleTap()
         testSingleTapSwipe()
         testSwipeMedianAndTiming()
         testRejectedTapInputsAndRecovery()
@@ -13,6 +14,40 @@ struct GestureCalibrationTests {
         testInitialLiftContinuousContactAndInstructions()
         testTimeoutTicks()
         print("Passed gesture calibration medians, timing, rejection, quiet-gap, timeout, and completion checks.")
+    }
+
+    private static func testTripleTap() {
+        var recorder = makeRecorder(.tripleTap)
+        arm(&recorder, at: 0)
+        for index in 0..<10 {
+            let start = 1.0 + Double(index) * 3
+            let first = 0.10 + Double(index) * 0.01
+            let second = 0.20 + Double(index) * 0.01
+            let secondLift = performDoubleTap(&recorder, start: start, interval: first)
+            precondition(recorder.samples.count == index, "Two taps cannot complete a triple-tap attempt")
+            recorder.process(report([(0, 800, 800, true)]), at: secondLift + second - 0.03)
+            recorder.process(emptyReport, at: secondLift + second)
+            precondition(recorder.samples.count == index + 1)
+        }
+        precondition(recorder.isComplete)
+        precondition(close(recorder.medianDoubleTapInterval, 0.145))
+        precondition(close(recorder.medianSecondTapInterval, 0.245))
+        precondition(close(recorder.combinedTripleInterval, 0.390))
+        precondition(recorder.medianSwipeWindow == nil)
+        for invalid in 0..<3 {
+            var rejected = makeRecorder(.tripleTap)
+            arm(&rejected, at: 0)
+            let lift = performDoubleTap(&rejected, start: 1, interval: 0.15)
+            if invalid == 0 { rejected.tick(at: lift + 1.6) }
+            else {
+                rejected.process(report([(0,500,500,true)]), at: lift + 0.1)
+                if invalid == 1 { rejected.tick(at: lift + 0.4) }
+                else { rejected.process(report([(0,600,500,true)]), at: lift + 0.15) }
+                rejected.process(emptyReport, at: lift + 0.45)
+            }
+            precondition(rejected.samples.isEmpty, "Reject timed-out, held or moving third taps")
+        }
+        print("Triple calibration passed: independent medians, combined rhythm, no partial samples, timeout/hold/movement rejection.")
     }
 
     private static func testDoubleTapMedianAndTiming() {

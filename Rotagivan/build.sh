@@ -51,6 +51,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/EventPoster.swift" \
   "$script_dir/AppExplorerSelection.swift" \
   "$script_dir/AppExplorer.swift" \
+  "$script_dir/AppExplorerSettingsView.swift" \
   "$script_dir/GestureEngine.swift" \
   "$script_dir/DoubleTapSwipe.swift" \
   "$script_dir/SwipeDirectionClassification.swift" \

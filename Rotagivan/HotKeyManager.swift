@@ -122,6 +122,13 @@ final class HotKeyManager {
     var onProfileChanged: ((UInt32) -> Void)?
     var profileName: ((UInt32) -> String?)?
     var onAction: ((UInt32, Bool) -> Void)?
+    var onExplorerHold: ((Bool) -> Void)?
+    private var explorerShortcut: RecordedShortcut?
+    func configureExplorer(_ shortcut: RecordedShortcut?) {
+        guard shortcut != explorerShortcut else { return }
+        explorerShortcut = shortcut
+        if handler != nil { registerActions() }
+    }
     private var refs: [EventHotKeyRef?] = []
     private var handler: EventHandlerRef?
     private var pressed = Set<UInt32>()
@@ -171,6 +178,7 @@ final class HotKeyManager {
         NotificationCenter.default.publisher(for: .shortcutRecordingStarted).sink { [weak self] _ in
             guard let self else { return }
             self.recording = true
+            self.onExplorerHold?(false)
             self.onAction?(5, false)
             (self.refs + self.actionRefs).compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
             self.refs.removeAll()
@@ -258,6 +266,7 @@ final class HotKeyManager {
 
     private func registerActions() {
         guard !recording else { return }
+        onExplorerHold?(false)
         // Releasing before replacing registrations prevents a stuck drag on profile changes.
         onAction?(5, false)
         pressed.removeAll()
@@ -282,10 +291,32 @@ final class HotKeyManager {
             if result != noErr { ShortcutSettings.shared.error = "\(name) shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
         }
+        if let shortcut = explorerShortcut {
+            let modifiers = UInt32((shortcut.modifiers & (1 << 18) != 0 ? 4096 : 0) |
+                (shortcut.modifiers & (1 << 19) != 0 ? 2048 : 0) |
+                (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
+                (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
+            guard used.insert("\(shortcut.keyCode):\(modifiers)").inserted else {
+                ShortcutSettings.shared.error = "App Explorer conflicts with a profile or mouse shortcut."; return
+            }
+            guard shortcut.keyCode >= 64 || modifiers != 0 else {
+                ShortcutSettings.shared.error = "App Explorer letter shortcuts need a modifier."; return
+            }
+            var ref: EventHotKeyRef?
+            let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: 6), GetApplicationEventTarget(), 0, &ref)
+            if result != noErr { ShortcutSettings.shared.error = "App Explorer shortcut is unavailable. Choose another combination." }
+            actionRefs.append(ref)
+        }
     }
 
     private func handle(id: UInt32, down: Bool) {
         guard !recording else { return }
+        if id == 6 {
+            if down { guard pressed.insert(id).inserted else { return } }
+            else { pressed.remove(id) }
+            onExplorerHold?(down)
+            return
+        }
         if (3...5).contains(id) {
             if down { guard pressed.insert(id).inserted else { return } }
             else { pressed.remove(id) }

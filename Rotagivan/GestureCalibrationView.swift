@@ -16,6 +16,8 @@ final class GestureCalibrationSession: ObservableObject, Identifiable {
     var medianDoubleTapInterval: Double? { recorder.medianDoubleTapInterval }
     var medianSwipeWindow: Double? { recorder.medianSwipeWindow }
     var medianSwipeDuration: Double? { recorder.medianSwipeDuration }
+    var medianSecondTapInterval: Double? { recorder.medianSecondTapInterval }
+    var combinedTripleInterval: Double? { recorder.combinedTripleInterval }
 
     private var recorder: GestureCalibrationRecorder
 
@@ -83,13 +85,13 @@ struct GestureCalibrationView: View {
             footer
         }
         .padding(24)
-        .frame(width: 520, height: session.mode != .doubleTap ? 590 : 540)
+        .frame(width: 520, height: session.mode == .tripleTap ? 650 : session.mode != .doubleTap ? 590 : 540)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: session.mode != .doubleTap ? "hand.draw" : "hand.tap")
+            Image(systemName: [.doubleTap, .tripleTap].contains(session.mode) ? "hand.tap" : "hand.draw")
                 .font(.system(size: 24, weight: .medium))
                 .foregroundStyle(.teal)
                 .frame(width: 34, height: 34)
@@ -159,9 +161,9 @@ struct GestureCalibrationView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text("Attempt").frame(width: 58, alignment: .leading)
-                Text(session.mode == .singleTapSwipe ? "Swipe duration" : "Tap interval").frame(maxWidth: .infinity, alignment: .trailing)
+                Text(session.mode == .singleTapSwipe ? "Swipe duration" : session.mode == .tripleTap ? "Tap 1 → 2" : "Tap interval").frame(maxWidth: .infinity, alignment: .trailing)
                 if session.mode != .doubleTap {
-                    Text("Swipe window").frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(session.mode == .tripleTap ? "Tap 2 → 3" : "Swipe window").frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
             .font(.caption.weight(.semibold))
@@ -175,7 +177,7 @@ struct GestureCalibrationView: View {
                             Text(milliseconds(session.mode == .singleTapSwipe ? (sample.swipeDuration ?? 0) : sample.doubleTapInterval))
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                             if session.mode != .doubleTap {
-                                Text(sample.swipeWindow.map(milliseconds) ?? "—")
+                                Text((session.mode == .tripleTap ? sample.secondTapInterval : sample.swipeWindow).map(milliseconds) ?? "—")
                                     .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
@@ -205,7 +207,12 @@ struct GestureCalibrationView: View {
         } else if session.isComplete, let tapMedian = session.medianDoubleTapInterval {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Median result").font(.system(size: 12, weight: .semibold))
-                if session.mode == .singleTapSwipe, let duration = session.medianSwipeDuration {
+                if session.mode == .tripleTap, let second = session.medianSecondTapInterval {
+                    resultLine(label: "Tap 1 → 2", rawSeconds: tapMedian, range: 0.05...0.6)
+                    resultLine(label: "Tap 2 → 3", rawSeconds: second, range: 0.05...0.6)
+                    Text("Combined rhythm: \(milliseconds(session.combinedTripleInterval ?? 0)). Intervals are measured lift-to-lift, including the next tap's contact time.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else if session.mode == .singleTapSwipe, let duration = session.medianSwipeDuration {
                     resultLine(label: "Quick-swipe duration", rawSeconds: duration, range: 0.06...0.3)
                 } else {
                     resultLine(label: "Double-tap interval", rawSeconds: tapMedian, range: 0.05...0.6)
@@ -246,6 +253,7 @@ struct GestureCalibrationView: View {
     private var title: String {
         switch session.mode {
         case .doubleTap: return "Calibrate double tap"
+        case .tripleTap: return "Calibrate triple tap"
         case .doubleTapSwipe: return "Calibrate double tap + swipe"
         case .singleTapSwipe: return "Calibrate tap + quick swipe"
         }
@@ -255,6 +263,8 @@ struct GestureCalibrationView: View {
         switch session.mode {
         case .doubleTap:
             return "Lift your finger, then make two distinct taps at your natural pace. Lift again before the next attempt."
+        case .tripleTap:
+            return "Tap three times naturally, then pause. Repeat 10 times. We learn each tap-to-tap interval separately and combine them into your triple-tap rhythm."
         case .doubleTapSwipe:
             return "Lift your finger, make two distinct taps, then place a third contact and swipe horizontally, vertically, or diagonally before lifting."
         case .singleTapSwipe:

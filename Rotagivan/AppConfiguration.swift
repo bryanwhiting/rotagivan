@@ -66,6 +66,14 @@ struct AppConfiguration: Codable {
     }
 
     func validate() throws {
+        if let explorer = settings.appExplorer {
+            guard explorer.favorites.count <= 8,
+                  Set(explorer.favorites.map(\.direction)).count == explorer.favorites.count,
+                  explorer.favorites.allSatisfy({ !$0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                      $0.bundleID != "local.rotagivan" && !$0.name.isEmpty }) else {
+                throw ConfigurationError("App Explorer favorites need unique directions and valid application identifiers.")
+            }
+        }
         let apps = settings.appOverrides ?? []
         guard apps.count <= 100, Set(apps.map(\.bundleID)).count == apps.count,
               apps.allSatisfy({ !$0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.name.isEmpty &&
@@ -164,7 +172,10 @@ private indirect enum ConfigurationValue: Codable {
             let allowed: String
             switch key {
             case "": allowed = "formatVersion settings shortcuts"
-            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides"
+            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer"
+            case "appExplorer": allowed = "defaultMode favorites holdShortcut"
+            case "favorites": allowed = "direction bundleID name"
+            case "holdShortcut": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
             case "shortcut": allowed = "keyCode modifiers keyLabel"
@@ -187,7 +198,7 @@ private indirect enum ConfigurationValue: Codable {
                 if case .number(let fine)? = values["fineGain"], case .number(let fast)? = values["fastGain"], fine > fast {
                     throw ConfigurationError("\(path): Fine speed cannot exceed Fast speed.")
                 }
-            case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval"
+            case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval"
             case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
             case "doubleTapSwipe", "singleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
             case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel"
@@ -231,6 +242,7 @@ private indirect enum ConfigurationValue: Codable {
                 "tapMaxDuration": 0...1, "tapImpactSpeed": 0...1, "tapMaxMovement": 0...160, "tapMovementRadius": 0...160,
                 "dragRegripWindow": 0...2, "regripWindow": 0...2, "secondFingerGracePeriod": 0...2,
                 "doubleTapInterval": 0.05...0.6, "doubleTapDelay": 0.05...0.6, "keyCode": 0...127,
+                "tripleTapFirstInterval": 0.05...0.6, "tripleTapSecondInterval": 0.05...0.6,
                 "modifiers": 0...Double(UInt32.max), "gain": 0...CursorResponse.maximumGain, "x": 0...1, "inputRange": 250...8000
             ]
             guard number.isFinite, number >= 0, ranges[key]?.contains(number) ?? true else {

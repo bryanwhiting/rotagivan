@@ -40,6 +40,9 @@ xcrun swiftc "${common[@]}" Rotagivan/Tests/SwipeDirectionTests.swift -o "$test_
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/AppExplorerSelection.swift \
   Rotagivan/Tests/AppExplorerTests.swift -o "$test_dir/AppExplorerTests"
 "$test_dir/AppExplorerTests"
+xcrun swiftc "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/Tests/ExplorerApplicationCatalogTests.swift \
+  -framework AppKit -o "$test_dir/ExplorerApplicationCatalogTests"
+"$test_dir/ExplorerApplicationCatalogTests"
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/DoubleTapSwipe.swift \
   Rotagivan/Tests/AppOverrideTests.swift -o "$test_dir/AppOverrideTests"
 "$test_dir/AppOverrideTests"
@@ -59,6 +62,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
+  Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"

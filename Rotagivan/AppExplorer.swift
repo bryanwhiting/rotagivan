@@ -34,7 +34,7 @@ extension AppExplorerPresenting {
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
-    var applicationURL: (String) -> URL? = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     var openApplication: (URL, NSWorkspace.OpenConfiguration) -> Void = { url, configuration in
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in

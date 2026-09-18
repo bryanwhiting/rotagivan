@@ -3,6 +3,26 @@ import AppKit
 import SwiftUI
 
 @main struct ExplorerCalibrationUISmoke {
+    @MainActor static func confirmPicker(query: String, applications: [ExplorerApplication]) -> AppExplorerFavorite? {
+        var saved: AppExplorerFavorite?
+        let picker = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 540, height: 500),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        picker.isReleasedWhenClosed = false
+        picker.contentView = NSHostingView(rootView: ExplorerDestinationPicker(direction: .left,
+            onSave: { favorite, _ in saved = favorite }, onCancel: {}, query: query,
+            loadApplications: { applications }))
+        picker.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let enter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: picker.windowNumber, context: nil,
+            characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        picker.sendEvent(enter)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        picker.orderOut(nil); picker.close()
+        return saved
+    }
+
     @MainActor static func drag(in window: NSWindow, from: NSPoint, to: NSPoint, cancel: Bool = false) {
         let start = ProcessInfo.processInfo.systemUptime
         func send(_ type: NSEvent.EventType, _ point: NSPoint, _ step: Int) {
@@ -26,6 +46,7 @@ import SwiftUI
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         send(.leftMouseUp, to, 11)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15)) // Let newly occupied slots finish native-view layout.
     }
 
     @MainActor static func render<V: View>(_ root: V, size: CGSize, path: String) throws {
@@ -50,6 +71,14 @@ import SwiftUI
         defaults.set(true, forKey: "migration.rotagivan.v1")
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = SettingsStore(defaults: defaults)
+        let searchFixture = [
+            ExplorerApplication(bundleID: "com.google.Chrome", name: "Google Chrome", url: URL(fileURLWithPath: "/Applications/Google Chrome.app")),
+            ExplorerApplication(bundleID: "test.Gmail", name: "Gmail", url: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Chrome Apps.localized/Gmail.app"))
+        ]
+        try render(ExplorerDestinationPicker(direction: .left, onSave: { _, _ in }, onCancel: {}, query: "gchr", loadApplications: { searchFixture }),
+            size: CGSize(width: 540, height: 500), path: CommandLine.arguments[1] + "/fuzzy-app-picker.png")
+        try render(ExplorerDestinationPicker(direction: .left, onSave: { _, _ in }, onCancel: {}, query: "https://example.com/docs", loadApplications: { [] }),
+            size: CGSize(width: 540, height: 500), path: CommandLine.arguments[1] + "/url-picker.png")
         var settings = AppExplorerSettings()
         settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari"), at: .up)
         settings.setFavorite(AppExplorerFavorite(direction: .left, bundleID: "com.apple.finder", name: "Finder"), at: .left)
@@ -305,5 +334,13 @@ import SwiftUI
         }
         controller.dismiss()
         print("Native UI passed: inline editing, E shortcut, group preservation, native sheet/text focus, save and resume, nested HUD and app/URL dispatch, recent-group ordering/back/edit/activation.")
+        let safari = ExplorerApplicationCatalog.application(at: NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")!)!
+        precondition(confirmPicker(query: "sfri", applications: [safari])?.bundleID == safari.bundleID,
+                     "Return chooses the fuzzy-matched app without launching it")
+        precondition(confirmPicker(query: "https://example.com/docs", applications: [])?.url == "https://example.com/docs",
+                     "Return adds the pasted website")
+        precondition(confirmPicker(query: "file:///tmp/unsafe", applications: []) == nil,
+                     "Invalid/non-web URLs cannot be submitted")
+        print("Native picker passed: fuzzy app selection, pasted URL, and invalid URL rejection via Return.")
     }
 }

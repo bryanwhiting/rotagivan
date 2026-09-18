@@ -258,7 +258,7 @@ No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
 In **General → App Explorer**, choose the default mode (initially **Favorites**)
 and assign an application, web URL, or named group to each of the eight positions.
-Each empty/app/URL slot menu offers **Choose app…**, **Set URL…** (or **Edit URL…**),
+Each empty/app/URL slot menu offers **Choose app or URL…**, **Set URL…** (or **Edit URL…**),
 and **New Explorer group…**. Create a group, give it a name, and fill its own
 eight slots. **Edit group** opens its grid; breadcrumbs and the center **Back**
 button return to its parent. **Rename…** preserves all contents. Removing a
@@ -280,7 +280,16 @@ without embedded usernames/passwords are accepted. URLs export and sync with
 your settings, so avoid links containing secrets or private sign-in tokens.
 Favorites keep their exact slots, including empty or unavailable slots, and can
 launch apps that are not running. Bundle IDs, positions, mode, and the optional
-hold shortcut export and sync; absolute application paths are not saved.
+hold shortcut export and sync; absolute application paths are not included.
+
+**Choose app or URL…** fuzzy-searches `/Applications`, `~/Applications` (including
+nested Chrome app folders), and `/System/Applications` off the main thread.
+Type a partial name or abbreviation such as `gchr`, select an app, and press
+Return. Results include app icons and folder locations. Paste a full `https://`
+or `http://` URL to add a website instead, with an optional display name.
+**Browse…** still lets you choose apps elsewhere. Selected app paths are remembered
+locally for launching Chrome apps that Launch Services has not indexed; those
+path hints are not exported or synced. Only the app bundle ID and name sync.
 
 Record **Hold for recent apps** to open the alternate mode while holding a key.
 If Recent apps is your default, the shortcut instead opens Favorites. Swipe and

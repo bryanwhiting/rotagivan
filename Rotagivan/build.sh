@@ -50,6 +50,8 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/TrackpadDistanceControl.swift" \
   "$script_dir/EventPoster.swift" \
   "$script_dir/AppExplorerSelection.swift" \
+  "$script_dir/ExplorerApplicationCatalog.swift" \
+  "$script_dir/ExplorerDestinationPicker.swift" \
   "$script_dir/AppExplorer.swift" \
   "$script_dir/AppExplorerSettingsView.swift" \
   "$script_dir/GestureEngine.swift" \

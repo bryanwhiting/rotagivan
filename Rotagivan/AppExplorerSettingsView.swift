@@ -1,10 +1,10 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct AppExplorerSettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var shortcuts = ShortcutSettings.shared
     @State private var editingURLPath: [SwipeDirection]?
+    @State private var editingApplicationPath: [SwipeDirection]?
     @State private var groupPath: [SwipeDirection]
     @State private var editingGroupPath: [SwipeDirection]?
     @State private var removingGroupPath: [SwipeDirection]?
@@ -106,6 +106,21 @@ struct AppExplorerSettingsView: View {
                 : "Drag an icon or name to another slot to swap; drop into an empty slot to move. Use ••• to choose apps, URLs, or groups. Changes save automatically. Tap the center in the HUD to go back.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+        .sheet(isPresented: Binding(get: { editingApplicationPath != nil }, set: { if !$0 { editingApplicationPath = nil } })) {
+            if let path = editingApplicationPath, let direction = path.last {
+                ExplorerDestinationPicker(direction: direction, onSave: { favorite, application in
+                    var next = settings
+                    guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
+                        groupError = "The destination group changed. Reopen the picker and try again."
+                        editingApplicationPath = nil
+                        return
+                    }
+                    if let application { ExplorerApplicationCatalog.remember(application) }
+                    store.settings.appExplorer = next
+                    groupError = nil; editingApplicationPath = nil
+                }, onCancel: { editingApplicationPath = nil })
+            }
+        }
         .sheet(isPresented: Binding(get: { editingURLPath != nil }, set: { if !$0 { editingURLPath = nil } })) {
             if let path = editingURLPath, let direction = path.last {
                 let favorite = settings.favorite(at: path)
@@ -165,7 +180,7 @@ struct AppExplorerSettingsView: View {
                         Button("Edit group…") { groupPath.append(direction) }
                         Button("Rename group…") { editingGroupPath = groupPath + [direction] }
                     } else {
-                        Button("Choose app…") { choose(direction) }
+                        Button("Choose app or URL…") { editingApplicationPath = groupPath + [direction] }
                         Button(favorite?.url != nil ? "Edit URL…" : "Set URL…") { editingURLPath = groupPath + [direction] }
                         Divider()
                         Button("New Explorer group…") { editingGroupPath = groupPath + [direction] }
@@ -281,24 +296,12 @@ struct AppExplorerSettingsView: View {
 
     static func applicationIcon(for favorite: AppExplorerFavorite?) -> NSImage? {
         guard let favorite, !favorite.isGroup, favorite.url == nil, let bundleID = favorite.bundleID,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+              let url = ExplorerApplicationCatalog.applicationURL(for: bundleID) else { return nil }
         // Native menu labels use NSImage's intrinsic size, not just the SwiftUI
         // frame. Copy before sizing so the workspace's cached icon is untouched.
         let icon = NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage
         icon?.size = NSSize(width: 16, height: 16)
         return icon
-    }
-    private func choose(_ direction: SwipeDirection) {
-        let path = groupPath
-        let picker = NSOpenPanel()
-        picker.title = "Choose \(direction.title) favorite"
-        picker.allowedContentTypes = [.applicationBundle]
-        picker.directoryURL = URL(fileURLWithPath: "/Applications")
-        picker.allowsMultipleSelection = false
-        guard picker.runModal() == .OK, let url = picker.url,
-              let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, id != "local.rotagivan" else { return }
-        let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-        edit { $0.setFavorite(AppExplorerFavorite(direction: direction, bundleID: id, name: name), at: direction, in: path) }
     }
 }
 

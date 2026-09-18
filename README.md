@@ -269,6 +269,27 @@ The current app, Rotagivan, and background-only helpers are excluded. If fewer
 than eight eligible apps are running, remaining tiles stay empty. Gesture
 assignments themselves do inherit, copy, export, and sync with profiles.
 
+### Two-finger tap and swipe combinations
+
+Under a profile's **Tapping** section, enable **Two-finger tap, then quick swipe**
+or **Two-finger double-tap, then swipe**. Tap with both fingers, lift both, then
+swipe with both fingers together. The double-tap variant requires two completed
+two-finger taps before the swipe. Assign a recorded shortcut or App Explorer to
+any of eight directions, including diagonals. Both gestures are off by default.
+
+Each variant has its own swipe window, distance, and bindings; the single-tap
+variant also has a quick-swipe duration. Actions fire once both fingers lift.
+Slightly staggered landings/lifts are accepted. A reserved swipe cannot move the
+cursor, scroll, or start dragging. Long holds cancel; lift both fingers before
+starting ordinary scrolling again. Without a preceding tap, normal two-finger
+scrolling and app-specific navigation continue to work.
+
+Stationary follow-up taps still use the existing two-finger double/triple-tap
+actions. If no swipe follows, the earlier tap action runs after its recognition
+window. These settings support profile inheritance, Tapping **Copy from**,
+per-app overrides, YAML export/import, and account sync. They do not alter the
+one-finger gesture settings.
+
 ### Single tap, then quick swipe
 
 In a profile's **Tapping** section, enable **Single tap, then quick swipe** and

@@ -59,12 +59,20 @@ struct ConfigurationTests {
         gestures.singleTapSwipe!.fastSwipeDuration = 0.125
         gestures.singleTapSwipe!.topRight = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
         gestures.singleTapSwipe!.setAction(.appExplorer, for: .down)
+        gestures.twoFingerSingleTapSwipe = gestures.singleTapSwipe
+        gestures.twoFingerDoubleTapSwipe = DoubleTapSwipeSettings(enabled: true)
+        gestures.twoFingerDoubleTapSwipe!.bottomLeft = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
         gestures.oneFingerDoubleTap = .appExplorer
         gestures.gestures.tripleTapFirstInterval = 0.14
         gestures.gestures.tripleTapSecondInterval = 0.24
         withSingleSwipe.settings.profileGestures?[1] = gestures
         let singleSwipeYAML = try withSingleSwipe.yaml()
         let singleSwipeRoundtrip = try AppConfiguration.parse(singleSwipeYAML)
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).twoFingerSingleTapSwipe == gestures.twoFingerSingleTapSwipe)
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).twoFingerDoubleTapSwipe == gestures.twoFingerDoubleTapSwipe)
+        var invalidPair = withSingleSwipe
+        invalidPair.settings.profileGestures?[1]?.twoFingerDoubleTapSwipe?.swipeDistance = 999
+        rejected(try ConfigurationYAML.encode(invalidPair), "out-of-range two-finger swipe distance")
         precondition(singleSwipeRoundtrip.settings.appExplorer == withSingleSwipe.settings.appExplorer)
         precondition(singleSwipeRoundtrip.settings.gestures(for: 1).gestures.tripleTapSecondInterval == 0.24)
         precondition(singleSwipeRoundtrip.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval == withSingleSwipe.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval)

@@ -7,6 +7,10 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
     case doubleLeft = "double.left", doubleRight = "double.right", doubleUp = "double.up", doubleDown = "double.down"
     case doubleTopLeft = "double.topLeft", doubleTopRight = "double.topRight", doubleBottomLeft = "double.bottomLeft", doubleBottomRight = "double.bottomRight"
     case twoFingerLeft = "twoFinger.left", twoFingerRight = "twoFinger.right"
+    case twoSingleLeft = "twoSingle.left", twoSingleRight = "twoSingle.right", twoSingleUp = "twoSingle.up", twoSingleDown = "twoSingle.down"
+    case twoSingleTopLeft = "twoSingle.topLeft", twoSingleTopRight = "twoSingle.topRight", twoSingleBottomLeft = "twoSingle.bottomLeft", twoSingleBottomRight = "twoSingle.bottomRight"
+    case twoDoubleLeft = "twoDouble.left", twoDoubleRight = "twoDouble.right", twoDoubleUp = "twoDouble.up", twoDoubleDown = "twoDouble.down"
+    case twoDoubleTopLeft = "twoDouble.topLeft", twoDoubleTopRight = "twoDouble.topRight", twoDoubleBottomLeft = "twoDouble.bottomLeft", twoDoubleBottomRight = "twoDouble.bottomRight"
     var id: String { rawValue }
     var direction: SwipeDirection? { SwipeDirection(rawValue: String(rawValue.split(separator: ".").last!)) }
     var title: String {
@@ -18,7 +22,14 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
         case .oneFingerTripleTap: return "One-finger triple tap"
         case .twoFingerTripleTap: return "Two-finger triple tap"
         default:
-            let prefix = rawValue.hasPrefix("single.") ? "Tap + swipe" : (rawValue.hasPrefix("double.") ? "Double-tap + swipe" : "Two-finger swipe")
+            let prefix: String
+            switch rawValue.split(separator: ".").first {
+            case "single": prefix = "Tap + swipe"
+            case "double": prefix = "Double-tap + swipe"
+            case "twoSingle": prefix = "Two-finger tap + swipe"
+            case "twoDouble": prefix = "Two-finger double-tap + swipe"
+            default: prefix = "Two-finger swipe"
+            }
             return "\(prefix) \(direction!.title.lowercased())"
         }
     }
@@ -59,8 +70,16 @@ struct AppGestureOverride: Codable, Equatable, Identifiable {
             case .twoFingerTripleTap: result.twoFingerTripleTap = binding.action; result.twoFingerTripleShortcut = binding.shortcut
             default:
                 guard let direction = binding.trigger.direction else { continue }
-                let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?> = binding.trigger.rawValue.hasPrefix("single.") ? \.singleTapSwipe : (binding.trigger.rawValue.hasPrefix("double.") ? \.doubleTapSwipe : \.twoFingerSwipe)
-                var swipe = result[keyPath: key] ?? (binding.trigger.rawValue.hasPrefix("single.") ? .singleTapDefaults : DoubleTapSwipeSettings())
+                let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?>
+                switch binding.trigger.rawValue.split(separator: ".").first {
+                case "single": key = \.singleTapSwipe
+                case "double": key = \.doubleTapSwipe
+                case "twoSingle": key = \.twoFingerSingleTapSwipe
+                case "twoDouble": key = \.twoFingerDoubleTapSwipe
+                default: key = \.twoFingerSwipe
+                }
+                let single = key == \.singleTapSwipe || key == \.twoFingerSingleTapSwipe
+                var swipe = result[keyPath: key] ?? (single ? .singleTapDefaults : DoubleTapSwipeSettings())
                 if !swipe.enabled && binding.action != .none {
                     for direction in SwipeDirection.allCases { swipe.setAction(.none, for: direction) }
                 }

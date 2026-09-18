@@ -31,6 +31,7 @@ final class GestureEngine {
         var tripleAction: TapAction
         var tripleShortcut: RecordedShortcut?
         var configuration: ProfileGestures
+        var isSingleTapSwipe = false
     }
     private var deferredDoubleTap: DeferredDoubleTap?
     private var swipeRecognizer = DoubleTapSwipeRecognizer()
@@ -189,7 +190,14 @@ final class GestureEngine {
                 let deferred = deferredDoubleTap
                 cancelTapSwipe()
                 if let deferred {
-                    performTap(deferred.tripleAction, shortcut: deferred.tripleShortcut, at: now)
+                    if deferred.isSingleTapSwipe {
+                        // The follow-up was a second tap, not a swipe. Restore
+                        // the first tap so normal double/triple arbitration runs.
+                        pendingTap = deferred.fallback.first
+                        registerTap(fingerCount: 2, at: now)
+                    } else {
+                        performTap(deferred.tripleAction, shortcut: deferred.tripleShortcut, at: now)
+                    }
                 }
             case .cancelled: cancelTapSwipe()
             case .swipe(let direction):
@@ -517,9 +525,10 @@ final class GestureEngine {
         let tripleShortcut = fingerCount == 2 ? active.twoFingerTripleShortcut : active.oneFingerTripleShortcut
         let firstInterval = tripleAction == .none ? doubleTapInterval : active.gestures.resolvedTripleTapFirstInterval
         let secondInterval = active.gestures.resolvedTripleTapSecondInterval
-        let swipeSettings = active.doubleTapSwipe ?? DoubleTapSwipeSettings()
-        let canSwipe = fingerCount == 1 && swipeSettings.isConfigured
-        let canSingleSwipe = fingerCount == 1 && active.singleTapSwipe?.isConfigured == true
+        let swipeSettings = (fingerCount == 2 ? active.twoFingerDoubleTapSwipe : active.doubleTapSwipe) ?? DoubleTapSwipeSettings()
+        let singleSettings = fingerCount == 2 ? active.twoFingerSingleTapSwipe : active.singleTapSwipe
+        let canSwipe = swipeSettings.isConfigured
+        let canSingleSwipe = singleSettings?.isConfigured == true
 
         if let pendingTap {
             if pendingTap.fingerCount == fingerCount, now.timeIntervalSince(pendingTap.date) <= (pendingTap.tapCount == 2 ? secondInterval : firstInterval) {
@@ -541,7 +550,8 @@ final class GestureEngine {
                     lastTap = .distantPast
                     swipeRecognizer.arm(at: now, settings: swipeSettings,
                         tripleTapDuration: tripleAction == .none ? nil : active.gestures.tapMaxDuration,
-                        tripleTapRadius: active.gestures.tapMaxMovement, tripleTapInterval: secondInterval)
+                        tripleTapRadius: active.gestures.tapMaxMovement, tripleTapInterval: secondInterval,
+                        fingerCount: fingerCount)
                     let wait = tripleAction == .none ? swipeSettings.resolvedWindow : max(swipeSettings.resolvedWindow, secondInterval)
                     let timer = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
                         MainActor.assumeIsolated {
@@ -571,7 +581,29 @@ final class GestureEngine {
             performTap(action, shortcut: shortcut, at: now)
             return
         }
-        let wait = canSingleSwipe ? max(active.singleTapSwipe!.resolvedWindow,
+        if fingerCount == 2, canSingleSwipe, let singleSettings {
+            var first = PendingTap(profileID: store.activeProfileID, fingerCount: 2,
+                action: action, shortcut: shortcut, date: now)
+            first.configuration = active
+            deferredDoubleTap = DeferredDoubleTap(profileID: store.activeProfileID, settings: singleSettings,
+                fallback: [first], tripleAction: .none, tripleShortcut: nil, configuration: active,
+                isSingleTapSwipe: true)
+            lastTap = .distantPast
+            swipeRecognizer.arm(at: now, settings: singleSettings,
+                tripleTapDuration: active.gestures.tapMaxDuration, tripleTapRadius: active.gestures.tapMaxMovement,
+                tripleTapInterval: firstInterval, fingerCount: 2,
+                maximumDuration: singleSettings.resolvedFastDuration)
+            let timer = Timer(timeInterval: max(singleSettings.resolvedWindow, firstInterval), repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.swipeRecognizer.expire(at: self.clock()) { self.finishDeferredDoubleTap() }
+                }
+            }
+            swipeTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+            return
+        }
+        let wait = canSingleSwipe ? max(singleSettings!.resolvedWindow,
             doubleAction != .none || tripleAction != .none || canSwipe ? firstInterval : 0) : firstInterval
         schedulePendingTap(PendingTap(profileID: store.activeProfileID, fingerCount: fingerCount,
             action: action, shortcut: shortcut, date: now), interval: wait)

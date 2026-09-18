@@ -311,6 +311,8 @@ struct ProfileGestures: Codable, Equatable {
     var twoFingerDoubleShortcut: RecordedShortcut?
     var doubleTapSwipe: DoubleTapSwipeSettings? = nil
     var singleTapSwipe: DoubleTapSwipeSettings? = nil
+    var twoFingerSingleTapSwipe: DoubleTapSwipeSettings? = nil
+    var twoFingerDoubleTapSwipe: DoubleTapSwipeSettings? = nil
     var oneFingerTripleTap: TapAction? = nil
     var twoFingerTripleTap: TapAction? = nil
     var oneFingerTripleShortcut: RecordedShortcut? = nil
@@ -390,6 +392,8 @@ struct StoredSettings: Codable {
             result.twoFingerDoubleShortcut = primary.twoFingerDoubleShortcut
             result.doubleTapSwipe = primary.doubleTapSwipe
             result.singleTapSwipe = primary.singleTapSwipe
+            result.twoFingerSingleTapSwipe = primary.twoFingerSingleTapSwipe
+            result.twoFingerDoubleTapSwipe = primary.twoFingerDoubleTapSwipe
             result.twoFingerSwipe = primary.twoFingerSwipe
             result.oneFingerTripleTap = primary.oneFingerTripleTap
             result.twoFingerTripleTap = primary.twoFingerTripleTap

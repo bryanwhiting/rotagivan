@@ -118,10 +118,19 @@ struct DoubleTapSwipeRecognizer {
     private var swipeDeadline = Date.distantPast
     private var swipeAllowed = true
     private var maximumMovement = 0.0
+    private var pairRecognizer = TwoFingerTapSwipeRecognizer()
+    private var fingerCount = 1
 
     mutating func arm(at now: Date, settings: DoubleTapSwipeSettings,
                       tripleTapDuration: Double? = nil, tripleTapRadius: Double = 0,
-                      tripleTapInterval: Double = 0.3) {
+                      tripleTapInterval: Double = 0.3, fingerCount: Int = 1,
+                      maximumDuration: Double = 0.7) {
+        self.fingerCount = fingerCount
+        if fingerCount == 2 {
+            pairRecognizer.arm(at: now, settings: settings, tapDuration: tripleTapDuration,
+                tapRadius: tripleTapRadius, tapInterval: tripleTapInterval, maximumDuration: maximumDuration)
+            return
+        }
         swipeDeadline = now.addingTimeInterval(settings.resolvedWindow)
         tripleDeadline = tripleTapDuration == nil ? .distantPast : now.addingTimeInterval(tripleTapInterval)
         phase = .waiting(max(swipeDeadline, tripleDeadline))
@@ -132,6 +141,7 @@ struct DoubleTapSwipeRecognizer {
     }
 
     mutating func cancel() {
+        if fingerCount == 2 { pairRecognizer.cancel(); return }
         switch phase {
         case .swiping, .untilLift: phase = .untilLift
         default: phase = .idle
@@ -139,6 +149,7 @@ struct DoubleTapSwipeRecognizer {
     }
 
     mutating func update(_ contacts: [FingerContact], at now: Date) -> Result {
+        if fingerCount == 2 { return pairRecognizer.update(contacts, at: now) }
         switch phase {
         case .idle:
             return Result()
@@ -194,8 +205,117 @@ struct DoubleTapSwipeRecognizer {
 
     /// Timer expiry must not flush a double tap while its third touch is active.
     mutating func expire(at now: Date) -> Bool {
+        if fingerCount == 2 { return pairRecognizer.expire(at: now) }
         guard case .waiting(let deadline) = phase, now >= deadline else { return false }
         phase = .idle
         return true
+    }
+}
+
+/// Reserves a two-finger follow-up touch after completed taps. Stable contact IDs
+/// avoid centroid jumps when fingers land/lift on adjacent reports. Both fingers
+/// must move together, so a pinch or one moving finger cannot fire a shortcut.
+struct TwoFingerTapSwipeRecognizer {
+    typealias Result = DoubleTapSwipeRecognizer.Result
+    typealias Completion = DoubleTapSwipeRecognizer.Completion
+    private enum Phase { case idle, waiting, joining, moving, ending, drain }
+    private var phase = Phase.idle
+    private var settings = DoubleTapSwipeSettings()
+    private var deadline = Date.distantPast
+    private var swipeDeadline = Date.distantPast
+    private var tapDeadline = Date.distantPast
+    private var started = Date.distantPast
+    private var lifted = Date.distantPast
+    private var tapDuration: Double?
+    private var tapRadius = 0.0
+    private var maximumDuration = 0.7
+    private var first: FingerContact?
+    private var origins: [UInt8: CGPoint] = [:]
+    private var last: [UInt8: CGPoint] = [:]
+    private var travel = 0.0
+    private var completion: Completion?
+
+    mutating func arm(at now: Date, settings: DoubleTapSwipeSettings, tapDuration: Double?,
+                      tapRadius: Double, tapInterval: Double, maximumDuration: Double) {
+        self = Self()
+        self.settings = settings; self.tapDuration = tapDuration; self.tapRadius = tapRadius
+        self.maximumDuration = maximumDuration
+        swipeDeadline = now.addingTimeInterval(settings.resolvedWindow)
+        tapDeadline = tapDuration == nil ? .distantPast : now.addingTimeInterval(tapInterval)
+        deadline = max(swipeDeadline, tapDeadline)
+        phase = .waiting
+    }
+
+    mutating func cancel() {
+        phase = (phase == .waiting || phase == .idle) ? .idle : .drain
+    }
+
+    mutating func expire(at now: Date) -> Bool {
+        guard phase == .waiting, now >= deadline else { return false }
+        phase = .idle; return true
+    }
+
+    private mutating func reject(_ contacts: [FingerContact]) -> Result {
+        phase = contacts.isEmpty ? .idle : .drain
+        return Result(consumed: true, completion: .cancelled)
+    }
+
+    mutating func update(_ contacts: [FingerContact], at now: Date) -> Result {
+        if phase == .idle { return Result() }
+        if phase == .drain {
+            if contacts.isEmpty { phase = .idle }
+            return Result(consumed: true)
+        }
+        guard contacts.count <= 2, contacts.allSatisfy(\.confident),
+              Set(contacts.map(\.id)).count == contacts.count else { return reject(contacts) }
+        if phase == .waiting {
+            if now > deadline { phase = .idle; return Result(completion: .fallback) }
+            if contacts.isEmpty { return Result() }
+            started = now; first = contacts.first; phase = .joining
+        }
+        if phase == .joining {
+            guard now.timeIntervalSince(started) <= 0.06, !contacts.isEmpty,
+                  let first, contacts.contains(where: { $0.id == first.id && hypot($0.x - first.x, $0.y - first.y) < 40 }) else {
+                return reject(contacts)
+            }
+            if contacts.count == 1 { return Result(consumed: true) }
+            origins = Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, CGPoint(x: $0.x, y: $0.y)) })
+            last = origins; phase = .moving
+        }
+        if phase == .ending {
+            guard now.timeIntervalSince(lifted) <= 0.12, contacts.count < 2,
+                  contacts.allSatisfy({ last[$0.id] != nil }) else { return reject(contacts) }
+            if contacts.isEmpty { phase = .idle; return Result(consumed: true, completion: completion) }
+            return Result(consumed: true)
+        }
+        guard now.timeIntervalSince(started) <= max(maximumDuration, tapDuration ?? 0),
+              contacts.allSatisfy({ finger in
+                  guard let previous = last[finger.id] else { return false }
+                  return hypot(finger.x - previous.x, finger.y - previous.y) < 400
+              }) else { return reject(contacts) }
+        if contacts.count == 2 {
+            last = Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, CGPoint(x: $0.x, y: $0.y)) })
+            for (id, point) in last { travel = max(travel, hypot(point.x - origins[id]!.x, point.y - origins[id]!.y)) }
+            return Result(consumed: true)
+        }
+        // Freeze the displacement at the last report containing both fingers.
+        // Do not turn staggered lifts into extra movement or a new gesture.
+        let dx = last.reduce(0.0) { $0 + $1.value.x - origins[$1.key]!.x } / 2
+        let dy = last.reduce(0.0) { $0 + $1.value.y - origins[$1.key]!.y } / 2
+        let distance = hypot(dx, dy)
+        if let tapDuration, now <= tapDeadline, now.timeIntervalSince(started) <= tapDuration,
+           travel <= tapRadius, travel < settings.resolvedDistance {
+            completion = .tap
+        } else if started <= swipeDeadline, now.timeIntervalSince(started) <= maximumDuration,
+                  distance >= settings.resolvedDistance,
+                  last.allSatisfy({ id, point in
+                      let x = point.x - origins[id]!.x, y = point.y - origins[id]!.y
+                      return (x * dx + y * dy) / max(distance, 1) >= settings.resolvedDistance / 3
+                  }), let direction = SwipeDirection.classify(dx: dx, dy: dy) {
+            completion = .swipe(direction)
+        } else { completion = .fallback }
+        if contacts.isEmpty { phase = .idle; return Result(consumed: true, completion: completion) }
+        lifted = now; phase = .ending
+        return Result(consumed: true)
     }
 }

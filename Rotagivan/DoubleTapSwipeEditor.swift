@@ -3,16 +3,22 @@ import SwiftUI
 struct DoubleTapSwipeEditor: View {
     @Binding var settings: DoubleTapSwipeSettings
     var singleTap = false
+    var twoFingers = false
     var onCalibrate: (() -> Void)? = nil
     var canCalibrate = false
     var distanceScale: TrackpadDistanceScale? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle(singleTap ? "Single tap, then quick swipe" : "Double-tap, then swipe", isOn: $settings.enabled)
+            Toggle(twoFingers ? (singleTap ? "Two-finger tap, then quick swipe" : "Two-finger double-tap, then swipe") : (singleTap ? "Single tap, then quick swipe" : "Double-tap, then swipe"), isOn: $settings.enabled)
             if settings.enabled {
+                if twoFingers {
+                    Text(singleTap ? "With both fingers: tap → lift → quick swipe → lift. Move both fingers together. A short second tap still counts as a double tap." : "With both fingers: tap → lift → tap → lift → swipe → lift. Move both fingers together; the action fires after both lift.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
                 Text(singleTap ? "One finger: tap → lift → quick swipe → lift. Finish the swipe within the quick-swipe duration. Holding longer hands control to tap-and-hold dragging; no shortcut fires." : "One finger: tap → lift → tap → lift → swipe → lift. The shortcut fires when the swipe ends; the cursor stays still during the swipe.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 directionEditors("Horizontal & vertical", directions: [.left, .right, .up, .down])
                 directionEditors("Diagonal directions", directions: [.topLeft, .topRight, .bottomLeft, .bottomRight])
                 Stepper(value: Binding(get: { settings.resolvedWindow * 1_000 }, set: {
@@ -38,7 +44,7 @@ struct DoubleTapSwipeEditor: View {
                     .help(canCalibrate ? "Time 10 complete gestures and apply their median timing." : "Enable and connect your trackpad to calibrate.")
                 }
                 Text(settings.isConfigured
-                     ? (singleTap ? "The first tap waits briefly for a swipe. During a qualifying second touch, the cursor stays still. A quick second tap still counts as a double tap. Holding waits for the quick-swipe duration before dragging." : "Single taps wait for double-tap recognition. Double taps then wait for this swipe window. No swipe? The usual tap action runs. Tap-and-hold on the second touch still drags as before.")
+                     ? (twoFingers ? "Taps wait briefly for the next touch. A qualifying swipe suppresses scrolling and the earlier tap action. Lift both fingers before starting normal scrolling again. A long hold cancels the gesture; it never starts a drag." : (singleTap ? "The first tap waits briefly for a swipe. During a qualifying second touch, the cursor stays still. A quick second tap still counts as a double tap. Holding waits for the quick-swipe duration before dragging." : "Single taps wait for double-tap recognition. Double taps then wait for this swipe window. No swipe? The usual tap action runs. Tap-and-hold on the second touch still drags as before."))
                      : "Assign a shortcut or App Explorer to at least one direction to activate this gesture. Your existing taps are unchanged until then.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }

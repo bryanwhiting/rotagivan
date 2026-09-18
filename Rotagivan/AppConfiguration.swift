@@ -198,8 +198,8 @@ private indirect enum ConfigurationValue: Codable {
                     throw ConfigurationError("\(path): Fine speed cannot exceed Fast speed.")
                 }
             case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval"
-            case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
-            case "doubleTapSwipe", "singleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
+            case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
+            case "doubleTapSwipe", "singleTapSwipe", "twoFingerSingleTapSwipe", "twoFingerDoubleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
             case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
             case "additionalProfiles": allowed = "id name motion"

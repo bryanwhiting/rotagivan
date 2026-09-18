@@ -26,6 +26,10 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/DoubleTapSwipeTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/DoubleTapSwipeTests"
 "$test_dir/DoubleTapSwipeTests"
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+  Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/TwoFingerTapSwipeTests.swift \
+  -framework AppKit -framework CoreGraphics -o "$test_dir/TwoFingerTapSwipeTests"
+"$test_dir/TwoFingerTapSwipeTests"
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/GestureCalibration.swift \
   Rotagivan/Tests/GestureCalibrationTests.swift -o "$test_dir/GestureCalibrationTests"
 "$test_dir/GestureCalibrationTests"

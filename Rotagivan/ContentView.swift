@@ -286,6 +286,8 @@ struct ContentView: View {
             target.twoFingerDoubleShortcut = source.twoFingerDoubleShortcut
             target.doubleTapSwipe = source.doubleTapSwipe
             target.singleTapSwipe = source.singleTapSwipe
+            target.twoFingerSingleTapSwipe = source.twoFingerSingleTapSwipe
+            target.twoFingerDoubleTapSwipe = source.twoFingerDoubleTapSwipe
             target.twoFingerSwipe = source.twoFingerSwipe
             target.oneFingerTripleTap = source.oneFingerTripleTap
             target.twoFingerTripleTap = source.twoFingerTripleTap
@@ -392,6 +394,10 @@ struct ContentView: View {
                 }), onCalibrate: {
                     hid.beginCalibration(profileID: id, mode: .doubleTapSwipe)
                 }, canCalibrate: hid.canCalibrate, distanceScale: hid.distanceScale)
+                Divider()
+                twoFingerSwipeEditor(id, singleTap: true)
+                Divider()
+                twoFingerSwipeEditor(id, singleTap: false)
             }
             Divider()
             ShortcutEditor(showBehavior: false, actionIndex: 0, showError: false, profileID: id)
@@ -407,6 +413,17 @@ struct ContentView: View {
             }
         }
         .font(.system(size: 12))
+    }
+
+    private func twoFingerSwipeEditor(_ id: UInt32, singleTap: Bool) -> some View {
+        let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?> = singleTap ? \.twoFingerSingleTapSwipe : \.twoFingerDoubleTapSwipe
+        return DoubleTapSwipeEditor(settings: Binding(get: {
+            store.settings.gestures(for: id)[keyPath: key] ?? (singleTap ? .singleTapDefaults : DoubleTapSwipeSettings())
+        }, set: { value in
+            var taps = store.settings.gestures(for: id)
+            taps[keyPath: key] = value
+            store.updateGestures(taps, for: id)
+        }), singleTap: singleTap, twoFingers: true, distanceScale: hid.distanceScale)
     }
 
     private func tapRecorder(_ title: String, action: Binding<TapAction>, shortcut: Binding<RecordedShortcut?>) -> some View {

@@ -29,7 +29,10 @@ struct ExplorerDestinationPicker: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let webURL {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label(webURL.host ?? "Website", systemImage: "globe").font(.title3)
+                    HStack {
+                        WebsiteFavicon(url: webURL, size: 24)
+                        Text(webURL.host ?? "Website").font(.title3)
+                    }
                     Text(webURL.absoluteString).font(.caption).textSelection(.enabled).lineLimit(3)
                     TextField("Website name (optional)", text: $urlName).textFieldStyle(.roundedBorder)
                     Text("Opens in your default browser. URLs sync with settings; avoid private sign-in links or URLs containing secrets.")

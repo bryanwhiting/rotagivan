@@ -422,7 +422,7 @@ struct AppExplorerView: View {
                     if entry.isGroup {
                         Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else if entry.isWebURL {
-                        Image(systemName: "globe").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        WebsiteFavicon(url: entry.url, size: 42)
                     } else {
                         Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
                     }

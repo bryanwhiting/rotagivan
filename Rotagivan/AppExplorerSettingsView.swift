@@ -218,6 +218,8 @@ struct AppExplorerSettingsView: View {
                     if let icon {
                         Image(nsImage: icon).resizable().renderingMode(.original)
                             .scaledToFit().frame(width: 16, height: 16)
+                    } else if !favorite.isGroup, favorite.url != nil {
+                        WebsiteFavicon(url: favorite.resolvedWebURL, size: 16)
                     } else {
                         Image(systemName: favorite.isRecentGroup ? "clock.arrow.circlepath" : (favorite.isGroup ? "folder.fill" : (favorite.url != nil ? "globe" : "app")))
                             .frame(width: 16, height: 16)

@@ -52,6 +52,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/AppExplorerSelection.swift" \
   "$script_dir/ExplorerApplicationCatalog.swift" \
   "$script_dir/ExplorerDestinationPicker.swift" \
+  "$script_dir/WebsiteFavicon.swift" \
   "$script_dir/AppExplorer.swift" \
   "$script_dir/AppExplorerSettingsView.swift" \
   "$script_dir/GestureEngine.swift" \

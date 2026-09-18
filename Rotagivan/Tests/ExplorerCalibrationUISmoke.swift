@@ -49,13 +49,13 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.15)) // Let newly occupied slots finish native-view layout.
     }
 
-    @MainActor static func render<V: View>(_ root: V, size: CGSize, path: String) throws {
+    @MainActor static func render<V: View>(_ root: V, size: CGSize, path: String, settle: TimeInterval = 0.3) throws {
         let view = NSHostingView(rootView: root)
         let window = NSPanel(contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.contentView = view
         window.orderFront(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        RunLoop.main.run(until: Date().addingTimeInterval(settle))
         view.layoutSubtreeIfNeeded()
         let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: bitmap)
@@ -66,6 +66,24 @@ import SwiftUI
     @MainActor static func main() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
+        let faviconBitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let faviconColor = NSColor(deviceRed: 0.35, green: 0.25, blue: 0.8, alpha: 1)
+        let faviconWhite = NSColor(deviceRed: 1, green: 1, blue: 1, alpha: 1)
+        for y in 0..<32 { for x in 0..<32 {
+            faviconBitmap.setColor((x > 10 && x < 21) || (y > 10 && y < 21) ? faviconWhite : faviconColor, atX: x, y: y)
+        } }
+        let faviconPNG = faviconBitmap.representation(using: .png, properties: [:])!
+        let faviconService = FaviconService(fetch: { url, _ in
+            guard url.host == "icon.example", url.path == "/favicon.ico" else { return nil }
+            return FaviconResponse(data: faviconPNG, url: url)
+        })
+        try render(HStack(spacing: 32) {
+            VStack { WebsiteFavicon(url: URL(string: "https://icon.example/private"), size: 42, service: faviconService); Text("Website icon") }
+            VStack { WebsiteFavicon(url: URL(string: "https://missing.example/"), size: 42, service: faviconService); Text("Fallback") }
+            VStack { WebsiteFavicon(url: URL(string: "https://icon.example/"), size: 16, service: faviconService); Text("Settings icon") }
+        }.padding(24), size: CGSize(width: 400, height: 140), path: CommandLine.arguments[1] + "/favicons.png", settle: 0.8)
         let suite = "Rotagivan.ExplorerCalibrationUI.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.set(true, forKey: "migration.rotagivan.v1")
@@ -87,7 +105,7 @@ import SwiftUI
         precondition(AppExplorerSettingsView.applicationIcon(for: settings.favorites.first { $0.direction == .up }) != nil)
         precondition(AppExplorerSettingsView.applicationIcon(for: settings.favorites.first { $0.direction == .up })?.size == NSSize(width: 16, height: 16))
         precondition(AppExplorerSettingsView.applicationIcon(for: settings.favorites.first { $0.direction == .left }) != nil)
-        precondition(AppExplorerSettingsView.applicationIcon(for: settings.favorites.first { $0.direction == .right }) == nil, "Web favorites keep their globe icon")
+        precondition(AppExplorerSettingsView.applicationIcon(for: settings.favorites.first { $0.direction == .right }) == nil, "Web favorites load their icon asynchronously, not through app lookup")
         precondition(AppExplorerSettingsView.applicationIcon(for: nil) == nil)
         precondition(AppExplorerSettingsView.applicationIcon(for: AppExplorerFavorite(direction: .down, bundleID: "invalid.rotagivan.missing-app", name: "Missing app")) == nil)
         try render(AppExplorerSettingsView(store: store).padding(24).frame(width: 680, height: 570)

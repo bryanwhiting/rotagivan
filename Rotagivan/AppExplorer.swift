@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import OSLog
 
 @MainActor protocol AppExplorerPresenting: AnyObject {
     var isVisible: Bool { get }
@@ -25,8 +26,16 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     private var sourcePID: pid_t?
     private var deadline = Date.distantPast
     private var alternateHeld = false
+    private var selectionGeneration: UInt64 = 0
+    private static let logger = Logger(subsystem: "local.rotagivan", category: "AppExplorer")
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
+    var applicationURL: (String) -> URL? = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
+    var openApplication: (URL, NSWorkspace.OpenConfiguration) -> Void = { url, configuration in
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            if let error { AppExplorerController.logger.error("Application open failed: \(error.localizedDescription, privacy: .public)") }
+        }
+    }
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var isVisible: Bool { panel != nil }
@@ -64,6 +73,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
 
     func show(waitingForLift: Bool) {
         guard !isVisible else { return }
+        selectionGeneration &+= 1
         sourcePID = workspace.frontmostApplication?.processIdentifier
         loadEntries()
         model.selected = nil
@@ -121,7 +131,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                         icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
                 }
-                let url = favorite.bundleID.flatMap { workspace.urlForApplication(withBundleIdentifier: $0) }
+                let url = favorite.bundleID.flatMap(applicationURL)
                 return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
                     name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url)
             }
@@ -161,15 +171,31 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
             return
         }
         guard let identifier = entry.bundleID else { return }
-        if let app = workspace.runningApplications.first(where: { $0.bundleIdentifier == identifier && !$0.isTerminated }) {
-            app.activate(options: [])
-        } else if let url = entry.url {
-            workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        // Prefer the actual running bundle when multiple installations exist.
+        let running = workspace.runningApplications.first { $0.bundleIdentifier == identifier && !$0.isTerminated }
+        guard let url = running?.bundleURL ?? entry.url ?? applicationURL(identifier) else { return }
+        let generation = selectionGeneration
+        // A nonactivating panel restores focus as it closes. Submit the user's
+        // activation on the next main-loop turn, after that teardown finishes.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false else { return }
+            self.openApplication(url, Self.activationConfiguration())
         }
+    }
+
+    static func activationConfiguration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.hides = false
+        configuration.hidesOthers = false
+        configuration.createsNewApplicationInstance = false
+        configuration.allowsRunningApplicationSubstitution = true
+        return configuration
     }
 
     func dismiss() {
         guard let panel else { return }
+        selectionGeneration &+= 1
         self.panel = nil
         panel.orderOut(nil)
         panel.close()

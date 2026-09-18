@@ -77,6 +77,27 @@ import SwiftUI
         controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
         controller.process(report(nil))
         precondition(!controller.isVisible && openedURLs.map(\.absoluteString) == ["https://example.com/docs"], "Open web favorite exactly once, through URL opener, not app activation")
+        var openedApps: [URL] = []
+        controller.openApplication = { url, options in
+            precondition(!controller.isVisible, "HUD must close before activating an app")
+            precondition(options.activates && !options.hides && !options.hidesOthers)
+            precondition(!options.createsNewApplicationInstance && options.allowsRunningApplicationSubstitution)
+            openedApps.append(url)
+        }
+        func chooseLeft() {
+            controller.show(waitingForLift: false)
+            controller.process(report(500)); controller.process(report(400)); controller.process(report(nil))
+        }
+        chooseLeft()
+        precondition(openedApps.isEmpty, "Defer app activation until panel teardown completes")
+        controller.dismiss() // Releasing the hold key after selection must not cancel the committed launch.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(openedApps.count == 1 && openedApps[0].lastPathComponent == "Finder.app")
+        chooseLeft()
+        controller.show(waitingForLift: false) // A newer HUD supersedes any queued activation.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(openedApps.count == 1)
+        controller.dismiss()
         controller.show(waitingForLift: false)
         controller.setAlternateHeld(true)
         precondition(!controller.isVisible, "Changing modes cancels any partial selection")

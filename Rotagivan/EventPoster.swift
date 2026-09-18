@@ -114,7 +114,7 @@ final class EventPoster: GestureEventPosting {
         case .tripleLeftClick: click(button: .left, count: 3)
         case .rightClick: click(button: .right)
         case .none: break
-        case .appExplorer: break // Handled by GestureEngine's local action coordinator.
+        case .appExplorer, .windowManager: break // Handled by GestureEngine's local action coordinator.
         case .shortcut:
             if let shortcut { postShortcut(shortcut) }
         case .optionF19, .enter:

@@ -8,6 +8,7 @@ import OSLog
     var onDismiss: (() -> Void)? { get set }
     var contextIsValid: (() -> Bool)? { get set }
     func show(waitingForLift: Bool)
+    func showWindowManager(waitingForLift: Bool)
     func process(_ report: TrackpadReport)
     func dismiss()
     func setAlternateHeld(_ held: Bool)
@@ -90,15 +91,28 @@ extension AppExplorerPresenting {
     }
 
     func show(waitingForLift: Bool) {
+        show(waitingForLift: waitingForLift, windowManager: false)
+    }
+
+    func showWindowManager(waitingForLift: Bool) {
+        show(waitingForLift: waitingForLift, windowManager: true)
+    }
+
+    private func show(waitingForLift: Bool, windowManager: Bool) {
         guard !isVisible else { return }
         selectionGeneration &+= 1
         groupPath = []
-        model.showingWindowManager = false
+        model.showingWindowManager = windowManager
+        model.directWindowManager = windowManager
         model.message = nil
         tilingTarget = nil
         model.canEdit = editingStore != nil
         contactIsDown = waitingForLift
         sourcePID = workspace.frontmostApplication?.processIdentifier
+        if windowManager {
+            tilingTarget = sourcePID.flatMap(captureWindow)
+            model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
+        }
         loadEntries()
         model.selected = nil
         input = AppExplorerSelection(waitingForLift: waitingForLift)
@@ -262,6 +276,7 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing else { return }
         if model.showingWindowManager {
             guard contextIsValid?() != false else { dismiss(); return }
+            if model.directWindowManager { dismiss(); return }
             model.showingWindowManager = false
             model.message = nil
             tilingTarget = nil
@@ -351,6 +366,7 @@ extension AppExplorerPresenting {
         groupPath = []
         model.groupNames = []
         model.showingWindowManager = false
+        model.directWindowManager = false
         model.message = nil
         tilingTarget = nil
         onDismiss?()
@@ -410,6 +426,7 @@ struct ExplorerEntry {
     @Published var isEditing = false
     @Published var showingRecents = false
     @Published var showingWindowManager = false
+    @Published var directWindowManager = false
     @Published var message: String?
 }
 
@@ -420,13 +437,14 @@ struct AppExplorerView: View {
     var onBack: () -> Void = {}
     var onEdit: () -> Void = {}
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
+    private var canGoBack: Bool { !model.directWindowManager && !model.groupNames.isEmpty }
 
     var body: some View {
         VStack(spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.groupNames.last ?? "App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded)).lineLimit(1)
-                    Text(([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased())
+                    Text(model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased())
                         .font(.system(size: 9, weight: .medium)).tracking(1).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -445,19 +463,19 @@ struct AppExplorerView: View {
                             else {
                                 Button(action: onBack) {
                                     VStack(spacing: 7) {
-                                        Image(systemName: model.groupNames.isEmpty ? "safari" : "arrow.uturn.backward")
+                                        Image(systemName: canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))
                                             .font(.system(size: 30, weight: .light)).foregroundStyle(.teal)
-                                        Text(model.groupNames.isEmpty ? "Tap to close" : "Tap to go back")
+                                        Text(canGoBack ? "Tap to go back" : "Tap to close")
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(model.groupNames.isEmpty ? "Close App Explorer" : "Back to parent group")
+                                    .accessibilityLabel(canGoBack ? "Back to parent group" : "Close \(model.directWindowManager ? "Window Manager" : "App Explorer")")
                             }
                         }
                     }
                 }
             }
-            Text(model.message ?? (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to go back" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))))
+            Text(model.message ?? (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))))
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
         }
         .padding(26)

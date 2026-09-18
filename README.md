@@ -285,6 +285,14 @@ the Dock/menu bar. Accessibility must be enabled. Full-screen windows and window
 that do not support resizing show a message; some apps enforce a minimum size.
 The destination saves and syncs; window references and geometry are never synced.
 
+To open tiling directly, go to **Layers → Tapping**, open the **…** action menu
+for a single, double, or triple tap, and choose **Window Manager**. Both one- and
+two-finger taps support it. Enable custom tap settings for a non-default layer
+if it currently inherits from the default. No Explorer favorite or keyboard
+shortcut is required. When opened directly, center tap closes the tiling HUD.
+The binding follows the active layer, supports tap overrides for specific apps,
+and exports/syncs with your configuration. Existing bindings are not changed.
+
 Web favorites load their site's favicon (with a globe fallback) and support an optional custom name; swipe and lift to
 open the URL in your default browser. Only full `http://` and `https://` links
 without embedded usernames/passwords are accepted. URLs export and sync with

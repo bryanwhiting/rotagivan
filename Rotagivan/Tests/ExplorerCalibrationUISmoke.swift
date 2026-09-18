@@ -415,5 +415,26 @@ import SwiftUI
         controller.dismiss()
         precondition(tiled.count == previousTileCount, "Back/cancel/missing targets never tile")
         print("Window Manager native HUD passed: all directions, nested back navigation, capture failure, retry, and no editor/app activation.")
+        captureAvailable = true
+        store.settings.appExplorer = AppExplorerSettings(defaultMode: .recent)
+        controller.showWindowManager(waitingForLift: true)
+        precondition(controller.displayedEntries.count == 8 && controller.displayedEntries.allSatisfy { $0.tilingDirection != nil }, "Direct action bypasses favorites and recent apps")
+        swipeLeft()
+        precondition(tiled.count == previousTileCount && controller.isVisible, "Drain any remainder of the tap trigger")
+        let directPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let directView = directPanel.contentView!
+        let directBitmap = directView.bitmapImageRepForCachingDisplay(in: directView.bounds)!
+        directView.cacheDisplay(in: directView.bounds, to: directBitmap)
+        try directBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/direct-window-manager.png"))
+        centerTap()
+        precondition(!controller.isVisible && tiled.count == previousTileCount, "Center closes a directly opened manager")
+        controller.showWindowManager(waitingForLift: false)
+        swipeLeft()
+        precondition(!controller.isVisible && tiled.count == previousTileCount + 1 && tiled.last == .left)
+        controller.show(waitingForLift: false)
+        precondition(controller.displayedEntries.allSatisfy { $0.tilingDirection == nil }, "Direct mode does not leak into future App Explorer openings")
+        controller.dismiss()
+        print("Direct Window Manager passed: independent of Explorer mode/favorites, trigger drain, center close, tiling dispatch and mode reset.")
     }
 }

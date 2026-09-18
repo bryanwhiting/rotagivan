@@ -9,6 +9,11 @@ import CoreGraphics
     var input = AppExplorerSelection(waitingForLift: false)
     var selections: [SwipeDirection] = []
     var alternateHeld = false
+    var windowManagerShows = 0
+    func showWindowManager(waitingForLift: Bool) {
+        windowManagerShows += 1
+        show(waitingForLift: waitingForLift)
+    }
     func setAlternateHeld(_ held: Bool) { alternateHeld = held }
     func show(waitingForLift: Bool) {
         isVisible = true
@@ -194,13 +199,15 @@ private final class CalibrationPoster: GestureEventPosting {
             precondition(f.poster.actions == 0, "An in-progress touch is drained on app switch")
             precondition(f.store.settings.gestures(for:1) == taps, "App overrides never rewrite the profile")
         }
+        for action in [TapAction.appExplorer, .windowManager] {
         for cancellation in 0..<4 {
             check { f in
                 var taps = f.store.activeGestures
-                taps.oneFingerTap = .appExplorer
+                taps.oneFingerTap = action
                 f.store.updateGestures(taps, for:1)
                 f.send(1, x:500); f.send(1.03)
                 precondition(f.explorer.isVisible && f.poster.actions == 0)
+                precondition(f.explorer.windowManagerShows == (action == .windowManager ? 1 : 0))
                 f.send(1.1,x:500)
                 switch cancellation {
                 case 0:
@@ -213,6 +220,7 @@ private final class CalibrationPoster: GestureEventPosting {
                 if cancellation != 0 { f.send(1.15,x:600); f.send(1.2) }
                 precondition(!f.explorer.isVisible && f.poster.actions == 0 && f.poster.moves == 0 && f.poster.scrolls == 0 && f.poster.dragStarts == 0)
             }
+        }
         }
         print("App Explorer HID gate passed: action routing, exclusive input, profile/stop/Escape cancellation, and lift draining.")
         check { f in

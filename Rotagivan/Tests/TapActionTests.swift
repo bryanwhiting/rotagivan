@@ -147,6 +147,33 @@ struct TapActionTests {
         precondition(ordinary.poster.dragStarts == 0)
         ordinary.finish()
         for twoFingers in [false, true] {
+            for tapCount in 1...3 {
+                check { f in
+                    f.configureTriple(twoFingers: twoFingers)
+                    var taps = f.store.activeGestures
+                    if twoFingers {
+                        taps.twoFingerTap = tapCount == 1 ? .windowManager : .leftClick
+                        taps.twoFingerDoubleTap = tapCount == 2 ? .windowManager : TapAction.none
+                        taps.twoFingerTripleTap = tapCount == 3 ? .windowManager : TapAction.none
+                    } else {
+                        taps.oneFingerTap = tapCount == 1 ? .windowManager : .leftClick
+                        taps.oneFingerDoubleTap = tapCount == 2 ? .windowManager : TapAction.none
+                        taps.oneFingerTripleTap = tapCount == 3 ? .windowManager : TapAction.none
+                    }
+                    f.store.updateGestures(taps, for: 1)
+                    var managerShows = 0, explorerShows = 0
+                    f.engine.onWindowManager = { managerShows += 1 }
+                    f.engine.onAppExplorer = { explorerShows += 1 }
+                    for tap in 0..<tapCount { f.tap(Double(tap) * 0.02, twoFingers: twoFingers) }
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+                    precondition(managerShows == 1 && explorerShows == 0)
+                    precondition(f.poster.taps.isEmpty && f.poster.dragStarts == 0, "Window Manager gestures must not emit clicks or arm dragging")
+                }
+            }
+        }
+        precondition(!TapAction.windowManager.supportsTapAndHoldDrag)
+        print("Window Manager tap routing passed: one/two fingers, single/double/triple taps, one HUD opening and no click/drag leakage.")
+        for twoFingers in [false, true] {
             for swipeEnabled in [false, true] {
                 check { f in
                     f.configureTriple(twoFingers: twoFingers)

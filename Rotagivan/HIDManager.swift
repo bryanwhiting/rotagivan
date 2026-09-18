@@ -69,6 +69,7 @@ final class NavigatorHIDManager: ObservableObject {
                 }
             }
             self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
+            self.gestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
@@ -100,13 +101,14 @@ final class NavigatorHIDManager: ObservableObject {
         store.foregroundBundleID = bundleID
     }
 
-    private func openAppExplorer() {
+    private func openAppExplorer(windowManager: Bool = false) {
         guard explorer?.isEditing != true else { return }
         guard store.settings.enabled, !calibrationCapturing else { return }
         explorerProfileID = store.activeProfileID
         explorerSettings = store.activeGestures
         explorerConfiguration = store.settings.appExplorer
-        explorer?.show(waitingForLift: contactsDown)
+        if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
+        else { explorer?.show(waitingForLift: contactsDown) }
     }
 
     func explorerHold(_ down: Bool) {

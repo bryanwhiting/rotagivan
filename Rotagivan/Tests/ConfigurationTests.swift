@@ -63,11 +63,19 @@ struct ConfigurationTests {
         gestures.twoFingerDoubleTapSwipe = DoubleTapSwipeSettings(enabled: true)
         gestures.twoFingerDoubleTapSwipe!.bottomLeft = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
         gestures.oneFingerDoubleTap = .appExplorer
+        gestures.oneFingerTripleTap = .windowManager
+        gestures.twoFingerTripleTap = .windowManager
         gestures.gestures.tripleTapFirstInterval = 0.14
         gestures.gestures.tripleTapSecondInterval = 0.24
         withSingleSwipe.settings.profileGestures?[1] = gestures
         let singleSwipeYAML = try withSingleSwipe.yaml()
         let singleSwipeRoundtrip = try AppConfiguration.parse(singleSwipeYAML)
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).oneFingerTripleTap == .windowManager)
+        precondition(singleSwipeRoundtrip.settings.gestures(for: 1).twoFingerTripleTap == .windowManager)
+        var inheritedWindowManager = singleSwipeRoundtrip.settings
+        inheritedWindowManager.defaultProfileID = 1
+        inheritedWindowManager.customTapProfiles = []
+        precondition(inheritedWindowManager.effectiveGestures(for: 2).oneFingerTripleTap == .windowManager)
         var grouped = withSingleSwipe
         grouped.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .left, name: "Work", children: [
             AppExplorerFavorite(direction: .up, name: "Research", children: [

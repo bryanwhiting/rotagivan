@@ -78,6 +78,9 @@ struct TapActionEditor: View {
                         Button("Right click") { action = .rightClick }
                     }
                     Button("App Explorer") { action = .appExplorer; shortcut = nil }
+                    if !shortcutsOnly {
+                        Button("Window Manager") { action = .windowManager; shortcut = nil }
+                    }
                     Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.borderlessButton).frame(width: 24)

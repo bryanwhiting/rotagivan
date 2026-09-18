@@ -207,7 +207,7 @@ enum ProfileMaximum {
 }
 
 enum TapAction: String, Codable, CaseIterable {
-    case optionF19, enter, leftClick, doubleLeftClick, tripleLeftClick, rightClick, none, shortcut, appExplorer
+    case optionF19, enter, leftClick, doubleLeftClick, tripleLeftClick, rightClick, none, shortcut, appExplorer, windowManager
     var title: String {
         switch self {
         case .optionF19: return "Option + F19"
@@ -219,6 +219,7 @@ enum TapAction: String, Codable, CaseIterable {
         case .none: return "Nothing"
         case .shortcut: return "Keyboard shortcut"
         case .appExplorer: return "App Explorer"
+        case .windowManager: return "Window Manager"
         }
     }
 

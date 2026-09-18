@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class GestureEngine {
     var onAppExplorer: (() -> Void)?
+    var onWindowManager: (() -> Void)?
     var isEditingInterface = false {
         didSet { if oldValue != isEditingInterface { reset() } }
     }
@@ -656,9 +657,10 @@ final class GestureEngine {
 
     private func dispatchTap(_ action: TapAction, shortcut: RecordedShortcut?) {
         guard action != .none else { return }
-        if action == .appExplorer {
+        if action == .appExplorer || action == .windowManager {
             reset() // Stop all cursor/scroll momentum and queued taps before the HUD opens.
-            onAppExplorer?()
+            if action == .windowManager { onWindowManager?() }
+            else { onAppExplorer?() }
         } else { poster.performTap(action, shortcut: shortcut) }
     }
 

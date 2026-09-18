@@ -8,8 +8,28 @@ enum AppExplorerMode: String, Codable, CaseIterable {
 
 struct AppExplorerFavorite: Codable, Equatable {
     var direction: SwipeDirection
-    var bundleID: String
+    var bundleID: String? = nil
     var name: String
+    var url: String? = nil
+
+    var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
+    var isValidDestination: Bool {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if url != nil { return bundleID == nil && resolvedWebURL != nil }
+        guard let bundleID else { return false }
+        return !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bundleID != "local.rotagivan"
+    }
+
+    /// Web links only: imported settings must not invoke file or custom URL handlers.
+    static func webURL(_ value: String) -> URL? {
+        guard value.count <= 4096, !value.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }),
+              let parts = URLComponents(string: value),
+              let scheme = parts.scheme?.lowercased(), ["https", "http"].contains(scheme),
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil,
+              parts.port.map({ (1...65535).contains($0) }) ?? true else { return nil }
+        return parts.url
+    }
 }
 
 struct AppExplorerSettings: Codable, Equatable {

@@ -28,10 +28,13 @@ import SwiftUI
         var settings = AppExplorerSettings()
         settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari"), at: .up)
         settings.setFavorite(AppExplorerFavorite(direction: .left, bundleID: "com.apple.finder", name: "Finder"), at: .left)
+        settings.setFavorite(AppExplorerFavorite(direction: .right, name: "Project docs", url: "https://example.com/docs"), at: .right)
         store.settings.appExplorer = settings
         try render(AppExplorerSettingsView(store: store).padding(24).frame(width: 680, height: 570)
             .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 570), path: CommandLine.arguments[1] + "/settings.png")
         precondition(store.settings.appExplorer == settings)
+        try render(ExplorerURLFavoriteEditor(direction: .right, name: "Project docs", address: "https://example.com/docs", onSave: { _ in }, onCancel: {}),
+            size: CGSize(width: 440, height: 300), path: CommandLine.arguments[1] + "/url-editor.png")
         var taps = store.settings.gestures(for: 1)
         taps.gestures.tapMaxDuration = 0.2
         taps.gestures.tapMaxMovement = 30
@@ -52,8 +55,23 @@ import SwiftUI
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { settings }
         controller.contextIsValid = { true }
+        var openedURLs: [URL] = []
+        controller.openWebURL = { openedURLs.append($0); return true }
         controller.show(waitingForLift: false)
         precondition(controller.isVisible)
+        let hud = NSApp.windows.first { $0.title == "App Explorer" }!.contentView!
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        hud.layoutSubtreeIfNeeded()
+        let bitmap = hud.bitmapImageRepForCachingDisplay(in: hud.bounds)!
+        hud.cacheDisplay(in: hud.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/hud.png"))
+        func report(_ x: Double?) -> TrackpadReport {
+            TrackpadReport(contacts: x.map { [FingerContact(id: 0, x: $0, y: 500, touching: true, confident: true)] } ?? [], buttonDown: false, scanTime: 0)
+        }
+        controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
+        controller.process(report(nil))
+        precondition(!controller.isVisible && openedURLs.map(\.absoluteString) == ["https://example.com/docs"], "Open web favorite exactly once, through URL opener, not app activation")
+        controller.show(waitingForLift: false)
         controller.setAlternateHeld(true)
         precondition(!controller.isVisible, "Changing modes cancels any partial selection")
         controller.show(waitingForLift: false)

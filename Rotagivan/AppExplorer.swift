@@ -26,6 +26,7 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
     private var deadline = Date.distantPast
     private var alternateHeld = false
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
+    var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var isVisible: Bool { panel != nil }
@@ -116,7 +117,11 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         model.mode = settings.mode(holdingShortcut: alternateHeld)
         if model.mode == .favorites {
             model.entries = settings.favorites.map { favorite in
-                let url = workspace.urlForApplication(withBundleIdentifier: favorite.bundleID)
+                if favorite.url != nil {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                        icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
+                }
+                let url = favorite.bundleID.flatMap { workspace.urlForApplication(withBundleIdentifier: $0) }
                 return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
                     name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url)
             }
@@ -151,7 +156,12 @@ extension AppExplorerPresenting { func setAlternateHeld(_ held: Bool) {} }
         let entry = model.entries.first { $0.direction == direction }
         dismiss()
         guard let entry else { return }
-        if let app = workspace.runningApplications.first(where: { $0.bundleIdentifier == entry.bundleID && !$0.isTerminated }) {
+        if entry.isWebURL {
+            if let url = entry.url, AppExplorerFavorite.webURL(url.absoluteString) != nil { _ = openWebURL(url) }
+            return
+        }
+        guard let identifier = entry.bundleID else { return }
+        if let app = workspace.runningApplications.first(where: { $0.bundleIdentifier == identifier && !$0.isTerminated }) {
             app.activate(options: [])
         } else if let url = entry.url {
             workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
@@ -184,12 +194,14 @@ private final class ExplorerPanel: NSPanel {
 
 struct ExplorerEntry {
     var direction: SwipeDirection
-    var bundleID: String
+    var bundleID: String?
     var name: String
     var icon: NSImage?
     var url: URL?
-    init(direction: SwipeDirection, bundleID: String, name: String, icon: NSImage?, url: URL?) {
+    var isWebURL: Bool
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
+        self.isWebURL = isWebURL
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -236,7 +248,7 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Choose favorites in General → App Explorer." : "Open another app to see it here.") : "Swipe toward an app · lift to switch · Esc to cancel")
+            Text(model.entries.isEmpty ? (model.mode == .favorites ? "Choose favorites in General → App Explorer." : "Open another app to see it here.") : "Swipe to choose · lift to open · Esc to cancel")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(26)
@@ -251,9 +263,13 @@ struct AppExplorerView: View {
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
+                    if entry.isWebURL {
+                        Image(systemName: "globe").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                    } else {
+                        Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
+                    }
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    if entry.url == nil { Text("Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if entry.url == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -266,6 +282,7 @@ struct AppExplorerView: View {
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
         .buttonStyle(.plain).disabled(entry == nil || entry?.url == nil)
+        .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }
 }

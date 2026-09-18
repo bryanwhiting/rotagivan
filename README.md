@@ -237,7 +237,12 @@ For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.
 No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
 In **General → App Explorer**, choose the default mode (initially **Favorites**)
-and assign an application to each of the eight positions in the matching grid.
+and assign an application or web URL to each of the eight positions in the matching grid.
+Each slot menu offers **Choose app…** and **Set URL…** (or **Edit URL…**).
+Web favorites have a globe icon and an optional custom name; swipe and lift to
+open the URL in your default browser. Only full `http://` and `https://` links
+without embedded usernames/passwords are accepted. URLs export and sync with
+your settings, so avoid links containing secrets or private sign-in tokens.
 Favorites keep their exact slots, including empty or unavailable slots, and can
 launch apps that are not running. Bundle IDs, positions, mode, and the optional
 hold shortcut export and sync; absolute application paths are not saved.

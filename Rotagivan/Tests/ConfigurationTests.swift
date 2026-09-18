@@ -50,6 +50,7 @@ struct ConfigurationTests {
         withSingleSwipe.settings.appExplorer = AppExplorerSettings(defaultMode: .favorites,
             favorites: [AppExplorerFavorite(direction: .topLeft, bundleID: "com.apple.Safari", name: "Safari")],
             holdShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 19, keyLabel: "F17"))
+        withSingleSwipe.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, name: "Project docs", url: "https://example.com/docs?q=hello%20world#intro"), at: .right)
         withSingleSwipe.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0.25,fastMultiplier:2.5,transitionSpeed:1300)
         withSingleSwipe.settings.appOverrides = [.chrome]
         var gestures = withSingleSwipe.settings.gestures(for: 1)
@@ -70,6 +71,18 @@ struct ConfigurationTests {
         var invalidExplorer = withSingleSwipe
         invalidExplorer.settings.appExplorer!.favorites.append(invalidExplorer.settings.appExplorer!.favorites[0])
         rejected(try ConfigurationYAML.encode(invalidExplorer), "duplicate explorer slot")
+        for destination in ["file:///tmp/unsafe", "javascript:alert(1)", "https://user:password@example.com", "https://"] {
+            var invalid = withSingleSwipe
+            invalid.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, name: "Invalid", url: destination), at: .right)
+            rejected(try ConfigurationYAML.encode(invalid), "unsafe or invalid favorite URL")
+        }
+        var ambiguousFavorite = withSingleSwipe
+        ambiguousFavorite.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, bundleID: "com.apple.Safari", name: "Ambiguous", url: "https://example.com"), at: .right)
+        rejected(try ConfigurationYAML.encode(ambiguousFavorite), "favorite with both app and URL")
+        var longLink = withSingleSwipe
+        longLink.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, name: "Long link", url: "https://example.com/?q=" + String(repeating: "a", count: 600)), at: .right)
+        let longRestored = try AppConfiguration.parse(longLink.yaml())
+        precondition(longRestored.settings.appExplorer == longLink.settings.appExplorer)
         var invalidTriple = withSingleSwipe
         invalidTriple.settings.profileGestures?[1]?.gestures.tripleTapSecondInterval = 0.9
         rejected(try ConfigurationYAML.encode(invalidTriple), "triple-tap timing outside bounds")

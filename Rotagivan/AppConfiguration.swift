@@ -69,9 +69,8 @@ struct AppConfiguration: Codable {
         if let explorer = settings.appExplorer {
             guard explorer.favorites.count <= 8,
                   Set(explorer.favorites.map(\.direction)).count == explorer.favorites.count,
-                  explorer.favorites.allSatisfy({ !$0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                      $0.bundleID != "local.rotagivan" && !$0.name.isEmpty }) else {
-                throw ConfigurationError("App Explorer favorites need unique directions and valid application identifiers.")
+                  explorer.favorites.allSatisfy(\.isValidDestination) else {
+                throw ConfigurationError("App Explorer favorites need unique directions, a name, and either an app identifier or a valid HTTP(S) URL without embedded credentials.")
             }
         }
         let apps = settings.appOverrides ?? []
@@ -174,7 +173,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts"
             case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut"
-            case "favorites": allowed = "direction bundleID name"
+            case "favorites": allowed = "direction bundleID name url"
             case "holdShortcut": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
@@ -251,7 +250,7 @@ private indirect enum ConfigurationValue: Codable {
             if ["id", "keyCode", "modifiers", "defaultProfileID", "formatVersion", "sliderBaselineRevision"].contains(key),
                number.rounded() != number { throw ConfigurationError("\(path) must be an integer.") }
         case .string(let text):
-            guard text.count <= 512 else { throw ConfigurationError("\(path) is too long.") }
+            guard text.count <= (key == "url" ? 4096 : 512) else { throw ConfigurationError("\(path) is too long.") }
         default: break
         }
     }

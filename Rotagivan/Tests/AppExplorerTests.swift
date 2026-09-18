@@ -18,6 +18,25 @@ import Foundation
         settings.holdShortcut = RecordedShortcut(keyCode: 64, modifiers: 1 << 19, keyLabel: "F17")
         let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
         precondition(restored == settings)
+        let legacy = try JSONDecoder().decode(AppExplorerFavorite.self, from: Data(#"{"direction":"up","bundleID":"com.apple.Safari","name":"Safari"}"#.utf8))
+        precondition(legacy.url == nil && legacy.bundleID == "com.apple.Safari" && legacy.isValidDestination)
+        let web = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/docs?q=one%20two#section")
+        precondition(web.isValidDestination && web.bundleID == nil)
+        settings.setFavorite(web, at: .up)
+        precondition(settings.favorites[0].url == web.url && settings.favorites[0].bundleID == nil)
+        let webRestored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
+        precondition(webRestored == settings)
+        for valid in ["https://example.com", "http://localhost:8080/path", "https://example.com/path?q=hello#anchor"] {
+            precondition(AppExplorerFavorite.webURL(valid) != nil)
+        }
+        for invalid in ["", "example.com", "https://", "https://exa mple.com", "https://example.com/\nsecret", "javascript:alert(1)", "file:///tmp/test", "data:text/html,hello", "mailto:test@example.com", "custom://open", "https://user:password@example.com", "https://user@example.com", "https://example.com:0", "https://example.com:65536", "https://example.com/" + String(repeating: "a", count: 4096)] {
+            precondition(AppExplorerFavorite.webURL(invalid) == nil, "Reject invalid or non-web destinations")
+        }
+        var ambiguous = web; ambiguous.bundleID = "com.apple.Safari"
+        precondition(!ambiguous.isValidDestination)
+        precondition(!AppExplorerFavorite(direction: .up, name: "Missing destination").isValidDestination)
+        settings.setFavorite(legacy, at: .up)
+        precondition(settings.favorites[0].url == nil && settings.favorites[0].bundleID == "com.apple.Safari")
         let directions: [(SwipeDirection, Double, Double)] = [(.up,500,400),(.topRight,600,400),(.right,600,500),(.bottomRight,600,600),(.down,500,600),(.bottomLeft,400,600),(.left,400,500),(.topLeft,400,400)]
         for (direction, x, y) in directions {
             var input = AppExplorerSelection(waitingForLift: true)

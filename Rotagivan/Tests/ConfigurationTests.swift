@@ -108,6 +108,14 @@ struct ConfigurationTests {
         badKeyExplorer.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: explorerChord), at: .up)
         rejected(try ConfigurationYAML.encode(badKeyExplorer), "mixed Explorer URL/shortcut")
         print("Explorer shortcut YAML roundtrip and validation passed.")
+        var layeredExplorer = grouped
+        layeredExplorer.settings.appExplorer!.holdLayers = [ExplorerHoldLayer(name: "Thirds", holdShortcut: RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y"),
+            favorites: [AppExplorerFavorite(direction: .up, name: "Media Controls", action: .mediaControls)], windowLayout: .thirds)]
+        let layerYAML = try layeredExplorer.yaml()
+        let layerRestored = try AppConfiguration.parse(layerYAML)
+        precondition(layerRestored.settings.appExplorer == layeredExplorer.settings.appExplorer)
+        rejected(layerYAML.replacingOccurrences(of: "windowLayout: thirds", with: "windowLayout: invalid"), "unknown window layout")
+        print("Explorer hold layers and media controls YAML roundtrip passed.")
         var invalidGroup = grouped
         invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
         rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")

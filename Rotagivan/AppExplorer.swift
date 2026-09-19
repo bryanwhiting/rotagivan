@@ -34,6 +34,9 @@ extension AppExplorerPresenting {
     var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
     private var deadline = Date.distantPast
     private var alternateHeld = false
+    private var heldKeys = ExplorerHeldKeys()
+    private var baseGroupPath: [SwipeDirection] = []
+    var performMedia: (ExplorerMediaAction) -> Void = { ExplorerMediaAction.perform($0) }
     private(set) var groupPath: [SwipeDirection] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
@@ -105,6 +108,9 @@ extension AppExplorerPresenting {
         guard !isVisible else { return }
         selectionGeneration &+= 1
         groupPath = []
+        heldKeys = ExplorerHeldKeys()
+        baseGroupPath = []
+        model.showingMediaControls = false
         model.showingWindowManager = windowManager
         model.directWindowManager = windowManager
         model.message = nil
@@ -131,6 +137,7 @@ extension AppExplorerPresenting {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onCancel = { [weak self] in self?.dismiss() }
         panel.onEdit = { [weak self] in self?.beginEditing() }
+        panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
             onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() }))
@@ -165,24 +172,60 @@ extension AppExplorerPresenting {
         }
     }
 
+    @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return false }
+        let previous = heldKeys.activeID
+        let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
+        var handled = false
+        switch event.type {
+        case .keyDown: handled = heldKeys.press(key: event.keyCode, modifiers: flags, layers: configuration().holdLayers ?? [])
+        case .keyUp: heldKeys.release(key: event.keyCode); handled = previous != heldKeys.activeID
+        case .flagsChanged: heldKeys.updateModifiers(flags)
+        default: return false
+        }
+        if previous != heldKeys.activeID {
+            if previous == nil { baseGroupPath = groupPath }
+            if heldKeys.activeID == nil { groupPath = baseGroupPath }
+            else if !model.showingWindowManager && !model.showingMediaControls { groupPath = [] }
+            model.message = nil
+            refreshGroup() // Drain any in-progress swipe before changing its targets.
+        }
+        return handled
+    }
+
     private func loadEntries() {
-        let settings = configuration()
-        model.mode = settings.mode(holdingShortcut: alternateHeld)
+        let original = configuration()
+        let layer = original.holdLayers?.first { $0.id == heldKeys.activeID }
+        let settings = original.projected(layerID: layer?.id)
+        model.layerName = layer?.name
+        model.windowLayout = layer?.windowLayout ?? .halves
+        model.layerHint = (original.holdLayers ?? []).compactMap { layer in layer.holdShortcut.map { "\($0.displayName): \(layer.name)" } }.joined(separator: " · ")
+        model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
         model.showingRecents = model.mode == .recent || recentGroup
-        model.canEdit = editingStore != nil && !model.showingWindowManager
+        model.canEdit = editingStore != nil && !model.showingWindowManager && !model.showingMediaControls && layer == nil
+        if model.showingMediaControls {
+            model.groupNames.append("Media Controls")
+            model.entries = ExplorerMediaAction.allCases.map { action in
+                ExplorerEntry(direction: action.direction, bundleID: nil, name: action.title, icon: nil, url: nil, mediaAction: action)
+            }
+            return
+        }
         if model.showingWindowManager {
             model.groupNames.append("Window Manager")
             model.entries = SwipeDirection.allCases.map { direction in
-                ExplorerEntry(direction: direction, bundleID: nil, name: WindowTile.title(direction),
+                ExplorerEntry(direction: direction, bundleID: nil, name: WindowTile.title(direction, layout: model.windowLayout),
                     icon: nil, url: nil, tilingDirection: direction)
             }
             return
         }
         if model.mode == .favorites && !recentGroup {
             model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
+                if favorite.action == .mediaControls {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
+                }
                 if let shortcut = favorite.shortcut {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                         icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
@@ -237,9 +280,21 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if let media = entry?.mediaAction {
+            performMedia(media)
+            model.selected = nil
+            input = AppExplorerSelection(waitingForLift: contactIsDown)
+            deadline = Date().addingTimeInterval(15)
+            return
+        }
+        if entry?.isMediaControls == true {
+            model.showingMediaControls = true
+            refreshGroup()
+            return
+        }
         if let tile = entry?.tilingDirection {
             if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
-            let error = tilingTarget.map { $0.apply(tile) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
+            let error = tilingTarget.map { $0.apply(tile, model.windowLayout) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
             if let error {
                 model.message = error
                 model.selected = nil
@@ -295,6 +350,12 @@ extension AppExplorerPresenting {
 
     func goBack() {
         guard isVisible, !isEditing else { return }
+        if model.showingMediaControls {
+            guard contextIsValid?() != false else { dismiss(); return }
+            model.showingMediaControls = false
+            refreshGroup()
+            return
+        }
         if model.showingWindowManager {
             guard contextIsValid?() != false else { dismiss(); return }
             if model.directWindowManager { dismiss(); return }
@@ -318,7 +379,7 @@ extension AppExplorerPresenting {
     }
 
     func beginEditing() {
-        guard let store = editingStore, let previous = panel, !isEditing, !model.showingWindowManager,
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingWindowManager, !model.showingMediaControls, heldKeys.activeID == nil,
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
         model.isEditing = true
@@ -388,6 +449,9 @@ extension AppExplorerPresenting {
         model.groupNames = []
         model.showingWindowManager = false
         model.directWindowManager = false
+        model.showingMediaControls = false
+        heldKeys = ExplorerHeldKeys()
+        baseGroupPath = []
         model.message = nil
         tilingTarget = nil
         onDismiss?()
@@ -397,6 +461,7 @@ extension AppExplorerPresenting {
 private final class ExplorerPanel: NSPanel {
     var onCancel: (() -> Void)?
     var onEdit: (() -> Void)?
+    var onKey: ((NSEvent) -> Bool)?
     var allowsEditing = false
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -404,11 +469,18 @@ private final class ExplorerPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) { onCancel?() }
     override func keyDown(with event: NSEvent) {
         if allowsEditing { super.keyDown(with: event); return }
+        if onKey?(event) == true { return }
         if event.keyCode == 14, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             onEdit?(); return
         }
         if event.keyCode == 53 { onCancel?() }
         // Do not leak typing into the application behind the HUD.
+    }
+    override func keyUp(with event: NSEvent) {
+        if allowsEditing { super.keyUp(with: event) } else { _ = onKey?(event) }
+    }
+    override func flagsChanged(with event: NSEvent) {
+        if allowsEditing { super.flagsChanged(with: event) } else { _ = onKey?(event) }
     }
 }
 
@@ -424,7 +496,9 @@ struct ExplorerEntry {
     var isWindowManager: Bool
     var tilingDirection: SwipeDirection?
     var shortcut: RecordedShortcut?
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil) {
+    var isMediaControls: Bool
+    var mediaAction: ExplorerMediaAction?
+    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
@@ -432,6 +506,8 @@ struct ExplorerEntry {
         self.isWindowManager = isWindowManager
         self.tilingDirection = tilingDirection
         self.shortcut = shortcut
+        self.isMediaControls = isMediaControls
+        self.mediaAction = mediaAction
     }
     init(direction: SwipeDirection, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
@@ -451,6 +527,10 @@ struct ExplorerEntry {
     @Published var showingWindowManager = false
     @Published var directWindowManager = false
     @Published var message: String?
+    @Published var showingMediaControls = false
+    @Published var layerName: String?
+    @Published var layerHint = ""
+    @Published var windowLayout: ExplorerWindowLayout = .halves
 }
 
 struct AppExplorerView: View {
@@ -467,7 +547,7 @@ struct AppExplorerView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.groupNames.last ?? "App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded)).lineLimit(1)
-                    Text(model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased())
+                    Text(model.layerName.map { "\($0) · \(model.showingWindowManager ? model.windowLayout.title : "Held layer")" } ?? (model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased()))
                         .font(.system(size: 9, weight: .medium)).tracking(1).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -498,8 +578,9 @@ struct AppExplorerView: View {
                     }
                 }
             }
-            Text(model.message ?? (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"))))
+            Text(model.message ?? (model.showingMediaControls ? "Swipe to control · repeat to adjust · center tap to go back" : (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit")))))
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
+            if !model.layerHint.isEmpty { Text("Hold \(model.layerHint)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
         }
         .padding(26)
         .frame(width: 470, height: 464)
@@ -513,10 +594,12 @@ struct AppExplorerView: View {
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    if entry.shortcut != nil {
+                    if entry.isMediaControls || entry.mediaAction != nil {
+                        Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                    } else if entry.shortcut != nil {
                         Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else if let direction = entry.tilingDirection {
-                        WindowTileIcon(direction: direction)
+                        WindowTileIcon(direction: direction, layout: model.windowLayout)
                     } else if entry.isWindowManager {
                         Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
                     } else if entry.isGroup {
@@ -530,7 +613,7 @@ struct AppExplorerView: View {
                     if let shortcut = entry.shortcut { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
-                    else if entry.url == nil && entry.tilingDirection == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -542,7 +625,7 @@ struct AppExplorerView: View {
             .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil && entry?.shortcut == nil))
+        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil && entry?.shortcut == nil && entry?.isMediaControls != true && entry?.mediaAction == nil))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }

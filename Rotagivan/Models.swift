@@ -6,7 +6,34 @@ enum AppExplorerMode: String, Codable, CaseIterable {
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
-enum AppExplorerAction: String, Codable { case windowManager }
+enum AppExplorerAction: String, Codable { case windowManager, mediaControls }
+
+enum ExplorerWindowLayout: String, Codable, CaseIterable {
+    case halves, thirds, twoThirds
+    var title: String { switch self { case .halves: return "Halves & quarters"; case .thirds: return "Thirds"; case .twoThirds: return "Two thirds" } }
+    var fraction: Double { switch self { case .halves: return 0.5; case .thirds: return 1.0 / 3; case .twoThirds: return 2.0 / 3 } }
+}
+
+struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name: String
+    var holdShortcut: RecordedShortcut?
+    var favorites: [AppExplorerFavorite] = []
+    var windowLayout: ExplorerWindowLayout = .halves
+}
+
+// Explorer-local keys never register globally or alter cursor/tap layers.
+struct ExplorerHeldKeys {
+    private var held: [(key: UInt16, id: UUID, modifiers: UInt64)] = []
+    var activeID: UUID? { held.last?.id }
+    mutating func press(key: UInt16, modifiers: UInt64, layers: [ExplorerHoldLayer]) -> Bool {
+        if held.contains(where: { $0.key == key }) { return true }
+        guard let layer = layers.first(where: { $0.holdShortcut?.keyCode == key && $0.holdShortcut?.modifiers == modifiers }) else { return false }
+        held.append((key, layer.id, modifiers)); return true
+    }
+    mutating func release(key: UInt16) { held.removeAll { $0.key == key } }
+    mutating func updateModifiers(_ flags: UInt64) { held.removeAll { $0.modifiers & flags != $0.modifiers } }
+}
 
 struct AppExplorerFavorite: Codable, Equatable {
     var direction: SwipeDirection
@@ -56,6 +83,15 @@ struct AppExplorerSettings: Codable, Equatable {
     var defaultMode: AppExplorerMode = .favorites
     var favorites: [AppExplorerFavorite] = []
     var holdShortcut: RecordedShortcut?
+    var holdLayers: [ExplorerHoldLayer]? = nil
+    func projected(layerID: UUID?) -> Self {
+        guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
+        var result = self
+        result.favorites = layer.favorites
+        result.defaultMode = .favorites
+        result.holdLayers = nil
+        return result
+    }
     func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
     func favorites(at path: [SwipeDirection]) -> [AppExplorerFavorite]? {
         var current = favorites
@@ -82,6 +118,18 @@ struct AppExplorerSettings: Codable, Equatable {
                 if let children = entry.children, !valid(children, depth: depth + 1) { return false }
             }
             return true
+        }
+        let layers = holdLayers ?? []
+        guard layers.count <= 16, Set(layers.map(\.id)).count == layers.count else { return false }
+        var keys = Set<String>()
+        for layer in layers {
+            guard !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, layer.name.count <= 128 else { return false }
+            if let key = layer.holdShortcut {
+                guard key.isValidExplorerShortcut, key.keyCode != 53,
+                      !(key.keyCode == holdShortcut?.keyCode && key.modifiers == holdShortcut?.modifiers),
+                      keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
+            }
+            guard valid(layer.favorites, depth: 0) else { return false }
         }
         return valid(favorites, depth: 0)
     }

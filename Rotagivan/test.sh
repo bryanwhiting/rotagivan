@@ -49,6 +49,9 @@ xcrun swiftc "${common[@]}" Rotagivan/WebsiteFavicon.swift Rotagivan/Tests/Favic
 xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/Tests/WindowTilingTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/WindowTilingTests"
 "$test_dir/WindowTilingTests"
+xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/MediaControls.swift Rotagivan/Tests/ExplorerLayerMediaTests.swift \
+  -framework AppKit -framework SwiftUI -o "$test_dir/ExplorerLayerMediaTests"
+"$test_dir/ExplorerLayerMediaTests"
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/DoubleTapSwipe.swift \
   Rotagivan/Tests/AppOverrideTests.swift -o "$test_dir/AppOverrideTests"
 "$test_dir/AppOverrideTests"
@@ -71,6 +74,8 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/WebsiteFavicon.swift \
   Rotagivan/WindowTiling.swift \
+  Rotagivan/MediaControls.swift \
+  Rotagivan/ExplorerHoldLayerEditor.swift \
   Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"

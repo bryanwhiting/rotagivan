@@ -265,11 +265,15 @@ import SwiftUI
         try editBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/inline-editor.png"))
         let previousOpenCount = openedApps.count
         let beforeDrag = store.settings.appExplorer!
-        // Centers of the middle-row labels in this fixed 680 x 500 editor fixture.
-        // Dispatch locally to the window; never move the user's cursor or require TCC access.
-        let labelY = editView.isFlipped ? 268.0 : editView.bounds.height - 268.0
-        let sourcePoint = editView.convert(NSPoint(x: 130, y: labelY), to: nil)
-        let targetPoint = editView.convert(NSPoint(x: 550, y: labelY), to: nil)
+        // Resolve actual native drag handles so toolbar additions don't break the fixture.
+        func dragHandles(_ view: NSView) -> [NSView] {
+            if String(describing: type(of: view)).contains("ExplorerSlotDragView") { return [view] }
+            return view.subviews.flatMap(dragHandles)
+        }
+        let centers = dragHandles(editView).map { $0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil) }
+        precondition(centers.count >= 3)
+        let sourcePoint = centers.min { abs($0.x - 130) < abs($1.x - 130) }!
+        let targetPoint = centers.min { abs($0.x - 550) < abs($1.x - 550) }!
         drag(in: editPanel, from: sourcePoint, to: targetPoint)
         precondition(store.settings.appExplorer!.favorite(at: [.left, .right])?.name == "Development",
                      "Actual mouse drag must swap group with URL")
@@ -370,7 +374,7 @@ import SwiftUI
         var tileError: String?
         var captureAvailable = true
         controller.captureWindow = { _ in
-            captureAvailable ? WindowTilingTarget { direction in tiled.append(direction); return tileError } : nil
+            captureAvailable ? WindowTilingTarget { direction, _ in tiled.append(direction); return tileError } : nil
         }
         for direction in SwipeDirection.allCases {
             controller.show(waitingForLift: false)
@@ -482,5 +486,85 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         precondition(sentKeys.count == 1, "Back and cancel never send a shortcut")
         print("Explorer shortcut native HUD passed: nested swipe-up, dispatch after teardown, exact chord, no duplicates, focus/context/new-HUD cancellation and back safety.")
+        controller.frontmostPID = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+        let y = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
+        let u = RecordedShortcut(keyCode: 32, modifiers: 0, keyLabel: "U")
+        let heldLayer = ExplorerHoldLayer(name: "Thirds", holdShortcut: y, favorites: [
+            AppExplorerFavorite(direction: .left, name: "Layer docs", url: "https://example.com/layer")
+        ], windowLayout: .thirds)
+        let wideLayer = ExplorerHoldLayer(name: "Wide", holdShortcut: u, windowLayout: .twoThirds)
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .left, name: "Window Manager", action: .windowManager),
+            AppExplorerFavorite(direction: .right, name: "Media Controls", action: .mediaControls)
+        ], holdLayers: [heldLayer, wideLayer])
+        try render(ExplorerHoldLayerEditor(layer: heldLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}),
+            size: CGSize(width: 450, height: 360), path: CommandLine.arguments[1] + "/hold-layer-editor.png")
+        try render(AppExplorerSettingsView(store: store, initialLayerID: heldLayer.id).padding(24).frame(width: 680, height: 500).background(Color(nsColor: .windowBackgroundColor)),
+            size: CGSize(width: 680, height: 500), path: CommandLine.arguments[1] + "/held-layer-grid.png")
+        func layerKey(_ code: UInt16, down: Bool, repeatKey: Bool = false) {
+            let window = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+            let event = NSEvent.keyEvent(with: down ? .keyDown : .keyUp, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: code == 16 ? "y" : "u", charactersIgnoringModifiers: code == 16 ? "y" : "u", isARepeat: repeatKey, keyCode: code)!
+            window.sendEvent(event)
+        }
+        controller.show(waitingForLift: false)
+        layerKey(16, down: true)
+        precondition(controller.isVisible && controller.displayedEntries.first?.name == "Layer docs", "Native Y keydown selects Explorer layer")
+        layerKey(16, down: true, repeatKey: true)
+        layerKey(32, down: true)
+        precondition(controller.displayedEntries.isEmpty)
+        layerKey(32, down: false)
+        precondition(controller.displayedEntries.first?.name == "Layer docs")
+        layerKey(16, down: false)
+        precondition(controller.displayedEntries.first?.isWindowManager == true)
+        controller.process(report(500)); controller.process(report(400))
+        layerKey(16, down: true)
+        let urlsBeforeLayer = openedURLs.count
+        controller.process(report(nil))
+        precondition(controller.isVisible && openedURLs.count == urlsBeforeLayer, "Changing layers mid-swipe requires a fresh swipe")
+        swipeLeft()
+        precondition(!controller.isVisible && openedURLs.last?.path == "/layer")
+        var layouts: [ExplorerWindowLayout] = []
+        controller.captureWindow = { _ in WindowTilingTarget { _, layout in layouts.append(layout); return nil } }
+        controller.showWindowManager(waitingForLift: false)
+        layerKey(16, down: true)
+        precondition(controller.displayedEntries.first?.name.contains("⅓") == true)
+        let thirdsPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let thirdsView = thirdsPanel.contentView!
+        let thirdsBitmap = thirdsView.bitmapImageRepForCachingDisplay(in: thirdsView.bounds)!
+        thirdsView.cacheDisplay(in: thirdsView.bounds, to: thirdsBitmap)
+        try thirdsBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/thirds-hud.png"))
+        swipeLeft()
+        precondition(layouts == [.thirds])
+        controller.showWindowManager(waitingForLift: false)
+        layerKey(32, down: true); swipeLeft()
+        precondition(layouts == [.thirds, .twoThirds])
+        controller.showWindowManager(waitingForLift: false)
+        layerKey(16, down: true); layerKey(16, down: false); swipeLeft()
+        precondition(layouts.last == .halves)
+        var mediaActions: [ExplorerMediaAction] = []
+        controller.performMedia = { mediaActions.append($0) }
+        controller.show(waitingForLift: false)
+        controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
+        precondition(controller.isVisible && controller.displayedEntries.count == 6 && controller.displayedEntries.allSatisfy { $0.mediaAction != nil })
+        let mediaPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let mediaView = mediaPanel.contentView!
+        let mediaBitmap = mediaView.bitmapImageRepForCachingDisplay(in: mediaView.bounds)!
+        mediaView.cacheDisplay(in: mediaView.bounds, to: mediaBitmap)
+        try mediaBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/media-hud.png"))
+        swipeUp(); controller.process(report(nil)); swipeUp()
+        precondition(mediaActions == [.volumeUp, .volumeUp] && controller.isVisible)
+        controller.process(report(500))
+        controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 600, y: 400, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+        controller.process(report(nil))
+        precondition(mediaActions.last == .playPause && controller.isVisible)
+        centerTap()
+        precondition(controller.displayedEntries.contains { $0.isMediaControls })
+        controller.dismiss()
+        precondition(mediaActions.count == 3)
+        print("Explorer layers/media native UI passed: Y/U holds, repeat/release priority, mid-swipe drain, alternate apps, thirds/two-thirds/default tiling, repeated volume, play/pause and back.")
     }
 }

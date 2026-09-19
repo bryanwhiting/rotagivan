@@ -3,7 +3,8 @@ import ApplicationServices
 import SwiftUI
 
 enum WindowTile {
-    static func title(_ direction: SwipeDirection) -> String {
+    static func title(_ direction: SwipeDirection, layout: ExplorerWindowLayout = .halves) -> String {
+        if layout != .halves { return "\(direction.title) \(layout == .thirds ? "⅓" : "⅔")" }
         switch direction {
         case .left: return "Left half"
         case .right: return "Right half"
@@ -17,7 +18,16 @@ enum WindowTile {
     }
 
     // Top-left origin, matching Accessibility's global desktop coordinates.
-    static func frame(_ direction: SwipeDirection, in area: CGRect) -> CGRect {
+    static func frame(_ direction: SwipeDirection, in area: CGRect, layout: ExplorerWindowLayout = .halves) -> CGRect {
+        if layout != .halves {
+            let width = floor(area.width * layout.fraction), height = floor(area.height * layout.fraction)
+            let left = [.left, .topLeft, .bottomLeft].contains(direction)
+            let right = [.right, .topRight, .bottomRight].contains(direction)
+            let top = [.up, .topLeft, .topRight].contains(direction)
+            let bottom = [.down, .bottomLeft, .bottomRight].contains(direction)
+            return CGRect(x: right ? area.maxX - width : area.minX, y: bottom ? area.maxY - height : area.minY,
+                width: left || right ? width : area.width, height: top || bottom ? height : area.height)
+        }
         let halfWidth = floor(area.width / 2), halfHeight = floor(area.height / 2)
         switch direction {
         case .up: return CGRect(x: area.minX, y: area.minY, width: area.width, height: halfHeight)
@@ -45,7 +55,7 @@ enum WindowTile {
 
 @MainActor struct WindowTilingTarget {
     // Returns a user-visible error, or nil on success. Injectable for HUD tests.
-    var apply: (SwipeDirection) -> String?
+    var apply: (SwipeDirection, ExplorerWindowLayout) -> String?
 }
 
 @MainActor enum WindowTiling {
@@ -56,7 +66,7 @@ enum WindowTile {
         guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let window = unsafeBitCast(value, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(window, 0.2)
-        return WindowTilingTarget { direction in
+        return WindowTilingTarget { direction, layout in
             guard AXIsProcessTrusted() else { return "Enable Accessibility for Rotagivan, then try again." }
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return "The original app is no longer active. Reopen Explorer over that window." }
             if (attribute(window, "AXFullScreen") as? Bool) == true { return "Exit full screen before tiling this window." }
@@ -70,7 +80,7 @@ enum WindowTile {
             let frames = screens.map { WindowTile.accessibilityFrame($0.frame, primaryTop: primary.frame.maxY) }
             guard let index = WindowTile.screenIndex(for: current, frames: frames) else { return "No display is available." }
             let area = WindowTile.accessibilityFrame(screens[index].visibleFrame, primaryTop: primary.frame.maxY)
-            let desired = WindowTile.frame(direction, in: area)
+            let desired = WindowTile.frame(direction, in: area, layout: layout)
             // Resize first so a large window can move into an edge/corner, then
             // repeat size after moving for apps that constrain by current position.
             var size = desired.size, point = desired.origin
@@ -106,9 +116,10 @@ enum WindowTile {
 
 struct WindowTileIcon: View {
     let direction: SwipeDirection
+    var layout: ExplorerWindowLayout = .halves
     var body: some View {
         let area = CGRect(x: 0, y: 0, width: 42, height: 30)
-        let tile = WindowTile.frame(direction, in: area).insetBy(dx: 2, dy: 2)
+        let tile = WindowTile.frame(direction, in: area, layout: layout).insetBy(dx: 2, dy: 2)
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).strokeBorder(.secondary.opacity(0.5))
             RoundedRectangle(cornerRadius: 2).fill(.teal).frame(width: tile.width, height: tile.height)

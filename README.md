@@ -231,6 +231,32 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+**Explorer hold layers:** use **Add layer** above the favorites grid in General
+settings or the inline editor. Name the layer, record a hold key (new layers
+suggest **Y**), and choose **Halves & quarters**, **Thirds**, or **Two thirds** for
+window sizing. New layers copy the currently edited slots; choose the layer in
+the **Explorer layer** picker to replace its apps, URLs, shortcuts, and groups.
+**Edit…** changes its name/key/window preset; **Remove** asks before deleting it.
+
+While the HUD is open, hold the layer key to temporarily switch its contents.
+Release it to restore the prior Explorer page. In Window Manager, the same key
+temporarily changes the window sizes instead of showing apps. Edge placements
+use the chosen fraction in one dimension; corner placements use it in both.
+The most recently pressed layer wins if multiple keys are held. Changing layers
+mid-swipe drains the current touch; lift, then make a fresh swipe. Escape closes
+the HUD. Release layer keys before using **Edit**. These keys are Explorer-local,
+not global shortcuts and not the cursor/tap layers. Use a key that isn't already
+intercepted by another global shortcut. Layer definitions and slots export/sync;
+the held state does not. Up to 16 Explorer layers and 256 total slots are supported.
+
+**Media Controls:** choose **Media Controls** from a slot's **•••** menu, then
+select it in Explorer. Swipe **up/down** for volume up/down, **top-right** for
+play/pause, **top-left** for mute/unmute, and **left/right** for previous/next
+track. Lift to apply; the HUD stays open for repeated adjustments. Center tap
+returns to the parent Explorer; Escape closes. These send standard macOS media
+keys to the system's active media app/output; some external audio devices do not
+support software volume adjustment. No music-service login is needed.
+
 Click **Edit** in the Explorer HUD, or press **E** while it is open, to customize
 favorites right there. The inline editor starts in the current group and offers
 the same app picker, URL editor, named groups, rename, and removal controls.

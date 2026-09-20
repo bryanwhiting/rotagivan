@@ -117,12 +117,13 @@ enum WindowTile {
 struct WindowTileIcon: View {
     let direction: SwipeDirection
     var layout: ExplorerWindowLayout = .halves
+    var accent: Color = .teal
     var body: some View {
         let area = CGRect(x: 0, y: 0, width: 42, height: 30)
         let tile = WindowTile.frame(direction, in: area, layout: layout).insetBy(dx: 2, dy: 2)
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).strokeBorder(.secondary.opacity(0.5))
-            RoundedRectangle(cornerRadius: 2).fill(.teal).frame(width: tile.width, height: tile.height)
+            RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: tile.width, height: tile.height)
                 .offset(x: tile.minX, y: tile.minY)
         }.frame(width: 42, height: 30).frame(height: 42).accessibilityHidden(true)
     }

@@ -195,6 +195,8 @@ extension AppExplorerPresenting {
 
     private func loadEntries() {
         let original = configuration()
+        model.theme = original.resolvedTheme
+        model.animationsEnabled = original.resolvedAnimationsEnabled
         let layer = original.holdLayers?.first { $0.id == heldKeys.activeID }
         let settings = original.projected(layerID: layer?.id)
         model.layerName = layer?.name
@@ -531,24 +533,40 @@ struct ExplorerEntry {
     @Published var layerName: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
+    @Published var theme: ExplorerTheme = .vector
+    @Published var animationsEnabled = true
 }
 
 struct AppExplorerView: View {
     @ObservedObject var model: ExplorerModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var appeared = false
+    @State private var reticleRotation = -135.0
     var onSelect: (SwipeDirection) -> Void
     var onCancel: () -> Void
     var onBack: () -> Void = {}
     var onEdit: () -> Void = {}
+    // Previews/tests may enforce reduced motion; they cannot override macOS's
+    // accessibility preference in the opposite direction.
+    var forceReduceMotion = false
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var canGoBack: Bool { !model.directWindowManager && !model.groupNames.isEmpty }
+    private var animates: Bool {
+        ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
+            reduceMotion: reduceMotion || forceReduceMotion)
+    }
+    private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
+    private var accent: Color { model.theme.accent }
 
     var body: some View {
         VStack(spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.groupNames.last ?? "App Explorer").font(.system(size: 19, weight: .semibold, design: .rounded)).lineLimit(1)
+                    Text(model.groupNames.last ?? "App Explorer")
+                        .font(.system(size: 19, weight: .semibold, design: model.theme.isHUD ? .monospaced : .rounded)).lineLimit(1)
                     Text(model.layerName.map { "\($0) · \(model.showingWindowManager ? model.windowLayout.title : "Held layer")" } ?? (model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased()))
-                        .font(.system(size: 9, weight: .medium)).tracking(1).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(model.theme.isHUD ? accent : .secondary).lineLimit(1)
                 }
                 Spacer()
                 if model.canEdit {
@@ -566,8 +584,20 @@ struct AppExplorerView: View {
                             else {
                                 Button(action: onBack) {
                                     VStack(spacing: 7) {
-                                        Image(systemName: canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))
-                                            .font(.system(size: 30, weight: .light)).foregroundStyle(.teal)
+                                        if model.theme.isHUD && model.showingWindowManager {
+                                            ExplorerLayoutPreview(direction: model.selected, layout: model.windowLayout, accent: accent)
+                                        } else {
+                                            ZStack {
+                                                if model.theme.isHUD {
+                                                    Circle().stroke(accent.opacity(0.20), style: StrokeStyle(lineWidth: 1, dash: [2, 5])).frame(width: 57, height: 57)
+                                                    Circle().trim(from: 0.04, to: 0.26).stroke(accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                                        .frame(width: 57, height: 57)
+                                                        .rotationEffect(.degrees(reticleRotation))
+                                                }
+                                                Image(systemName: canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))
+                                                    .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
+                                            }.frame(height: model.theme.isHUD ? 57 : 30)
+                                        }
                                         Text(canGoBack ? "Tap to go back" : "Tap to close")
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
@@ -584,26 +614,54 @@ struct AppExplorerView: View {
         }
         .padding(26)
         .frame(width: 470, height: 464)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26))
-        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(.white.opacity(0.2)))
+        .background(ExplorerHUDBackdrop(theme: model.theme))
+        .tint(accent)
+        .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
+        .scaleEffect(animates && !appeared ? 0.985 : 1)
+        .opacity(animates && !appeared ? 0.85 : 1)
+        .onAppear {
+            reticleRotation = reticleAngle(model.selected)
+            withAnimation(animates ? .easeOut(duration: 0.16) : nil) { appeared = true }
+        }
+        .onReceive(model.$selected.removeDuplicates()) { direction in
+            withAnimation(feedback) {
+                reticleRotation = ExplorerHUDMotion.nearestAngle(from: reticleRotation, to: reticleAngle(direction))
+            }
+        }
+        .transaction { if !animates { $0.animation = nil } }
+    }
+
+    private func reticleAngle(_ direction: SwipeDirection?) -> Double {
+        switch direction {
+        case .up: return -135
+        case .topRight: return -90
+        case .right: return -45
+        case .bottomRight: return 0
+        case .down: return 45
+        case .bottomLeft: return 90
+        case .left: return 135
+        case .topLeft: return 180
+        case nil: return -135
+        }
     }
 
     private func tile(_ direction: SwipeDirection) -> some View {
         let entry = model.entries.first { $0.direction == direction }
-        let selected = model.selected == direction && entry != nil
+        let available = entry != nil && (entry?.url != nil || entry?.isGroup == true || entry?.isWindowManager == true || entry?.tilingDirection != nil || entry?.shortcut != nil || entry?.isMediaControls == true || entry?.mediaAction != nil)
+        let selected = model.selected == direction && available
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
                     if entry.isMediaControls || entry.mediaAction != nil {
-                        Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
                     } else if entry.shortcut != nil {
-                        Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
                     } else if let direction = entry.tilingDirection {
-                        WindowTileIcon(direction: direction, layout: model.windowLayout)
+                        WindowTileIcon(direction: direction, layout: model.windowLayout, accent: accent)
                     } else if entry.isWindowManager {
-                        Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
                     } else if entry.isGroup {
-                        Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(.teal).frame(width: 42, height: 42)
+                        Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
                     } else if entry.isWebURL {
                         WebsiteFavicon(url: entry.url, size: 42)
                     } else {
@@ -618,14 +676,17 @@ struct AppExplorerView: View {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)
                 }
-                Text(direction.title).font(.system(size: 9)).foregroundStyle(.secondary)
+                Text(selected && model.theme.isHUD ? "\(direction.title.uppercased()) · READY" : direction.title)
+                    .font(.system(size: 9, weight: .medium, design: model.theme.isHUD ? .monospaced : .default))
+                    .foregroundStyle(selected ? accent : .secondary)
             }
             .frame(width: 130, height: 98)
-            .background(selected ? Color.teal.opacity(0.22) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
-            .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(selected ? Color.teal.opacity(0.8) : .clear, lineWidth: 1.5))
+            .background(ExplorerTileChrome(theme: model.theme, selected: selected, occupied: entry != nil))
+            .scaleEffect(selected && model.theme.isHUD ? 1.025 : 1)
+            .animation(feedback, value: selected)
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain).disabled(entry == nil || (entry?.url == nil && entry?.isGroup != true && entry?.isWindowManager != true && entry?.tilingDirection == nil && entry?.shortcut == nil && entry?.isMediaControls != true && entry?.mediaAction == nil))
+        .buttonStyle(.plain).disabled(!available)
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
     }

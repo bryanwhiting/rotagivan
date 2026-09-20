@@ -2,6 +2,22 @@
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
+## App Explorer appearance
+
+Choose **General → App Explorer → Classic / Vector HUD / Ember**, or use the
+palette menu while editing the Explorer directly. Vector HUD is the new default:
+dark instrument panels, cyan targeting brackets, a directional reticle, and a
+live destination preview in Window Manager. Ember uses a warm amber cockpit
+palette; Classic retains the native material appearance.
+
+Appearance is shared across Explorer groups, hold layers, window controls, and
+media controls, and is included in YAML/cloud configuration syncing. It does not
+change any apps, bindings, gesture timing, or window layouts. **Animate HUD
+feedback** can be disabled independently; macOS Reduce Motion always wins.
+Selection feedback lasts 120 ms and the entrance settles in 160 ms. There are no
+looping effects, animation timers, or per-report telemetry: actions execute
+immediately, without waiting for animations.
+
 ## Apple trackpad actions (experimental)
 
 In **General → Apple trackpad · actions only**, enable **Apple trackpad actions**

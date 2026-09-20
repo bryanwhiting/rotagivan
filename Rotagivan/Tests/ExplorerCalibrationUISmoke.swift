@@ -566,5 +566,44 @@ import SwiftUI
         controller.dismiss()
         precondition(mediaActions.count == 3)
         print("Explorer layers/media native UI passed: Y/U holds, repeat/release priority, mid-swipe drain, alternate apps, thirds/two-thirds/default tiling, repeated volume, play/pause and back.")
+        for theme in ExplorerTheme.allCases {
+            let themedModel = ExplorerModel()
+            themedModel.theme = theme
+            themedModel.layerHint = "Y: Thirds · U: Wide"
+            themedModel.canEdit = true
+            themedModel.entries = [
+                ExplorerEntry(direction: .topLeft, bundleID: nil, name: "Safari", icon: NSWorkspace.shared.icon(forFile: "/Applications/Safari.app"), url: URL(fileURLWithPath: "/Applications/Safari.app")),
+                ExplorerEntry(direction: .up, bundleID: nil, name: "Window Manager", icon: nil, url: nil, isWindowManager: true),
+                ExplorerEntry(direction: .topRight, bundleID: nil, name: "Music", icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Music.app"), url: URL(fileURLWithPath: "/System/Applications/Music.app")),
+                ExplorerEntry(direction: .left, bundleID: nil, name: "Finder", icon: NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app"), url: URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")),
+                ExplorerEntry(direction: .right, bundleID: nil, name: "Focus", icon: nil, url: nil, shortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")),
+                ExplorerEntry(direction: .bottomLeft, bundleID: nil, name: "Recent apps", icon: nil, url: nil, isGroup: true, isRecentGroup: true),
+                ExplorerEntry(direction: .down, bundleID: nil, name: "Workspace", icon: nil, url: nil, isGroup: true),
+                ExplorerEntry(direction: .bottomRight, bundleID: nil, name: "Media Controls", icon: nil, url: nil, isMediaControls: true)
+            ]
+            themedModel.selected = .right
+            let view = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {})
+            try render(view, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue).png")
+            let reducedView = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {}, forceReduceMotion: true)
+            try render(reducedView, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-reduced-motion.png")
+            themedModel.showingWindowManager = true
+            themedModel.canEdit = false
+            themedModel.groupNames = ["Window Manager"]
+            themedModel.layerName = "Precision layout"
+            themedModel.windowLayout = .thirds
+            themedModel.entries = ExplorerModel.directions.map {
+                ExplorerEntry(direction: $0, bundleID: nil, name: WindowTile.title($0, layout: .thirds), icon: nil, url: nil, tilingDirection: $0)
+            }
+            themedModel.selected = .topRight
+            try render(view, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-layouts.png")
+        }
+        try render(ExplorerThemePicker(theme: .constant(.vector)).padding(16).frame(width: 510).background(Color(nsColor: .windowBackgroundColor)),
+            size: CGSize(width: 510, height: 150), path: CommandLine.arguments[1] + "/theme-picker.png")
+        print("Explorer theme snapshots passed: Classic/Vector/Ember, Reduce Motion, selected layout previews, and appearance picker.")
+        precondition(!ExplorerHUDMotion.enabled(theme: .vector, preference: true, reduceMotion: true))
+        precondition(!ExplorerHUDMotion.enabled(theme: .ember, preference: false, reduceMotion: false))
+        precondition(!ExplorerHUDMotion.enabled(theme: .native, preference: true, reduceMotion: false))
+        precondition(ExplorerHUDMotion.nearestAngle(from: 180, to: -135) == 225)
+        precondition(ExplorerHUDMotion.nearestAngle(from: -135, to: 180) == -180)
     }
 }

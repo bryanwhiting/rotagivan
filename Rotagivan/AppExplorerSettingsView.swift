@@ -23,6 +23,16 @@ struct AppExplorerSettingsView: View {
     private var settings: AppExplorerSettings { baseSettings.projected(layerID: selectedLayerID) }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
+    private var themeBinding: Binding<ExplorerTheme> {
+        Binding(get: { baseSettings.resolvedTheme }, set: { theme in
+            var next = baseSettings; next.theme = theme; store.settings.appExplorer = next
+        })
+    }
+    private var animationBinding: Binding<Bool> {
+        Binding(get: { baseSettings.resolvedAnimationsEnabled }, set: { enabled in
+            var next = baseSettings; next.animationsEnabled = enabled; store.settings.appExplorer = next
+        })
+    }
     var compact = false
     var onGroupPathChange: (([SwipeDirection]) -> Void)? = nil
 
@@ -39,6 +49,10 @@ struct AppExplorerSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             if !compact && selectedLayerID == nil {
             Label("App Explorer", systemImage: "safari").font(.headline)
+            ExplorerThemePicker(theme: themeBinding)
+            Toggle("Animate HUD feedback", isOn: animationBinding).font(.caption)
+            Text("Appearance applies to apps, groups, window layouts, and media controls. Reduce Motion always disables animations.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Default mode", selection: Binding(get: { settings.defaultMode }, set: { mode in
                 edit { $0.defaultMode = mode }
             })) {
@@ -58,6 +72,15 @@ struct AppExplorerSettingsView: View {
             if let error = shortcuts.error { Text(error).font(.caption).foregroundStyle(.orange) }
             }
             HStack {
+                if compact {
+                    Menu {
+                        Picker("Theme", selection: themeBinding) {
+                            ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        Toggle("Animate HUD feedback", isOn: animationBinding)
+                    } label: { Image(systemName: "paintpalette") }
+                        .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
+                }
                 Picker("Explorer layer", selection: $selectedLayerID) {
                     Text("Default").tag(nil as UUID?)
                     ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }

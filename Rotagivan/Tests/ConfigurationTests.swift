@@ -116,6 +116,21 @@ struct ConfigurationTests {
         precondition(layerRestored.settings.appExplorer == layeredExplorer.settings.appExplorer)
         rejected(layerYAML.replacingOccurrences(of: "windowLayout: thirds", with: "windowLayout: invalid"), "unknown window layout")
         print("Explorer hold layers and media controls YAML roundtrip passed.")
+        precondition(AppExplorerSettings().resolvedTheme == .vector)
+        precondition(AppExplorerSettings().resolvedAnimationsEnabled)
+        for theme in ExplorerTheme.allCases {
+            var themed = layeredExplorer
+            themed.settings.appExplorer!.theme = theme
+            themed.settings.appExplorer!.animationsEnabled = false
+            let themeYAML = try themed.yaml()
+            let restored = try AppConfiguration.parse(themeYAML)
+            precondition(restored.settings.appExplorer == themed.settings.appExplorer)
+            let projection = themed.settings.appExplorer!.projected(layerID: themed.settings.appExplorer!.holdLayers!.first!.id)
+            precondition(projection.resolvedTheme == theme && !projection.resolvedAnimationsEnabled)
+            rejected(themeYAML.replacingOccurrences(of: "theme: \(theme.rawValue)", with: "theme: unknownTheme"), "unknown Explorer theme")
+            rejected(themeYAML.replacingOccurrences(of: "animationsEnabled: false", with: "animationsEnabled: notABoolean"), "invalid animation setting")
+        }
+        print("Explorer themes passed: legacy fallback, all-theme YAML roundtrip, animation preference, layer inheritance, and invalid input rejection.")
         var invalidGroup = grouped
         invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
         rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")

@@ -83,6 +83,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/WebsiteFavicon.swift \
   Rotagivan/WindowTiling.swift \
+  Rotagivan/ExplorerAppearance.swift \
   Rotagivan/MediaControls.swift \
   Rotagivan/ExplorerHoldLayerEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \

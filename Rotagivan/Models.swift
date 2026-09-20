@@ -8,6 +8,17 @@ enum AppExplorerMode: String, Codable, CaseIterable {
 
 enum AppExplorerAction: String, Codable { case windowManager, mediaControls }
 
+enum ExplorerTheme: String, Codable, CaseIterable {
+    case native, vector, ember
+    var title: String {
+        switch self { case .native: return "Classic"; case .vector: return "Vector HUD"; case .ember: return "Ember" }
+    }
+    var subtitle: String {
+        switch self { case .native: return "Native · understated"; case .vector: return "Precision · electric"; case .ember: return "Warm · cinematic" }
+    }
+    var isHUD: Bool { self != .native }
+}
+
 enum ExplorerWindowLayout: String, Codable, CaseIterable {
     case halves, thirds, twoThirds
     var title: String { switch self { case .halves: return "Halves & quarters"; case .thirds: return "Thirds"; case .twoThirds: return "Two thirds" } }
@@ -84,6 +95,10 @@ struct AppExplorerSettings: Codable, Equatable {
     var favorites: [AppExplorerFavorite] = []
     var holdShortcut: RecordedShortcut?
     var holdLayers: [ExplorerHoldLayer]? = nil
+    var theme: ExplorerTheme? = nil
+    var animationsEnabled: Bool? = nil
+    var resolvedTheme: ExplorerTheme { theme ?? .vector }
+    var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     func projected(layerID: UUID?) -> Self {
         guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
         var result = self

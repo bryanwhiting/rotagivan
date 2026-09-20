@@ -54,10 +54,12 @@ private final class CalibrationPoster: GestureEventPosting {
     let preferences: UserDefaults
     let store: SettingsStore
     let poster = CalibrationPoster()
+    let applePoster = CalibrationPoster()
     let explorer = ExplorerStub()
     let start = ProcessInfo.processInfo.systemUptime
     var now = Date()
     var engine: GestureEngine!
+    var appleEngine: GestureEngine!
     var hid: NavigatorHIDManager!
 
     init() {
@@ -77,7 +79,9 @@ private final class CalibrationPoster: GestureEventPosting {
             left: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17"))
         store.updateGestures(taps, for: 1)
         engine = GestureEngine(store: store, poster: poster, clock: { [unowned self] in self.now })
-        hid = NavigatorHIDManager(store: store, gestures: engine, explorer: explorer)
+        appleEngine = GestureEngine(store: store, poster: applePoster, clock: { [unowned self] in self.now }, inputMode: .nativeActions)
+        hid = NavigatorHIDManager(store: store, gestures: engine, explorer: explorer,
+            appleGestures: appleEngine, inputPreferences: preferences)
     }
 
     func begin(_ mode: GestureCalibrationMode = .doubleTap) -> GestureCalibrationSession {
@@ -91,6 +95,13 @@ private final class CalibrationPoster: GestureEventPosting {
         now = Date(timeIntervalSince1970: start + time)
         let contacts = x.map { [FingerContact(id: 0, x: $0, y: y, touching: true, confident: true)] } ?? []
         hid.receive(TrackpadReport(contacts: contacts, buttonDown: button, scanTime: 0), at: start + time)
+    }
+
+    func sendApple(_ time: Double, x: Double? = nil, y: Double = 500, deviceID: UInt64 = 42) {
+        now = Date(timeIntervalSince1970: start + time)
+        let contacts = x.map { [FingerContact(id: 0, x: $0, y: y, touching: true, confident: true)] } ?? []
+        hid.receive(TrackpadReport(contacts: contacts, buttonDown: false, scanTime: 0),
+            from: .apple(deviceID), at: start + time)
     }
 
     func trials(_ mode: GestureCalibrationMode, intervals: [Double] = (0..<10).map { 0.10 + Double($0) * 0.01 }) {
@@ -108,6 +119,7 @@ private final class CalibrationPoster: GestureEventPosting {
     func finish() {
         hid.endCalibration()
         engine.reset()
+        appleEngine.reset()
         preferences.removePersistentDomain(forName: suite)
     }
 }
@@ -120,6 +132,58 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        for action in [TapAction.appExplorer, .windowManager] {
+            check { f in
+                var taps = f.store.activeGestures
+                taps.oneFingerTap = action
+                f.store.updateGestures(taps, for: 1)
+                f.sendApple(1, x: 500); f.sendApple(1.03)
+                precondition(f.explorer.isVisible, "Apple tap must open the shared HUD")
+                precondition(f.explorer.windowManagerShows == (action == .windowManager ? 1 : 0))
+                f.send(1.1, x: 500); f.send(1.14, x: 600); f.send(1.18)
+                f.sendApple(1.2, x: 500, deviceID: 43); f.sendApple(1.24, x: 600, deviceID: 43); f.sendApple(1.28, deviceID: 43)
+                precondition(f.explorer.isVisible && f.explorer.selections.isEmpty, "Other devices cannot steer this HUD")
+                f.sendApple(1.3, x: 500); f.sendApple(1.34, x: 600); f.sendApple(1.38)
+                precondition(f.explorer.selections == [.right])
+                precondition(f.applePoster.actions == 0 && f.applePoster.moves == 0 && f.applePoster.scrolls == 0 && f.applePoster.dragStarts == 0)
+                precondition(f.poster.actions == 0 && f.poster.moves == 0, "Navigator remains quiet while Apple owns the HUD")
+            }
+        }
+        check { f in
+            f.hid.explorerHold(true)
+            f.sendApple(1, x: 500); f.sendApple(1.05, x: 600); f.sendApple(1.1)
+            precondition(f.explorer.selections == [.right], "Keyboard-opened HUD accepts Apple input")
+            f.hid.explorerHold(false)
+        }
+        check { f in
+            let session = f.begin()
+            for index in 0..<10 {
+                let t = 1.0 + Double(index) * 3
+                f.sendApple(t, x: 500); f.sendApple(t + 0.03)
+                // Navigator touches must never count as the second Apple tap.
+                f.send(t + 0.05, x: 500); f.send(t + 0.07)
+                f.sendApple(t + 0.18, x: 500); f.sendApple(t + 0.21)
+            }
+            precondition(session.isComplete && session.sampleCount == 10)
+            precondition(abs((session.medianDoubleTapInterval ?? 0) - 0.18) < 0.0001)
+            precondition(f.applePoster.actions == 0 && f.poster.actions == 0)
+        }
+        print("Apple HID integration passed: action HUDs, source isolation, hotkey entry, and calibration.")
+        check { f in
+            var taps = f.store.activeGestures
+            taps.oneFingerTap = .appExplorer
+            f.store.updateGestures(taps, for: 1)
+            f.sendApple(1, x: 500)
+            f.sendApple(1.1, x: 650)
+            f.hid.navigatorDisconnected()
+            f.sendApple(1.11, x: 650); f.sendApple(1.14)
+            precondition(!f.explorer.isVisible, "Navigator unplug must not turn a moved Apple contact into a fresh tap")
+            f.sendApple(2, x: 500); f.sendApple(2.03)
+            precondition(f.explorer.isVisible)
+            f.hid.navigatorDisconnected()
+            f.sendApple(2.1, x: 500); f.sendApple(2.14, x: 600); f.sendApple(2.18)
+            precondition(f.explorer.selections == [.right], "Unrelated Navigator unplug must preserve the Apple HUD")
+        }
         check { f in
             f.hid.explorerHold(true)
             f.explorer.isEditing = true

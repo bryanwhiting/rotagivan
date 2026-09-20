@@ -521,7 +521,7 @@ struct ContentView: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 22) {
             Section("Status") {
-                LabeledContent("Trackpad") { Text(statusText) }
+                LabeledContent("Navigator") { Text(statusText) }
                 Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }
                 Button("Open Accessibility Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
@@ -530,6 +530,18 @@ struct ContentView: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
                 }
                 Toggle("Enable Rotagivan", isOn: enabledBinding)
+            }
+            Divider()
+            Section("Apple trackpad · actions only") {
+                Toggle("Enable Apple trackpad actions", isOn: Binding(
+                    get: { hid.appleTrackpadEnabled }, set: { hid.setAppleTrackpadEnabled($0) }))
+                Text(hid.appleTrackpadStatus).foregroundStyle(.secondary)
+                Text("Uses the active layer’s tap and swipe bindings for shortcuts, App Explorer, and Window Manager. Enable tap actions in that layer to use tap bindings.")
+                    .font(.callout)
+                Text("macOS keeps control of cursor movement, scrolling, clicks, and dragging. Motion settings and synthetic click/drag bindings apply only to Navigator. Native macOS gestures are not blocked, so overlapping gestures may trigger both actions.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Experimental · built-in and Magic Trackpads. Uses a private macOS touch interface; compatibility may change after a macOS update. This switch is saved only on this Mac, not synced.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
@@ -542,7 +554,7 @@ struct ContentView: View {
             SyncSettingsView(sync: sync)
             Divider()
             Section {
-                Text("Rotagivan is an independent, editable implementation. Do not run it at the same time as ZSA Navigator or both apps will respond to each touch.")
+                Text("Rotagivan is an independent, editable implementation. Quit ZSA Navigator before using Rotagivan’s Navigator driver. Apple trackpad actions are independent of that driver.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

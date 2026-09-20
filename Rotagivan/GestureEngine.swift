@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class GestureEngine {
+    enum InputMode {
+        case navigator
+        case nativeActions
+    }
+
     var onAppExplorer: (() -> Void)?
     var onWindowManager: (() -> Void)?
     var isEditingInterface = false {
@@ -40,6 +45,9 @@ final class GestureEngine {
     private let store: SettingsStore
     private let poster: any GestureEventPosting
     private let clock: () -> Date
+    private let inputMode: InputMode
+    private var synthesizesPointerEvents: Bool { inputMode == .navigator }
+    private var syntheticDragActive: Bool { synthesizesPointerEvents && poster.dragging }
     private struct DeferredDoubleTap {
         var profileID: UInt32
         var settings: DoubleTapSwipeSettings
@@ -86,6 +94,8 @@ final class GestureEngine {
     private var pendingTapTimer: Timer?
     private var pendingTap: PendingTap?
     private var physicalButtonDown = false
+    private var touchHadPhysicalButton = false
+    private var nativeContactBlocked = false
     private var keyboardDrag = false
     // A tap-and-hold drag ends with its finger lift. Re-grip only applies to
     // a physical-button drag; otherwise the synthetic left button can linger.
@@ -95,6 +105,7 @@ final class GestureEngine {
     private var tapDragStartTimer: Timer?
 
     func keyboardAction(_ id: UInt32, down: Bool) {
+        guard synthesizesPointerEvents else { return }
         if id == 5 {
             if down {
                 cancelTapSwipe(blockUntilLift: false)
@@ -114,10 +125,12 @@ final class GestureEngine {
         }
     }
 
-    init(store: SettingsStore, poster: any GestureEventPosting = EventPoster(), clock: @escaping () -> Date = Date.init) {
+    init(store: SettingsStore, poster: any GestureEventPosting = EventPoster(),
+         clock: @escaping () -> Date = Date.init, inputMode: InputMode = .navigator) {
         self.store = store
         self.poster = poster
         self.clock = clock
+        self.inputMode = inputMode
     }
 
     func reset() {
@@ -144,9 +157,11 @@ final class GestureEngine {
         previousContacts.removeAll()
         holdingTapMotion = false
         touchProfileID = nil
-        poster.endDrag()
+        if synthesizesPointerEvents { poster.endDrag() }
         scrolling = false
         physicalButtonDown = false
+        touchHadPhysicalButton = false
+        nativeContactBlocked = false
         lastTap = .distantPast
         lastTapProfileID = nil
         scrollVelocity = .zero
@@ -155,12 +170,28 @@ final class GestureEngine {
         cursorFilter = CursorVelocityFilter()
         cursorTiming = CursorTiming()
         cursorGainFilter = CursorGainFilter()
-        store.cursorTelemetry.reset()
+        if synthesizesPointerEvents { store.cursorTelemetry.reset() }
     }
 
     func process(_ report: TrackpadReport, receivedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard store.settings.enabled else { reset(); return }
-        cursorInterval = cursorTiming.interval(scanTime: report.scanTime, receivedAt: receivedAt)
+        if !synthesizesPointerEvents {
+            let touching = report.contacts.filter(\.touching)
+            // Three/four-finger macOS gestures and uncertain/palm contacts must
+            // never degrade into one/two-finger custom actions on partial lift.
+            if touching.count > 2 || touching.contains(where: { !$0.confident }) {
+                reset()
+                nativeContactBlocked = true
+                return
+            }
+            if nativeContactBlocked {
+                if touching.isEmpty { nativeContactBlocked = false }
+                return
+            }
+        }
+        if synthesizesPointerEvents {
+            cursorInterval = cursorTiming.interval(scanTime: report.scanTime, receivedAt: receivedAt)
+        }
         let now = clock()
         let current = report.contacts.filter { $0.touching && $0.confident }
         let previousCount = previousContacts.values.filter(\.touching).count
@@ -227,7 +258,7 @@ final class GestureEngine {
             momentumTimer?.invalidate(); momentumTimer = nil
             cursorDecelerationTimer?.invalidate(); cursorDecelerationTimer = nil
             cursorVelocity = .zero
-            store.cursorTelemetry.endTouch()
+            endCursorTelemetry()
             lastReportTime = now
             return
         }
@@ -238,12 +269,12 @@ final class GestureEngine {
             holdingTapMotion = false
             cancelTapDragCandidate()
         }
-        if poster.dragging { twoFingerNavigation = TwoFingerNavigationRecognizer() }
+        if syntheticDragActive { twoFingerNavigation = TwoFingerNavigationRecognizer() }
         else {
             let settings = activeGestures.twoFingerSwipe
             let navigation = twoFingerNavigation.update(report, settings: settings, profileID: store.activeProfileID, at: now)
             if navigation.consumed {
-                store.cursorTelemetry.endTouch()
+                endCursorTelemetry()
                 maximumMovement = max(maximumMovement, twoFingerNavigation.travel)
                 previousContacts = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
                 lastReportTime = now
@@ -256,12 +287,12 @@ final class GestureEngine {
         }
 
         if current.isEmpty {
-            store.cursorTelemetry.endTouch()
+            endCursorTelemetry()
             if let deadline = pendingDragEndAt, now >= deadline {
                 pendingDragEnd?.invalidate()
                 pendingDragEnd = nil
                 pendingDragEndAt = nil
-                poster.endDrag()
+                if synthesizesPointerEvents { poster.endDrag() }
             }
             if previousCount > 0 { finishTouch(at: now) }
             previousContacts.removeAll()
@@ -273,7 +304,7 @@ final class GestureEngine {
         if current.count >= 2 {
             holdingTapMotion = false
             cancelTapDragCandidate()
-            store.cursorTelemetry.endTouch()
+            endCursorTelemetry()
             handleScroll(current, at: now)
         } else if let finger = current.first {
             handleCursor(finger, at: now)
@@ -291,11 +322,12 @@ final class GestureEngine {
         touchStart = now
         touchOrigin = centroid(contacts)
         touchProfileID = store.activeProfileID
+        touchHadPhysicalButton = physicalButtonDown
         let taps = activeGestures
         let hasTapAction = taps.oneFingerTap != .none || (taps.oneFingerDoubleTap ?? .none) != .none ||
             (taps.oneFingerTripleTap ?? .none) != .none ||
             taps.doubleTapSwipe?.isConfigured == true || taps.singleTapSwipe?.isConfigured == true
-        holdingTapMotion = contacts.count == 1 && !poster.dragging &&
+        holdingTapMotion = synthesizesPointerEvents && contacts.count == 1 && !syntheticDragActive &&
             hasTapAction && taps.gestures.tapToClick && taps.gestures.resolvedKeepCursorStillForTaps
         maximumMovement = 0
         hadTwoFingers = contacts.count >= 2
@@ -306,7 +338,7 @@ final class GestureEngine {
         cursorFilter = CursorVelocityFilter()
         cursorGainFilter = CursorGainFilter()
 
-        if contacts.count == 1, !poster.dragging, taps.gestures.tapToClick,
+        if contacts.count == 1, !syntheticDragActive, taps.gestures.tapToClick,
            let settings = taps.singleTapSwipe, settings.isConfigured,
            let pending = pendingTap, pending.fingerCount == 1, pending.tapCount == 1,
            pending.profileID == store.activeProfileID,
@@ -324,11 +356,11 @@ final class GestureEngine {
             RunLoop.main.add(timer, forMode: .common)
         }
 
-        if poster.dragging {
+        if syntheticDragActive {
             pendingDragEnd?.invalidate()
             pendingDragEnd = nil
             pendingDragEndAt = nil
-        } else if contacts.count == 1, activeGestures.gestures.tapToClick,
+        } else if synthesizesPointerEvents, contacts.count == 1, activeGestures.gestures.tapToClick,
                   activeGestures.oneFingerTap == .leftClick,
                   activeGestures.gestures.touchAndHoldDrag {
             let pickupWindow = max(Self.tapDragPickupWindow, activeGestures.gestures.resolvedDoubleTapInterval)
@@ -378,6 +410,10 @@ final class GestureEngine {
             cursorVelocity = .zero
             return
         }
+        guard synthesizesPointerEvents else {
+            cursorVelocity = .zero
+            return
+        }
         // The new touch has its own origin: landing elsewhere never moves the
         // cursor. Small report-by-report movements add up to a deliberate drag.
         let tapSettings = activeGestures.gestures
@@ -390,7 +426,7 @@ final class GestureEngine {
         if holdingTapMotion {
             let stillPotentialTap = touchProfileID == store.activeProfileID &&
                 tapSettings.tapToClick && tapSettings.resolvedKeepCursorStillForTaps &&
-                !poster.dragging && maximumMovement <= tapSettings.tapMaxMovement &&
+                !syntheticDragActive && maximumMovement <= tapSettings.tapMaxMovement &&
                 now.timeIntervalSince(touchStart) <= tapSettings.tapMaxDuration
             if stillPotentialTap {
                 // Drop tap wobble rather than buffer it: replaying it on lift
@@ -429,6 +465,7 @@ final class GestureEngine {
         let rawDY = matching.map { $0.0.y - $0.1.y }.reduce(0, +) / Double(matching.count)
         maximumMovement += hypot(rawDX, rawDY)
         guard maximumMovement > activeGestures.gestures.tapMaxMovement else { return }
+        guard synthesizesPointerEvents else { return }
         let profile = store.activeProfile
         let dt = profile.scrollResponse == nil ? max(0.001, now.timeIntervalSince(lastReportTime)) : cursorInterval
         if scrollProfileID != store.activeProfileID || scrollResponseSnapshot != profile.scrollResponse {
@@ -482,6 +519,7 @@ final class GestureEngine {
         let gestures = activeGestures.gestures
         let duration = now.timeIntervalSince(touchStart)
         let isTap = gestures.tapToClick && touchProfileID == store.activeProfileID &&
+            (synthesizesPointerEvents || !touchHadPhysicalButton) &&
             duration <= gestures.tapMaxDuration && maximumMovement <= gestures.tapMaxMovement
         holdingTapMotion = false
 
@@ -491,15 +529,15 @@ final class GestureEngine {
         if scrolling {
             if store.activeProfile.kineticScroll { startMomentum() }
             scrolling = false
-            if !poster.dragging { return }
+            if !syntheticDragActive { return }
         }
 
-        if !hadTwoFingers && !poster.dragging {
+        if !hadTwoFingers && !syntheticDragActive && synthesizesPointerEvents {
             if isTap { cursorVelocity = .zero }
             else { startCursorDeceleration() }
         }
 
-        if poster.dragging {
+        if syntheticDragActive {
             if tapDragActive {
                 tapDragActive = false
                 pendingDragEnd?.invalidate()
@@ -651,8 +689,9 @@ final class GestureEngine {
     private func performTap(_ action: TapAction, shortcut: RecordedShortcut?, at date: Date) {
         dispatchTap(action, shortcut: shortcut)
         // Only a real single-finger click may arm tap-hold dragging.
-        lastTap = action == .leftClick ? date : .distantPast
-        lastTapProfileID = action == .leftClick ? store.activeProfileID : nil
+        let armsSyntheticDrag = synthesizesPointerEvents && action == .leftClick
+        lastTap = armsSyntheticDrag ? date : .distantPast
+        lastTapProfileID = armsSyntheticDrag ? store.activeProfileID : nil
     }
 
     private func dispatchTap(_ action: TapAction, shortcut: RecordedShortcut?) {
@@ -661,7 +700,12 @@ final class GestureEngine {
             reset() // Stop all cursor/scroll momentum and queued taps before the HUD opens.
             if action == .windowManager { onWindowManager?() }
             else { onAppExplorer?() }
-        } else { poster.performTap(action, shortcut: shortcut) }
+        } else if synthesizesPointerEvents || [.shortcut, .optionF19, .enter].contains(action) {
+            // Apple's native trackpad owns every pointer event in native-actions
+            // mode. Keyboard actions cross the poster boundary; mouse actions
+            // stay native.
+            poster.performTap(action, shortcut: shortcut)
+        }
     }
 
     private func cancelPendingTap() {
@@ -696,10 +740,14 @@ final class GestureEngine {
     }
 
     private func startTapDrag() {
+        guard synthesizesPointerEvents else {
+            cancelTapDragCandidate()
+            return
+        }
         // The second contact belongs to quick-swipe recognition until its
         // deadline. Never post mouse-down and then reinterpret it as a swipe.
         if singleSwipe != nil { return }
-        guard tapDragCandidate, !poster.dragging else { return }
+        guard tapDragCandidate, !syntheticDragActive else { return }
         guard tapDragProfileID == store.activeProfileID, !hadTwoFingers,
               store.settings.enabled, activeGestures.gestures.tapToClick,
               activeGestures.gestures.touchAndHoldDrag,
@@ -722,12 +770,14 @@ final class GestureEngine {
         guard down != physicalButtonDown else { return }
         physicalButtonDown = down
         if down {
+            touchHadPhysicalButton = true
             cancelTapSwipe(blockUntilLift: false)
             cancelPendingTap()
+            cancelTapDragCandidate()
             cursorDecelerationTimer?.invalidate()
             cursorDecelerationTimer = nil
-            poster.beginDrag()
-        } else { poster.endDrag() }
+            if synthesizesPointerEvents { poster.beginDrag() }
+        } else if synthesizesPointerEvents { poster.endDrag() }
     }
 
     private func clearSingleSwipe() {
@@ -753,6 +803,7 @@ final class GestureEngine {
     }
 
     private func startMomentum() {
+        guard synthesizesPointerEvents else { return }
         momentumTimer?.invalidate()
         // The hardware reports short, high-frequency coordinate deltas. A
         // modest boost turns a deliberate flick into visible page coasting.
@@ -764,6 +815,9 @@ final class GestureEngine {
         momentumTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { timer.invalidate(); return }
+                guard self.synthesizesPointerEvents else {
+                    timer.invalidate(); self.momentumTimer = nil; return
+                }
                 let decay = self.store.activeProfile.kineticDecay
                 if self.store.activeProfile.scrollResponse?.sanitized.fastMultiplier == 0 {
                     timer.invalidate(); self.momentumTimer = nil; return
@@ -783,6 +837,7 @@ final class GestureEngine {
     }
 
     private func startCursorDeceleration() {
+        guard synthesizesPointerEvents else { return }
         cursorDecelerationTimer?.invalidate()
         cursorDecelerationTimer = nil
         let curve = store.activeProfile.resolvedCursorResponse
@@ -794,6 +849,9 @@ final class GestureEngine {
         let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { timer.invalidate(); return }
+                guard self.synthesizesPointerEvents else {
+                    timer.invalidate(); self.cursorDecelerationTimer = nil; return
+                }
                 let elapsed = ProcessInfo.processInfo.systemUptime - started
                 let integral = curve.releaseIntegral(from: previousElapsed, to: elapsed, duration: duration)
                 self.poster.move(dx: velocity.dx * integral, dy: velocity.dy * integral)
@@ -806,6 +864,10 @@ final class GestureEngine {
         }
         cursorDecelerationTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func endCursorTelemetry() {
+        if synthesizesPointerEvents { store.cursorTelemetry.endTouch() }
     }
 
     private func centroid(_ contacts: [FingerContact]) -> CGPoint {

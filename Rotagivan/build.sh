@@ -46,6 +46,8 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/ScrollCurveEditor.swift" \
   "$script_dir/MotionCurveEditor.swift" \
   "$script_dir/TrackpadReport.swift" \
+  "$script_dir/TrackpadInputRouting.swift" \
+  "$script_dir/AppleTrackpadInput.swift" \
   "$script_dir/TrackpadDistance.swift" \
   "$script_dir/TrackpadDistanceControl.swift" \
   "$script_dir/EventPoster.swift" \

@@ -11,6 +11,7 @@ struct RotagivanApp: App {
     private let hotKeys = HotKeyManager()
 
     init() {
+        AppleTrackpadInput.preserveLegacySettings()
         let factory = try? AppConfiguration.factory()
         try? factory?.seedIfNeeded()
         let store = SettingsStore(factorySettings: factory?.settings)
@@ -75,11 +76,16 @@ struct NavigatorPanel: View {
     @State private var trusted = AXIsProcessTrusted()
 
     private var connected: Bool {
+        if hid.appleTrackpadConnected { return true }
         if case .connected = hid.state { return true }
         return false
     }
 
     private var status: String {
+        if hid.appleTrackpadConnected {
+            if case .connected = hid.state { return "Both connected" }
+            return "Apple trackpad"
+        }
         switch hid.state {
         case .connected: return "Connected"
         case .looking: return "Searching"
@@ -114,8 +120,14 @@ struct NavigatorPanel: View {
                 }
                 .padding(8)
                 .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-            } else if case .error(let message) = hid.state {
+            } else if case .error(let message) = hid.state, !hid.appleTrackpadConnected {
                 Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if hid.appleTrackpadEnabled {
+                Text(hid.appleTrackpadStatus).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Apple: actions only · speed and scrolling below apply to Navigator.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Toggle("Enable", isOn: Binding(get: { store.settings.enabled }, set: {
                 store.settings.enabled = $0
@@ -160,7 +172,7 @@ struct NavigatorPanel: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }.buttonStyle(.link)
                 Spacer()
-                if !connected && store.settings.enabled {
+                if store.settings.enabled {
                     Button("Reconnect") { trusted = AXIsProcessTrusted(); hid.stop(); hid.start() }
                         .buttonStyle(.link)
                 }

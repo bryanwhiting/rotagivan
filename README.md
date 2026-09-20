@@ -2,6 +2,60 @@
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
+## Apple trackpad actions (experimental)
+
+In **General → Apple trackpad · actions only**, enable **Apple trackpad actions**
+to use a built-in Mac trackpad or Magic Trackpad alongside—or instead of—Navigator.
+This switch is **off by default**, saved only on this Mac, and not included in
+cloud/YAML configuration syncing. Your existing layers and bindings are unchanged.
+If an older experimental build stored a `macTrackpad` configuration, that data is
+archived in local preferences as `input.legacyAppleTrackpadSettings` before model
+migration. It is not reinterpreted or silently enabled as a new gesture binding.
+
+- Uses the active layer's tap, double/triple-tap, and tap/swipe bindings, including
+  app-specific overrides. Enable **tap actions** in the layer for tap bindings.
+  Native three/four-finger contacts and uncertain/palm contacts are ignored and
+  drained until all fingers lift; they are not treated as two-finger taps.
+- Keyboard actions, **App Explorer**, and **Window Manager** work through the same
+  action pipeline. Once a HUD opens, swipe and lift to select; nested groups,
+  Explorer hold layers, tiling sizes, and media controls remain available.
+- macOS still owns Apple pointer acceleration, scrolling/momentum, clicks, and
+  dragging. Rotagivan does **not** post extra mouse events for Apple touches,
+  change System Settings, seize the device, or block native gestures.
+  Navigator motion/scroll sliders and synthetic click/drag bindings do not apply
+  to the Apple trackpad. Click bindings remain macOS's responsibility, including
+  its own “Tap to click” preference.
+- Native gestures can happen **alongside** a Rotagivan binding. Choose bindings
+  that do not conflict with macOS/app gestures, or change those gestures yourself
+  in System Settings. A physical click may also resemble a configured tap to the
+  private touch interface; custom actions do not replace native clicking.
+- Calibration accepts either trackpad and locks each session to its first device.
+  Explorer similarly locks to the triggering/first trackpad. Concurrent touches
+  from different devices cannot combine into a gesture.
+
+This feature dynamically loads Apple's **private, undocumented MultitouchSupport
+framework**, because the public event APIs do not supply system-wide raw contacts
+for these gestures. It is not an App Store-compatible API contract and may stop
+working after a macOS update. Missing framework symbols or unsupported hardware
+report a status message rather than disabling the Navigator driver. Device
+recognition and contact layout are necessarily reverse-engineered; a future ABI
+change cannot be guaranteed safe merely by checking symbol names. Magic Mouse
+and Touch Bar are excluded. Use **General → Reconnect** after granting permissions
+or if a device stops producing actions. Disabling Apple actions leaves native
+trackpad behavior intact.
+
+The adapter's contact layout is informed by the reverse-engineered
+[MultitouchSupport header](https://github.com/machinarii/hypervibe/blob/main/MultitouchSupport.h)
+and [TrackMagic's earlier header](https://github.com/calftrail/TrackMagic/blob/master/MultitouchSupport.h).
+Its millimeter vector is converted to the same logical distance scale as
+Navigator (2,048 units per 55 mm). Raw-frame fixtures, gesture output isolation,
+device arbitration, and simulated HUD integration run in `Rotagivan/test.sh`.
+The separate native HUD smoke harness is
+`Rotagivan/Tests/ExplorerCalibrationUISmoke.swift`.
+Hardware enumeration was checked on a Mac mini with a Magic Mouse; physical
+Apple-trackpad recognition and distance calibration still need verification on
+a built-in or Magic Trackpad.
+
 ## Quick local build and install
 
 ```sh

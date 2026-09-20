@@ -17,6 +17,18 @@ final class NavigatorHIDManager: ObservableObject {
     @Published private(set) var state: State = .stopped
     @Published private(set) var distanceScale: TrackpadDistanceScale?
     @Published private(set) var calibrationSession: GestureCalibrationSession?
+    @Published private(set) var appleTrackpadEnabled: Bool
+    @Published private(set) var appleTrackpadStatus = "Disabled on this Mac"
+    @Published private(set) var appleTrackpadConnected = false
+    private let inputPreferences: UserDefaults
+    private let appleInput = AppleTrackpadInput()
+    private let appleGestures: GestureEngine
+    private var inputRouting = TrackpadInputRouting()
+    private var explorerSource: TrackpadInputSource?
+    private var calibrationSource: TrackpadInputSource?
+    private var navigatorDistanceScale: TrackpadDistanceScale?
+    private var appleDistanceScale: TrackpadDistanceScale?
+    private var started = false
     private var calibrationTimer: Timer?
     private var calibrationSettings: ProfileGestures?
     private var calibrationActiveProfile: UInt32?
@@ -32,6 +44,7 @@ final class NavigatorHIDManager: ObservableObject {
 
     var isCalibrating: Bool { calibrationCapturing }
     var canCalibrate: Bool {
+        if appleTrackpadConnected { return store.settings.enabled }
         if case .connected = state { return store.settings.enabled }
         return false
     }
@@ -41,9 +54,33 @@ final class NavigatorHIDManager: ObservableObject {
     private var device: IOHIDDevice?
     private var reportBuffer = [UInt8](repeating: 0, count: 64)
 
-    init(store: SettingsStore, gestures: GestureEngine? = nil, explorer: (any AppExplorerPresenting)? = nil) {
+    init(store: SettingsStore, gestures: GestureEngine? = nil, explorer: (any AppExplorerPresenting)? = nil,
+         appleGestures: GestureEngine? = nil, inputPreferences: UserDefaults = .standard) {
         self.store = store
         self.gestures = gestures ?? GestureEngine(store: store)
+        self.appleGestures = appleGestures ?? GestureEngine(store: store, inputMode: .nativeActions)
+        self.inputPreferences = inputPreferences
+        appleTrackpadEnabled = inputPreferences.bool(forKey: "input.appleTrackpadActions")
+        appleInput.onStatus = { [weak self] status in self?.appleStatusChanged(status) }
+        appleInput.onReport = { [weak self] identity, report, scale, time in
+            guard let self, self.started, self.appleTrackpadEnabled, self.store.settings.enabled else { return }
+            guard AXIsProcessTrusted() else {
+                self.appleInput.stop()
+                self.resetAppleSession()
+                self.appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
+                return
+            }
+            self.appleDistanceScale = scale
+            // Observation only. A held mouse button conservatively vetoes tap
+            // actions; this global snapshot is not a device-specific click API.
+            let buttonDown = [CGMouseButton.left, .right, .center].contains {
+                CGEventSource.buttonState(.combinedSessionState, button: $0)
+            }
+            let observed = TrackpadReport(contacts: report.contacts,
+                buttonDown: report.buttonDown || (buttonDown && report.contacts.contains(where: \.touching)),
+                scanTime: report.scanTime)
+            self.receive(observed, from: .apple(identity.deviceID), at: time)
+        }
         if gestures == nil {
             foregroundAppChanged(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
             appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
@@ -61,6 +98,7 @@ final class NavigatorHIDManager: ObservableObject {
             (explorer as? AppExplorerController)?.onEditingChanged = { [weak self] editing in
                 guard let self else { return }
                 self.gestures.isEditingInterface = editing
+                self.appleGestures.isEditingInterface = editing
                 self.suppressUntilLift = self.contactsDown
                 if !editing {
                     self.explorerProfileID = self.store.activeProfileID
@@ -70,9 +108,13 @@ final class NavigatorHIDManager: ObservableObject {
             }
             self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
             self.gestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
+            self.appleGestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
+            self.appleGestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
+                self.appleGestures.reset()
+                self.explorerSource = nil
                 self.suppressUntilLift = self.contactsDown
             }
             explorer.contextIsValid = { [weak self] in
@@ -97,6 +139,7 @@ final class NavigatorHIDManager: ObservableObject {
         }
         explorer?.dismiss()
         gestures.reset()
+        appleGestures.reset()
         suppressUntilLift = contactsDown
         store.foregroundBundleID = bundleID
     }
@@ -107,6 +150,7 @@ final class NavigatorHIDManager: ObservableObject {
         explorerProfileID = store.activeProfileID
         explorerSettings = store.activeGestures
         explorerConfiguration = store.settings.appExplorer
+        explorerSource = inputRouting.source
         if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
         else { explorer?.show(waitingForLift: contactsDown) }
     }
@@ -118,7 +162,10 @@ final class NavigatorHIDManager: ObservableObject {
             guard store.settings.enabled, !calibrationCapturing else { explorerHotkeyHeld = false; return }
             explorer?.setAlternateHeld(true)
             gestures.reset()
+            appleGestures.reset()
             openAppExplorer()
+            // A keyboard-opened HUD may be controlled by either trackpad.
+            explorerSource = nil
         } else {
             if explorer?.isEditing != true { explorer?.dismiss() }
             explorer?.setAlternateHeld(false)
@@ -137,6 +184,8 @@ final class NavigatorHIDManager: ObservableObject {
         explorer?.dismiss()
         endCalibration()
         gestures.reset()
+        appleGestures.reset()
+        calibrationSource = nil
         calibrationSettings = store.settings.gestures(for: session.profileID)
         calibrationActiveProfile = store.activeProfileID
         calibrationSession = session
@@ -172,6 +221,7 @@ final class NavigatorHIDManager: ObservableObject {
         calibrationTimer = nil
         suppressUntilLift = contactsDown
         gestures.reset()
+        appleGestures.reset()
     }
 
     private func cancelCalibration(reason: String) {
@@ -184,6 +234,7 @@ final class NavigatorHIDManager: ObservableObject {
         calibrationSession = nil
         calibrationSettings = nil
         calibrationActiveProfile = nil
+        calibrationSource = nil
     }
 
     func applyCalibration() {
@@ -214,6 +265,8 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func start() {
+        started = true
+        startAppleInput()
         guard manager == nil else { return }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: "io.zsa.navigator").isEmpty else {
             state = .error("Quit ZSA Navigator, then press Reconnect.")
@@ -251,8 +304,20 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func stop() {
+        let wasTouching = contactsDown
+        started = false
+        appleInput.stop()
+        appleGestures.reset()
+        inputRouting.reset()
+        contactsDown = false
+        suppressUntilLift = false
+        explorerSource = nil
+        calibrationSource = nil
         explorer?.dismiss()
+        suppressUntilLift = wasTouching
         distanceScale = nil
+        navigatorDistanceScale = nil
+        appleDistanceScale = nil
         cancelCalibration(reason: "The trackpad was disconnected or disabled. Reconnect and start again.")
         gestures.reset()
         if let manager {
@@ -296,19 +361,34 @@ final class NavigatorHIDManager: ObservableObject {
             return
         }
         let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "ZSA Navigator"
-        distanceScale = Self.readDistanceScale(from: device)
+        navigatorDistanceScale = Self.readDistanceScale(from: device)
+        if inputRouting.source?.isApple != true { distanceScale = navigatorDistanceScale }
         UserDefaults.standard.set(Date(), forKey: "debug.lastConnected")
         state = .connected(product)
     }
 
     private func didRemove(_ device: IOHIDDevice) {
         guard self.device === device else { return }
-        explorer?.dismiss()
-        distanceScale = nil
-        cancelCalibration(reason: "The trackpad disconnected. Reconnect and start again.")
         self.device = nil
-        gestures.reset()
+        navigatorDisconnected()
+    }
+
+    // Separate lifecycle seam for testing a Navigator unplug while Apple owns
+    // an active contact. An unrelated device must not restart that contact.
+    func navigatorDisconnected() {
+        navigatorDistanceScale = nil
         state = .looking
+        gestures.reset()
+        if inputRouting.source?.isApple == true {
+            distanceScale = appleDistanceScale
+            return
+        }
+        explorer?.dismiss()
+        distanceScale = appleTrackpadConnected ? appleDistanceScale : nil
+        cancelCalibration(reason: "The trackpad disconnected. Reconnect and start again.")
+        inputRouting.reset()
+        contactsDown = false
+        suppressUntilLift = false
     }
 
     static func readDistanceScale(from device: IOHIDDevice) -> TrackpadDistanceScale? {
@@ -337,17 +417,39 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     private func received(_ report: UnsafeMutablePointer<UInt8>, length: Int, receivedAt: TimeInterval) {
-        guard let parsed = TrackpadReport.parse(report, length: length) else { return }
+        guard manager != nil, device != nil,
+              let parsed = TrackpadReport.parse(report, length: length) else { return }
         receive(parsed, at: receivedAt)
     }
 
     func receive(_ report: TrackpadReport, at receivedAt: TimeInterval) {
-        contactsDown = report.buttonDown || report.contacts.contains(where: { $0.touching })
+        receive(report, from: .navigator, at: receivedAt)
+    }
+
+    func receive(_ report: TrackpadReport, from source: TrackpadInputSource, at receivedAt: TimeInterval) {
+        let touching = report.buttonDown || report.contacts.contains(where: { $0.touching })
+        let previousSource = inputRouting.source
+        let lock = explorer?.isVisible == true ? explorerSource : (calibrationCapturing ? calibrationSource : nil)
+        // Empty frames before the first touch are useful to initialize calibration.
+        if previousSource == nil && !touching {
+            _ = inputRouting.accept(source, touching: false, lockedTo: lock)
+            if calibrationCapturing { calibrationSession?.process(report, at: receivedAt) }
+            return
+        }
+        guard inputRouting.accept(source, touching: touching, lockedTo: lock) else { return }
+        if previousSource != inputRouting.source {
+            gestures.reset()
+            appleGestures.reset()
+        }
+        contactsDown = inputRouting.contactsDown
+        distanceScale = source.isApple ? appleDistanceScale : navigatorDistanceScale
         if explorer?.isVisible == true {
+            if explorerSource == nil { explorerSource = source }
             explorer?.process(report)
             if explorer?.isEditing != true { return }
         }
         if calibrationCapturing, let session = calibrationSession {
+            if calibrationSource == nil { calibrationSource = source }
             advanceCalibration(at: receivedAt)
             if calibrationCapturing {
                 session.process(report, at: receivedAt)
@@ -359,7 +461,60 @@ final class NavigatorHIDManager: ObservableObject {
             if !contactsDown { suppressUntilLift = false }
             return
         }
-        gestures.process(report, receivedAt: receivedAt)
+        if source.isApple { appleGestures.process(report, receivedAt: receivedAt) }
+        else { gestures.process(report, receivedAt: receivedAt) }
+    }
+
+    func setAppleTrackpadEnabled(_ enabled: Bool) {
+        guard appleTrackpadEnabled != enabled else { return }
+        appleTrackpadEnabled = enabled
+        inputPreferences.set(enabled, forKey: "input.appleTrackpadActions")
+        if enabled, store.settings.enabled {
+            started = true
+            startAppleInput()
+        } else {
+            appleInput.stop()
+            appleTrackpadStatus = enabled ? "Rotagivan is disabled" : "Disabled on this Mac"
+            resetAppleSession()
+        }
+    }
+
+    private func startAppleInput() {
+        guard appleTrackpadEnabled, store.settings.enabled else { return }
+        guard AXIsProcessTrusted() else {
+            appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
+            return
+        }
+        appleInput.start()
+    }
+
+    private func resetAppleSession() {
+        appleGestures.reset()
+        if inputRouting.source?.isApple == true {
+            let interruptedSource = contactsDown ? inputRouting.source : nil
+            explorer?.dismiss()
+            cancelCalibration(reason: "The Apple trackpad was disconnected or disabled. Start again after reconnecting.")
+            inputRouting.reset(draining: interruptedSource)
+            contactsDown = false
+            suppressUntilLift = false
+            distanceScale = navigatorDistanceScale
+        }
+    }
+
+    private func appleStatusChanged(_ status: AppleTrackpadInput.Status) {
+        appleTrackpadConnected = false
+        switch status {
+        case .stopped: appleTrackpadStatus = appleTrackpadEnabled ? "Stopped" : "Disabled on this Mac"
+        case .looking: appleTrackpadStatus = "Looking for an Apple trackpad…"
+        case .unavailable(let message): appleTrackpadStatus = message
+        case .connected(let devices):
+            appleTrackpadConnected = !devices.isEmpty
+            appleTrackpadStatus = "Monitoring \(devices.count) Apple trackpad\(devices.count == 1 ? "" : "s") · native motion"
+            if case .apple(let id) = inputRouting.source, !devices.contains(where: { $0.deviceID == id }) {
+                resetAppleSession()
+            }
+        }
+        if !appleTrackpadConnected { resetAppleSession() }
     }
 
     nonisolated private static let deviceMatched: IOHIDDeviceCallback = { context, _, _, device in

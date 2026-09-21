@@ -34,6 +34,7 @@ final class NavigatorHIDManager: ObservableObject {
     private var calibrationSettings: ProfileGestures?
     private var calibrationDevice: GestureDevice = .navigator
     private var calibrationActiveProfile: UInt32?
+    private var calibrationConfigurationID: String?
     private var calibrationCapturing = false
     private var contactsDown = false
     private var suppressUntilLift = false
@@ -56,6 +57,12 @@ final class NavigatorHIDManager: ObservableObject {
     var canCalibrate: Bool {
         if appleTrackpadConnected { return store.settings.enabled }
         if case .connected = state { return store.settings.enabled }
+        return false
+    }
+    func canCalibrate(device: GestureDevice) -> Bool {
+        guard store.settings.enabled else { return false }
+        if device == .apple { return store.settings.resolvedDevices.appleEnabled && appleTrackpadConnected }
+        if case .connected = state { return store.settings.resolvedDevices.navigatorEnabled }
         return false
     }
     private let store: SettingsStore
@@ -287,10 +294,11 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func beginCalibration(profileID: UInt32, mode: GestureCalibrationMode, device: GestureDevice = .navigator) {
-        guard canCalibrate, calibrationSession == nil,
-              let profile = store.profiles.first(where: { $0.id == profileID }) else { return }
+        guard canCalibrate(device: device), calibrationSession == nil,
+              store.profiles.contains(where: { $0.id == profileID }) else { return }
         startCalibrationSession(GestureCalibrationSession(profileID: profileID,
-            profileName: profile.name, mode: mode, gestures: device == .apple ? store.gestures(for: profileID, device: .apple) : store.settings.gestures(for: profileID)), device: device)
+            profileName: store.activeConfigurationName, mode: mode,
+            gestures: store.gestures(for: profileID, device: device), device: device), device: device)
     }
 
     // Separate from connection setup so the input gate can be tested without a physical device.
@@ -302,8 +310,14 @@ final class NavigatorHIDManager: ObservableObject {
         appleGestures.reset()
         calibrationSource = nil
         calibrationDevice = device
+        if let source = inputRouting.source, source.isApple != (device == .apple) {
+            // A resting finger on the other trackpad must not block capture.
+            inputRouting.reset(draining: contactsDown ? source : nil)
+            contactsDown = false
+        }
         calibrationSettings = calibrationGestures(session.profileID)
         calibrationActiveProfile = store.activeProfileID
+        calibrationConfigurationID = store.activeConfigurationID
         calibrationSession = session
         calibrationCapturing = true
         if !contactsDown {
@@ -321,9 +335,9 @@ final class NavigatorHIDManager: ObservableObject {
     func advanceCalibration(at time: TimeInterval) {
         guard let session = calibrationSession else { return }
         if !store.settings.enabled || store.activeProfileID != calibrationActiveProfile ||
+            store.activeConfigurationID != calibrationConfigurationID ||
             !store.profiles.contains(where: { $0.id == session.profileID }) ||
-            calibrationGestures(session.profileID) != calibrationSettings ||
-            (calibrationDevice == .navigator && session.profileID != store.defaultProfileID && !(store.settings.customTapProfiles ?? []).contains(session.profileID)) {
+            calibrationGestures(session.profileID) != calibrationSettings {
             session.cancel(reason: "The layer or its tap settings changed. Start a new calibration.")
         }
         if session.cancellationReason == nil && !session.isComplete { session.tick(at: time) }
@@ -350,6 +364,7 @@ final class NavigatorHIDManager: ObservableObject {
         calibrationSession = nil
         calibrationSettings = nil
         calibrationActiveProfile = nil
+        calibrationConfigurationID = nil
         calibrationSource = nil
     }
 
@@ -357,33 +372,27 @@ final class NavigatorHIDManager: ObservableObject {
         advanceCalibration(at: ProcessInfo.processInfo.systemUptime)
         guard let session = calibrationSession, session.isComplete, session.cancellationReason == nil,
               let median = session.medianDoubleTapInterval else { return }
-        var taps = calibrationGestures(session.profileID)
+        var timings = store.tapCalibration(for: calibrationDevice)
         if session.mode == .tripleTap, let second = session.medianSecondTapInterval {
-            taps.gestures.tripleTapFirstInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
-            taps.gestures.tripleTapSecondInterval = min(600, max(50, (second * 1_000).rounded())) / 1_000
+            timings.tripleTapFirstInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
+            timings.tripleTapSecondInterval = min(600, max(50, (second * 1_000).rounded())) / 1_000
         } else if session.mode != .singleTapSwipe {
-            taps.gestures.doubleTapInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
+            timings.doubleTapInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
         }
         if session.mode == .singleTapSwipe, let window = session.medianSwipeWindow, let duration = session.medianSwipeDuration {
-            var swipe = taps.singleTapSwipe ?? .singleTapDefaults
-            swipe.swipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
-            swipe.fastSwipeDuration = min(300, max(60, (duration * 1_000).rounded())) / 1_000
-            taps.singleTapSwipe = swipe
+            timings.singleSwipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
+            timings.singleSwipeDuration = min(300, max(60, (duration * 1_000).rounded())) / 1_000
         }
         if session.mode == .doubleTapSwipe, let window = session.medianSwipeWindow {
-            var swipe = taps.doubleTapSwipe ?? DoubleTapSwipeSettings()
-            swipe.swipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
-            taps.doubleTapSwipe = swipe
+            timings.doubleSwipeWindow = min(800, max(100, (window * 1_000).rounded())) / 1_000
         }
-        let profileID = session.profileID
-        let appleOverride = calibrationDevice == .apple && !store.settings.resolvedDevices.shareTapActions
+        let device = calibrationDevice
         endCalibration()
-        if appleOverride { store.updateAppleGestures(taps, for: profileID) }
-        else { store.updateGestures(taps, for: profileID) }
+        store.updateTapCalibration(timings, for: device)
     }
 
     private func calibrationGestures(_ id: UInt32) -> ProfileGestures {
-        calibrationDevice == .apple ? store.gestures(for: id, device: .apple) : store.settings.gestures(for: id)
+        store.gestures(for: id, device: calibrationDevice)
     }
 
     func start() {
@@ -561,6 +570,11 @@ final class NavigatorHIDManager: ObservableObject {
     func receive(_ report: TrackpadReport, from source: TrackpadInputSource, at receivedAt: TimeInterval) {
         guard source.isApple ? store.settings.resolvedDevices.appleEnabled : store.settings.resolvedDevices.navigatorEnabled else { return }
         let touching = report.buttonDown || report.contacts.contains(where: { $0.touching })
+        // Ignore other-device samples, but observe its lift to clear any drain.
+        if calibrationCapturing && source.isApple != (calibrationDevice == .apple) {
+            if !touching { _ = inputRouting.accept(source, touching: false, lockedTo: calibrationSource) }
+            return
+        }
         let previousSource = inputRouting.source
         let lock = explorer?.isVisible == true ? explorerSource : (calibrationCapturing ? calibrationSource : nil)
         // Empty frames before the first touch are useful to initialize calibration.

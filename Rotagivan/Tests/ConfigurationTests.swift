@@ -38,6 +38,15 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var calibrated = factory
+        calibrated.settings.navigatorTapCalibration = TapCalibrationSettings(doubleTapInterval: 0.18, tripleTapFirstInterval: 0.2,
+            tripleTapSecondInterval: 0.22, singleSwipeWindow: 0.3, singleSwipeDuration: 0.12, doubleSwipeWindow: 0.4)
+        calibrated.settings.appleTapCalibration = TapCalibrationSettings(doubleTapInterval: 0.25)
+        let calibratedYAML = try calibrated.yaml()
+        let calibratedRoundtrip = try AppConfiguration.parse(calibratedYAML)
+        precondition(tryEqual(calibrated, calibratedRoundtrip), "Shared calibration survives YAML sync")
+        rejected(calibratedYAML.replacingOccurrences(of: "singleSwipeDuration: 0.12", with: "singleSwipeDuration: 9.0"), "invalid shared calibration duration")
+        rejected(calibratedYAML.replacingOccurrences(of: "doubleSwipeWindow: 0.4", with: "doubleSwipeWindow: 0.01"), "invalid shared calibration window")
         var reserved = factory
         reserved.settings.appExplorer = AppExplorerSettings(favorites: [
             ExplorerReservedGroup.actions.tile(at: .up),

@@ -99,10 +99,10 @@ private final class CalibrationPoster: GestureEventPosting {
             appleHUDDelay: appleHUDDelay)
     }
 
-    func begin(_ mode: GestureCalibrationMode = .doubleTap) -> GestureCalibrationSession {
+    func begin(_ mode: GestureCalibrationMode = .doubleTap, device: GestureDevice = .navigator) -> GestureCalibrationSession {
         let session = GestureCalibrationSession(profileID: 1, profileName: "Test", mode: mode,
-            gestures: store.settings.gestures(for: 1))
-        hid.startCalibrationSession(session, at: start)
+            gestures: store.gestures(for: 1, device: device), device: device)
+        hid.startCalibrationSession(session, at: start, device: device)
         return session
     }
 
@@ -207,10 +207,12 @@ private final class CalibrationPoster: GestureEventPosting {
         }
         check { f in
             f.store.settings.devices = ProfileDevices(shareTapActions: false)
-            let original = f.store.settings.gestures(for: 1)
+            let original = f.store.gestures(for: 1, device: .navigator)
             f.store.updateAppleGestures(original, for: 1)
             let session = GestureCalibrationSession(profileID: 1, profileName: "Apple", mode: .doubleTap, gestures: original)
             f.hid.startCalibrationSession(session, at: f.start, device: .apple)
+            f.trials(.doubleTap)
+            precondition(session.samples.isEmpty, "Navigator touches cannot calibrate the selected Apple device")
             for index in 0..<10 {
                 let t = 1.0 + Double(index) * 3
                 f.sendApple(t, x: 500); f.sendApple(t + 0.03)
@@ -218,8 +220,14 @@ private final class CalibrationPoster: GestureEventPosting {
             }
             precondition(session.isComplete)
             f.hid.applyCalibration()
-            precondition(f.store.settings.gestures(for: 1) == original, "Apple calibration must not modify shared Navigator settings")
+            precondition(f.store.gestures(for: 1, device: .navigator) == original, "Apple calibration must not modify shared Navigator settings")
             precondition(abs(f.store.gestures(for: 1, device: .apple).gestures.resolvedDoubleTapInterval - 0.18) < 0.0001)
+            f.store.settings.customTapProfiles = [2]
+            f.store.updateAppleGestures(original, for: 2)
+            precondition(f.store.gestures(for: 2, device: .apple).gestures.doubleTapInterval == 0.18)
+            f.store.settings.devices?.shareTapActions = true
+            precondition(f.store.gestures(for: 2, device: .apple).gestures.doubleTapInterval == 0.18,
+                         "Sharing actions must not discard the device's shared calibration")
         }
         print("Device profiles passed: per-device dispatch, disabled drivers, and isolated Apple calibration.")
         for action in [TapAction.appExplorer, .windowManager] {
@@ -342,7 +350,8 @@ private final class CalibrationPoster: GestureEventPosting {
             f.hid.explorerHold(false)
         }
         check { f in
-            let session = f.begin()
+            f.send(0.1, x: 500) // Resting Navigator finger must not block Apple capture.
+            let session = f.begin(device: .apple)
             for index in 0..<10 {
                 let t = 1.0 + Double(index) * 3
                 f.sendApple(t, x: 500); f.sendApple(t + 0.03)
@@ -407,7 +416,7 @@ private final class CalibrationPoster: GestureEventPosting {
             precondition(!f.explorer.isVisible)
         }
         check { f in
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             let session = f.begin(.tripleTap)
             f.hid.explorerHold(true)
             precondition(!f.explorer.isVisible, "Hotkey cannot interrupt calibration")
@@ -421,13 +430,13 @@ private final class CalibrationPoster: GestureEventPosting {
             }
             precondition(session.isComplete && !f.hid.isCalibrating)
             precondition(f.poster.actions == 0 && f.poster.moves == 0)
-            precondition(f.store.settings.gestures(for: 1) == before, "Calibration must not save before Apply")
+            precondition(f.store.gestures(for: 1, device: .navigator) == before, "Calibration must not save before Apply")
             f.hid.applyCalibration()
-            let applied = f.store.settings.gestures(for: 1)
+            let applied = f.store.gestures(for: 1, device: .navigator)
             precondition(applied.gestures.tripleTapFirstInterval == 0.145)
             precondition(applied.gestures.tripleTapSecondInterval == 0.245)
             precondition(applied.gestures.doubleTapInterval == before.gestures.doubleTapInterval)
-            precondition(f.store.settings.effectiveGestures(for: 2).gestures.tripleTapSecondInterval == 0.245)
+            precondition(f.store.gestures(for: 2, device: .navigator).gestures.tripleTapSecondInterval == 0.245)
         }
         check { f in
             var taps = f.store.activeGestures
@@ -474,7 +483,7 @@ private final class CalibrationPoster: GestureEventPosting {
         }
         print("App Explorer HID gate passed: action routing, exclusive input, profile/stop/Escape cancellation, and lift draining.")
         check { f in
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             let session = f.begin(.singleTapSwipe)
             for index in 0..<10 {
                 let t = 1.0 + Double(index) * 2
@@ -483,34 +492,34 @@ private final class CalibrationPoster: GestureEventPosting {
             }
             precondition(session.isComplete && session.sampleCount == 10)
             precondition(f.poster.actions == 0 && f.poster.moves == 0 && f.poster.dragStarts == 0)
-            precondition(f.store.settings.gestures(for: 1) == before)
+            precondition(f.store.gestures(for: 1, device: .navigator) == before)
             f.hid.applyCalibration()
             var expected = before
             expected.singleTapSwipe = .singleTapDefaults
             expected.singleTapSwipe!.swipeWindow = 0.15
             expected.singleTapSwipe!.fastSwipeDuration = 0.12
-            precondition(f.store.settings.gestures(for: 1) == expected, "Single-swipe calibration changes only its own timings")
+            precondition(f.store.gestures(for: 1, device: .navigator) == expected, "Single-swipe calibration changes only its own timings")
         }
         check { f in
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             let session = f.begin()
             f.hid.applyCalibration()
-            assert(f.hid.calibrationSession != nil && f.store.settings.gestures(for: 1) == before)
+            assert(f.hid.calibrationSession != nil && f.store.gestures(for: 1, device: .navigator) == before)
             f.trials(.doubleTap)
             assert(session.isComplete && session.sampleCount == 10)
             assert(!f.hid.isCalibrating)
             assert(f.poster.actions == 0 && f.poster.moves == 0 && f.poster.scrolls == 0 && f.poster.dragStarts == 0)
-            assert(f.store.settings.gestures(for: 1) == before, "Capture must not save until Apply")
+            assert(f.store.gestures(for: 1, device: .navigator) == before, "Capture must not save until Apply")
             f.hid.applyCalibration()
             var expected = before
             expected.gestures.doubleTapInterval = 0.145
-            assert(f.store.settings.gestures(for: 1) == expected)
+            assert(f.store.gestures(for: 1, device: .navigator) == expected)
             assert(f.hid.calibrationSession == nil)
             f.send(40, x: 500); f.send(40.03)
             assert(f.poster.actions == 1, "Normal taps resume after capture")
         }
         check { f in
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             let session = f.begin(.doubleTapSwipe)
             f.trials(.doubleTapSwipe)
             assert(session.isComplete && session.sampleCount == 10)
@@ -519,10 +528,10 @@ private final class CalibrationPoster: GestureEventPosting {
             var expected = before
             expected.gestures.doubleTapInterval = 0.145
             expected.doubleTapSwipe?.swipeWindow = 0.195
-            assert(f.store.settings.gestures(for: 1) == expected, "Only timing fields change; bindings/enabled/distance survive")
+            assert(f.store.gestures(for: 1, device: .navigator) == expected, "Only timing fields change; bindings/enabled/distance survive")
         }
         check { f in
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             _ = f.begin()
             f.send(1, x: 500)
             f.hid.keyboardAction(0, down: true)
@@ -530,7 +539,7 @@ private final class CalibrationPoster: GestureEventPosting {
             f.hid.endCalibration()
             f.send(1.04, x: 600); f.send(1.08)
             assert(f.poster.actions == 0 && f.poster.moves == 0 && f.poster.dragStarts == 0, "Cancel must drain in-flight touch")
-            assert(f.store.settings.gestures(for: 1) == before)
+            assert(f.store.gestures(for: 1, device: .navigator) == before)
             f.send(2, x: 500); f.send(2.03)
             assert(f.poster.actions == 1)
         }
@@ -539,13 +548,13 @@ private final class CalibrationPoster: GestureEventPosting {
             f.send(1, x: 500)
             f.hid.stop()
             assert(session.cancellationReason != nil && !f.hid.isCalibrating)
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             f.hid.applyCalibration()
-            assert(f.store.settings.gestures(for: 1) == before)
+            assert(f.store.gestures(for: 1, device: .navigator) == before)
         }
         check { f in
             let session = f.begin()
-            var changed = f.store.settings.gestures(for: 1)
+            var changed = f.store.gestures(for: 1, device: .navigator)
             changed.gestures.tapMaxDuration = 0.4
             f.store.updateGestures(changed, for: 1)
             f.hid.advanceCalibration(at: f.start + 1)
@@ -561,27 +570,27 @@ private final class CalibrationPoster: GestureEventPosting {
             _ = f.begin(.doubleTapSwipe)
             f.trials(.doubleTapSwipe, intervals: Array(repeating: 0.9, count: 10))
             f.hid.applyCalibration()
-            assert(f.store.settings.gestures(for: 1).gestures.doubleTapInterval == 0.6)
+            assert(f.store.gestures(for: 1, device: .navigator).gestures.doubleTapInterval == 0.6)
         }
         check { f in
             let session = f.begin()
             f.trials(.doubleTap)
             assert(session.isComplete)
-            var changed = f.store.settings.gestures(for: 1)
+            var changed = f.store.gestures(for: 1, device: .navigator)
             changed.gestures.doubleTapInterval = 0.5
             f.store.updateGestures(changed, for: 1)
             f.hid.applyCalibration()
             assert(session.cancellationReason != nil)
-            assert(f.store.settings.gestures(for: 1) == changed, "Completed stale results must not overwrite newer settings")
+            assert(f.store.gestures(for: 1, device: .navigator) == changed, "Completed stale results must not overwrite newer settings")
         }
         check { f in
             let session = f.begin()
             f.trials(.doubleTap)
-            let before = f.store.settings.gestures(for: 1)
+            let before = f.store.gestures(for: 1, device: .navigator)
             f.store.setActiveProfile(2)
             f.hid.applyCalibration()
             assert(session.cancellationReason != nil)
-            assert(f.store.settings.gestures(for: 1) == before)
+            assert(f.store.gestures(for: 1, device: .navigator) == before)
         }
         print("Calibration integration tests passed")
     }

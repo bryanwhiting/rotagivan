@@ -419,14 +419,8 @@ struct ContentView: View {
                 tapRecorder("Two-finger triple tap", action: tripleTapActionBinding(id, twoFingers: true), shortcut: gestureBinding(id).twoFingerTripleShortcut)
                 Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
-                doubleTapDelaySlider(id)
-                calibrationButton("Calibrate double tap…", profileID: id, mode: .doubleTap)
-                calibrationButton("Calibrate triple tap…", profileID: id, mode: .tripleTap)
-                if let first = editableGestures(id).gestures.tripleTapFirstInterval,
-                   let second = editableGestures(id).gestures.tripleTapSecondInterval {
-                    Text("Triple tap: \(Int(first * 1000)) + \(Int(second * 1000)) ms")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Calibrate tap timing for every layer in General → Tap calibration.")
+                    .font(.caption).foregroundStyle(.secondary)
                 tapImpactSpeedSlider(id)
                 Toggle("Keep cursor still while tapping", isOn: Binding(get: {
                     editableGestures(id).gestures.resolvedKeepCursorStillForTaps
@@ -449,9 +443,7 @@ struct ContentView: View {
                     var taps = editableGestures(id)
                     taps.singleTapSwipe = value
                     updateEditableGestures(taps, for: id)
-                }), singleTap: true, onCalibrate: {
-                    hid.beginCalibration(profileID: id, mode: .singleTapSwipe, device: editingAppleActions ? .apple : .navigator)
-                }, canCalibrate: hid.canCalibrate, distanceScale: hid.distanceScale)
+                }), singleTap: true, showTimingControls: false, distanceScale: hid.distanceScale)
                 Divider()
                 DoubleTapSwipeEditor(settings: Binding(get: {
                     editableGestures(id).doubleTapSwipe ?? DoubleTapSwipeSettings()
@@ -459,9 +451,7 @@ struct ContentView: View {
                     var taps = editableGestures(id)
                     taps.doubleTapSwipe = value
                     updateEditableGestures(taps, for: id)
-                }), onCalibrate: {
-                    hid.beginCalibration(profileID: id, mode: .doubleTapSwipe, device: editingAppleActions ? .apple : .navigator)
-                }, canCalibrate: hid.canCalibrate, distanceScale: hid.distanceScale)
+                }), showTimingControls: false, distanceScale: hid.distanceScale)
                 Divider()
                 twoFingerSwipeEditor(id, singleTap: true)
                 Divider()
@@ -498,41 +488,6 @@ struct ContentView: View {
 
     private func tapRecorder(_ title: String, action: Binding<TapAction>, shortcut: Binding<RecordedShortcut?>) -> some View {
         TapActionEditor(title: title, action: action, shortcut: shortcut)
-    }
-
-    private func calibrationButton(_ title: String, profileID: UInt32, mode: GestureCalibrationMode) -> some View {
-        Button { hid.beginCalibration(profileID: profileID, mode: mode, device: editingAppleActions ? .apple : .navigator) } label: {
-            Label(title, systemImage: "stopwatch")
-        }
-        .disabled(!hid.canCalibrate)
-        .help(hid.canCalibrate ? "Time 10 tries using your trackpad and apply the median." : "Enable and connect your trackpad to calibrate.")
-    }
-
-    private func doubleTapDelaySlider(_ id: UInt32) -> some View {
-        let milliseconds = Binding<Double>(get: {
-            editableGestures(id).gestures.resolvedDoubleTapInterval * 1_000
-        }, set: { value in
-            var profileGestures = editableGestures(id)
-            profileGestures.gestures.doubleTapInterval = min(600, max(50, value.rounded())) / 1_000
-            updateEditableGestures(profileGestures, for: id)
-        })
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Double-tap recognition delay").foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                Slider(value: milliseconds, in: 50...max(60, store.settings.sliderBaseline(for: id).doubleTapDelay * 2_000 - 50), step: 10)
-                    .accessibilityLabel("Double-tap recognition delay in milliseconds")
-                TextField("Milliseconds", value: milliseconds, format: .number.precision(.fractionLength(0)))
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .frame(width: 52)
-                    .accessibilityLabel("Double-tap recognition delay in milliseconds")
-            }
-            Text("Single taps wait this long only when that finger count has a double-tap action.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(width: 270)
     }
 
     private func tapImpactSpeedSlider(_ id: UInt32) -> some View {
@@ -590,6 +545,8 @@ struct ContentView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 22) {
+            TapCalibrationSettingsView(store: store, hid: hid)
+            Divider()
             Section("Status") {
                 LabeledContent("Navigator") { Text(statusText) }
                 Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }

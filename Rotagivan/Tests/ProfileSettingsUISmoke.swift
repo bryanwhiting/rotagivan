@@ -44,7 +44,7 @@ import SwiftUI
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + "/settings-\(index).png"))
-            if section == "App overrides" {
+            if section == "App overrides" || section == "General" {
                 panel.makeKeyAndOrderFront(nil)
                 NSApp.activate()
                 // Coordinates refer to this fixed 940 × 740 native render fixture.
@@ -64,6 +64,24 @@ import SwiftUI
                     }
                     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
                 }
+                if section == "General" {
+                    click(226, 360) // Expand timing adjustments.
+                    let layout = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+                    host.cacheDisplay(in: host.bounds, to: layout)
+                    try layout.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + "/general-calibration-layout.png"))
+                    click(610, 400) // Change Navigator double-tap delay.
+                    let navigator = store.settings.navigatorTapCalibration
+                    precondition(navigator?.doubleTapInterval != nil, "General timing slider must edit shared calibration")
+                    click(760, 263) // Select Apple trackpad.
+                    click(650, 400)
+                    precondition(store.settings.appleTapCalibration?.doubleTapInterval != nil)
+                    precondition(store.settings.navigatorTapCalibration == navigator, "Apple timing edits preserve Navigator calibration")
+                    host.layoutSubtreeIfNeeded()
+                    let expanded = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+                    host.cacheDisplay(in: host.bounds, to: expanded)
+                    try expanded.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + "/general-calibration-expanded.png"))
+                    print("General calibration UI passed: expand timing, edit shared Navigator timing, switch devices and edit independently")
+                } else {
                 click(450, 250) // Safari
                 click(214, 347) // Enable overrides
                 precondition(store.settings.resolvedAppOverrides.first { $0.bundleID == "com.apple.Safari" }?.enabled == false)
@@ -78,6 +96,7 @@ import SwiftUI
                 store.settings.appOverrides = []
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
                 print("App override chips passed: native click selection, independent edits, disabled-app selection/removal, missing-app fallback and empty-state rendering.")
+                }
             }
             panel.orderOut(nil); panel.close()
         }

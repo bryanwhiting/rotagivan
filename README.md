@@ -130,7 +130,7 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   secondary tap-to-click take priority over opening a HUD. Custom actions do not
   replace native clicking. Mouse buttons are observed globally, so a simultaneous
   click on another mouse also conservatively cancels an Apple gesture.
-- Calibration accepts either trackpad and locks each session to its first device.
+- Calibration uses the trackpad selected in General and ignores the other device.
   Explorer similarly locks to the triggering/first trackpad. Concurrent touches
   from different devices cannot combine into a gesture.
 - Outside a HUD or calibration, Navigator takes priority over a resting Apple
@@ -757,8 +757,11 @@ are not changed by this behavior.
 
 ### Calibrate gesture timing
 
-In a layer's **Tapping** section, choose **Calibrate double tap…**, or enable
-**Double-tap, then swipe** and choose **Calibrate double-tap + swipe…**.
+Open **General → Tap calibration**, select **ZSA Navigator** or **Apple trackpad**,
+then choose double tap, triple tap, tap + swipe, or double tap + swipe.
+Calibration is shared by every current and future action layer in this top-level
+profile, including custom layers. It does not require enabling an action first.
+Each device keeps separate timing even when tap actions are shared across devices.
 With the trackpad connected, the guide collects 10 valid one-finger attempts.
 Wait for the ready prompt between attempts. Invalid attempts do not count.
 Cursor movement, clicking, dragging, and gesture shortcuts are suppressed
@@ -785,9 +788,12 @@ shared double-tap delay also applies to two-finger double taps.
 
 Cancel, closing settings, or switching away from the app leaves settings
 unchanged and releases capture. Disconnecting, disabling, or changing the
-layer's tap settings cancels capture. Non-default layers must enable
-**Set Custom Tap settings** to calibrate independently; otherwise they inherit
-the default layer's calibrated timing. Saved timing is included in YAML.
+reference layer's tap settings cancels capture. Changing the active layer or
+top-level profile also cancels capture so an interrupted test cannot save stale
+results. Use **Timing adjustments (milliseconds)** in General for manual edits.
+Existing layer timing is preserved until that timing is calibrated or edited
+there; before then, the controls display the default layer's values. Shared
+calibration overrides timing, not actions, and is included in YAML and sync.
 
 ### Sharing settings
 

@@ -35,6 +35,36 @@ struct ProfileDevices: Codable, Equatable {
     var appleLayerGestures: [UInt32: ProfileGestures]? = nil
 }
 
+/// Learned timings belong to a top-level profile/device, never an action layer.
+/// Optional fields preserve legacy layer tuning until that timing is calibrated.
+struct TapCalibrationSettings: Codable, Equatable {
+    var doubleTapInterval: Double? = nil
+    var tripleTapFirstInterval: Double? = nil
+    var tripleTapSecondInterval: Double? = nil
+    var singleSwipeWindow: Double? = nil
+    var singleSwipeDuration: Double? = nil
+    var doubleSwipeWindow: Double? = nil
+
+    func applying(to value: ProfileGestures) -> ProfileGestures {
+        var result = value
+        if let doubleTapInterval { result.gestures.doubleTapInterval = doubleTapInterval }
+        if let tripleTapFirstInterval { result.gestures.tripleTapFirstInterval = tripleTapFirstInterval }
+        if let tripleTapSecondInterval { result.gestures.tripleTapSecondInterval = tripleTapSecondInterval }
+        if singleSwipeWindow != nil || singleSwipeDuration != nil {
+            var swipe = result.singleTapSwipe ?? .singleTapDefaults
+            if let singleSwipeWindow { swipe.swipeWindow = singleSwipeWindow }
+            if let singleSwipeDuration { swipe.fastSwipeDuration = singleSwipeDuration }
+            result.singleTapSwipe = swipe
+        }
+        if let doubleSwipeWindow {
+            var swipe = result.doubleTapSwipe ?? DoubleTapSwipeSettings()
+            swipe.swipeWindow = doubleSwipeWindow
+            result.doubleTapSwipe = swipe
+        }
+        return result
+    }
+}
+
 struct ConfigurationProfile: Codable, Identifiable {
     var id: String
     var name: String
@@ -1041,6 +1071,8 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    var navigatorTapCalibration: TapCalibrationSettings? = nil
+    var appleTapCalibration: TapCalibrationSettings? = nil
     // One Navigator response per top-level profile. Legacy layer motion stays
     // encoded for lossless old-config import, but is no longer selected by hotkeys.
     var pointerMotion: MotionProfile? = nil
@@ -1334,9 +1366,19 @@ final class SettingsStore: ObservableObject {
     }
 
     func gestures(for id: UInt32, device: GestureDevice) -> ProfileGestures {
+        var result = settings.effectiveGestures(for: id)
         if device == .apple, !settings.resolvedDevices.shareTapActions,
-           let override = settings.devices?.appleLayerGestures?[id] { return override }
-        return settings.effectiveGestures(for: id)
+           let override = settings.devices?.appleLayerGestures?[id] { result = override }
+        return tapCalibration(for: device).applying(to: result)
+    }
+
+    func tapCalibration(for device: GestureDevice) -> TapCalibrationSettings {
+        (device == .apple ? settings.appleTapCalibration : settings.navigatorTapCalibration) ?? TapCalibrationSettings()
+    }
+
+    func updateTapCalibration(_ value: TapCalibrationSettings, for device: GestureDevice) {
+        if device == .apple { settings.appleTapCalibration = value }
+        else { settings.navigatorTapCalibration = value }
     }
 
     func updateAppleGestures(_ value: ProfileGestures?, for id: UInt32) {

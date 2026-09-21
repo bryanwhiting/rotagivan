@@ -1,11 +1,79 @@
 import SwiftUI
 
+struct TapCalibrationSettingsView: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var hid: NavigatorHIDManager
+    @State private var device: GestureDevice = .navigator
+
+    private var reference: ProfileGestures { store.gestures(for: store.defaultProfileID, device: device) }
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Calibrate once for all layers in \(store.activeConfigurationName). Actions remain separate; each trackpad keeps its own timing, even when actions are shared.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Picker("Trackpad", selection: $device) {
+                    ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented)
+                HStack {
+                    calibrate("Double tap…", mode: .doubleTap)
+                    calibrate("Triple tap…", mode: .tripleTap)
+                    calibrate("Tap + swipe…", mode: .singleTapSwipe)
+                    calibrate("Double tap + swipe…", mode: .doubleTapSwipe)
+                }
+                Text(hid.canCalibrate(device: device)
+                     ? "Complete 10 tries, then Apply to save the median across current and future layers."
+                     : "Enable and connect the selected trackpad to capture 10 tries. You can still adjust timing below.")
+                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Timing adjustments (milliseconds)") {
+                    VStack(spacing: 10) {
+                        timing("Double-tap delay", key: \.doubleTapInterval, fallback: reference.gestures.resolvedDoubleTapInterval, range: 50...600)
+                        timing("Triple tap · first gap", key: \.tripleTapFirstInterval, fallback: reference.gestures.resolvedTripleTapFirstInterval, range: 50...600)
+                        timing("Triple tap · second gap", key: \.tripleTapSecondInterval, fallback: reference.gestures.resolvedTripleTapSecondInterval, range: 50...600)
+                        Divider()
+                        timing("Tap + swipe · window", key: \.singleSwipeWindow, fallback: (reference.singleTapSwipe ?? .singleTapDefaults).resolvedWindow, range: 100...800)
+                        timing("Tap + swipe · duration", key: \.singleSwipeDuration, fallback: (reference.singleTapSwipe ?? .singleTapDefaults).resolvedFastDuration, range: 60...300)
+                        timing("Double tap + swipe · window", key: \.doubleSwipeWindow, fallback: (reference.doubleTapSwipe ?? DoubleTapSwipeSettings()).resolvedWindow, range: 100...800)
+                        Text("Swipe calibration uses one finger. Existing layer timings are preserved until you calibrate or edit that timing here. Before then, the values shown come from the default layer.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }.padding(.top, 10)
+                }
+            }.padding(10)
+        } label: { Label("Tap calibration", systemImage: "stopwatch") }
+    }
+
+    private func calibrate(_ title: String, mode: GestureCalibrationMode) -> some View {
+        Button(title) { hid.beginCalibration(profileID: store.defaultProfileID, mode: mode, device: device) }
+            .disabled(!hid.canCalibrate(device: device))
+    }
+
+    private func timing(_ title: String, key: WritableKeyPath<TapCalibrationSettings, Double?>,
+                        fallback: Double, range: ClosedRange<Double>) -> some View {
+        let milliseconds = Binding<Double>(get: {
+            (store.tapCalibration(for: device)[keyPath: key] ?? fallback) * 1_000
+        }, set: { value in
+            guard value.isFinite else { return }
+            var timings = store.tapCalibration(for: device)
+            timings[keyPath: key] = min(range.upperBound, max(range.lowerBound, value.rounded())) / 1_000
+            store.updateTapCalibration(timings, for: device)
+        })
+        return HStack {
+            Text(title).frame(width: 205, alignment: .leading)
+            Slider(value: milliseconds, in: range, step: 1).accessibilityLabel(title)
+            TextField("ms", value: milliseconds, format: .number.precision(.fractionLength(0)))
+                .textFieldStyle(.roundedBorder).frame(width: 60).accessibilityLabel("\(title) in milliseconds")
+            Text("ms").foregroundStyle(.secondary)
+        }
+    }
+}
+
 @MainActor
 final class GestureCalibrationSession: ObservableObject, Identifiable {
     let id = UUID()
     let profileID: UInt32
     let profileName: String
     let mode: GestureCalibrationMode
+    let device: GestureDevice
 
     @Published private(set) var sampleCount: Int
     @Published private(set) var instruction: String
@@ -21,10 +89,11 @@ final class GestureCalibrationSession: ObservableObject, Identifiable {
 
     private var recorder: GestureCalibrationRecorder
 
-    init(profileID: UInt32, profileName: String, mode: GestureCalibrationMode, gestures: ProfileGestures) {
+    init(profileID: UInt32, profileName: String, mode: GestureCalibrationMode, gestures: ProfileGestures, device: GestureDevice = .navigator) {
         self.profileID = profileID
         self.profileName = profileName
         self.mode = mode
+        self.device = device
 
         let recorder = GestureCalibrationRecorder(
             mode: mode,
@@ -98,7 +167,7 @@ struct GestureCalibrationView: View {
                 .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.title3.weight(.semibold))
-                Text("Calibrating the \(session.profileName) layer")
+                Text("\(session.device.title) · All layers in \(session.profileName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -130,7 +199,7 @@ struct GestureCalibrationView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Use one finger on the ZSA trackpad. Invalid or incomplete attempts are ignored and do not count.")
+            Text("Use one finger on the \(session.device.title). Invalid or incomplete attempts are ignored and do not count.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -220,7 +289,7 @@ struct GestureCalibrationView: View {
                 if let swipeMedian = session.medianSwipeWindow {
                     resultLine(label: "Swipe window", rawSeconds: swipeMedian, range: 0.1...0.8)
                 }
-                Text("Pointer control has been restored. Apply saves these timings; no shortcuts were triggered during the test.")
+                Text("Pointer control has been restored. Apply saves these timings across all layers in this profile for this device. Assigned actions stay unchanged.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

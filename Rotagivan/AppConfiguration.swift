@@ -193,7 +193,8 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices"
+            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration"
+            case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts favorites slotCount"
             case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured"
@@ -267,6 +268,7 @@ private indirect enum ConfigurationValue: Codable {
                 "dragRegripWindow": 0...2, "regripWindow": 0...2, "secondFingerGracePeriod": 0...2,
                 "doubleTapInterval": 0.05...0.6, "doubleTapDelay": 0.05...0.6, "keyCode": 0...127,
                 "tripleTapFirstInterval": 0.05...0.6, "tripleTapSecondInterval": 0.05...0.6,
+                "singleSwipeWindow": 0.1...0.8, "doubleSwipeWindow": 0.1...0.8, "singleSwipeDuration": 0.06...0.3,
                 "modifiers": 0...Double(UInt32.max), "gain": 0...CursorResponse.maximumGain, "x": 0...1, "inputRange": 250...8000
             ]
             guard number.isFinite, number >= 0, ranges[key]?.contains(number) ?? true else {

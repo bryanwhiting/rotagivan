@@ -33,6 +33,11 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.animationsEnabled = enabled; store.settings.appExplorer = next
         })
     }
+    private var centerCursorBinding: Binding<Bool> {
+        Binding(get: { baseSettings.resolvedCenterCursorOnAppSwitch }, set: { enabled in
+            var next = baseSettings; next.centerCursorOnAppSwitch = enabled; store.settings.appExplorer = next
+        })
+    }
     var compact = false
     var onGroupPathChange: (([SwipeDirection]) -> Void)? = nil
 
@@ -52,6 +57,9 @@ struct AppExplorerSettingsView: View {
             ExplorerThemePicker(theme: themeBinding)
             Toggle("Animate HUD feedback", isOn: animationBinding).font(.caption)
             Text("Appearance applies to apps, groups, window layouts, and media controls. Reduce Motion always disables animations.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
+            Text("After switching apps, move the pointer to the focused window. Off restores its original position. No window or a new mouse movement leaves the pointer alone.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Default mode", selection: Binding(get: { settings.defaultMode }, set: { mode in
                 edit { $0.defaultMode = mode }
@@ -78,6 +86,7 @@ struct AppExplorerSettingsView: View {
                             ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
                         }
                         Toggle("Animate HUD feedback", isOn: animationBinding)
+                        Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
                     } label: { Image(systemName: "paintpalette") }
                         .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
                 }

@@ -6,14 +6,52 @@ import Foundation
     @discardableResult func setLocked(_ locked: Bool) -> Bool
 }
 
-/// Scoped to a visible, non-editing Apple-controlled HUD. No cursor warping,
-/// hidden cursor, synthetic events, or changes to macOS trackpad preferences.
-/// The event tap dies with this object/process; it cannot leave a system-wide
-/// mouse/cursor disassociation behind after a crash.
+/// Balanced cursor ownership, independently testable without moving the real
+/// pointer. Warping generates no input event. Do not disassociate the system
+/// mouse: that API is foreground-only and this HUD deliberately preserves focus.
+final class ExplorerCursorHold {
+    var position: () -> CGPoint? = { CGEvent(source: nil)?.location }
+    var warp: (CGPoint) -> Bool = { CGWarpMouseCursorPosition($0) == .success }
+    var hide: () -> Bool = { CGDisplayHideCursor(CGMainDisplayID()) == .success }
+    var show: () -> Void = { _ = CGDisplayShowCursor(CGMainDisplayID()) }
+    private(set) var anchor: CGPoint?
+    private var hidden = false
+
+    func acquire() -> Bool {
+        if anchor != nil { return true }
+        guard let point = position(), point.x.isFinite, point.y.isFinite else { return false }
+        guard hide() else { return false }
+        hidden = true
+        anchor = point
+        guard pin() else { release(); return false }
+        return true
+    }
+
+    func pin() -> Bool {
+        guard let anchor else { return false }
+        return warp(anchor)
+    }
+
+    func release() {
+        // Restore before showing; clear ownership first so repeated teardown
+        // cannot warp back over a subsequent app-centering operation.
+        let saved = anchor
+        anchor = nil
+        if let saved { _ = warp(saved) }
+        if hidden { hidden = false; show() }
+    }
+
+    deinit { release() }
+}
+
+/// Scoped to a visible, non-editing Apple-controlled HUD. In addition to
+/// swallowing motion events, pin the actual WindowServer cursor and balance
+/// one hide/show pair. Never change native pointer preferences or app focus.
 @MainActor final class ExplorerPointerLock: ExplorerPointerControlling {
     var onInterruption: (() -> Void)?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private let cursor = ExplorerCursorHold()
 
     nonisolated static func suppresses(_ type: CGEventType) -> Bool {
         switch type {
@@ -48,6 +86,7 @@ import Foundation
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         guard CGEvent.tapIsEnabled(tap: tap) else { release(); return false }
+        guard cursor.acquire() else { release(); return false }
         return true
     }
 
@@ -56,6 +95,7 @@ import Foundation
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil
         source = nil
+        cursor.release()
     }
 
     deinit {
@@ -75,7 +115,18 @@ import Foundation
                 owner.onInterruption?()
                 return Unmanaged.passUnretained(event)
             }
-            return owner.tap != nil && suppresses(type) ? nil : Unmanaged.passUnretained(event)
+            guard owner.tap != nil && suppresses(type) else { return Unmanaged.passUnretained(event) }
+            // Dropping an event alone can leave the on-screen cursor moving.
+            // Update its real position as well, without posting another event.
+            guard owner.cursor.pin() else {
+                owner.release()
+                owner.onInterruption?()
+                return Unmanaged.passUnretained(event)
+            }
+            if let anchor = owner.cursor.anchor { event.location = anchor }
+            event.setDoubleValueField(.mouseEventDeltaX, value: 0)
+            event.setDoubleValueField(.mouseEventDeltaY, value: 0)
+            return nil
         }
     }
 }

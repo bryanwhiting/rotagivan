@@ -133,6 +133,16 @@ struct ConfigurationTests {
         print("Explorer hold layers and media controls YAML roundtrip passed.")
         precondition(AppExplorerSettings().resolvedTheme == .vector)
         precondition(AppExplorerSettings().resolvedAnimationsEnabled)
+        precondition(!AppExplorerSettings().resolvedCenterCursorOnAppSwitch)
+        var centeredExplorer = layeredExplorer
+        centeredExplorer.settings.appExplorer!.centerCursorOnAppSwitch = true
+        let centeredYAML = try centeredExplorer.yaml()
+        let centeredRoundtrip = try AppConfiguration.parse(centeredYAML)
+        precondition(centeredRoundtrip.settings.appExplorer == centeredExplorer.settings.appExplorer)
+        precondition(centeredRoundtrip.settings.appExplorer!.projected(layerID:
+            centeredRoundtrip.settings.appExplorer!.holdLayers!.first!.id).resolvedCenterCursorOnAppSwitch)
+        rejected(centeredYAML.replacingOccurrences(of: "centerCursorOnAppSwitch: true",
+            with: "centerCursorOnAppSwitch: notABoolean"), "invalid cursor-centering flag")
         for theme in ExplorerTheme.allCases {
             var themed = layeredExplorer
             themed.settings.appExplorer!.theme = theme

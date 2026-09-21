@@ -163,7 +163,7 @@ import SwiftUI
         precondition(!controller.isVisible && openedURLs.map(\.absoluteString) == ["https://example.com/docs"], "Open web favorite exactly once, through URL opener, not app activation")
         precondition(presentations == ["hud", "closed"], "Pointer lifecycle sees selection dismissal")
         var openedApps: [URL] = []
-        controller.openApplication = { url, options in
+        controller.openApplication = { url, options, _ in
             precondition(!controller.isVisible, "HUD must close before activating an app")
             precondition(options.activates && !options.hides && !options.hidesOthers)
             precondition(!options.createsNewApplicationInstance && options.allowsRunningApplicationSubstitution)
@@ -183,6 +183,38 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         precondition(openedApps.count == 1)
         controller.dismiss()
+        var completion: (@MainActor (pid_t?) -> Void)?
+        var centered: [pid_t] = []
+        let originalPointer = CGPoint(x: -350, y: 240)
+        controller.cursorPosition = { originalPointer }
+        controller.openApplication = { _, _, finished in completion = finished }
+        controller.centerApplication = { pid, origin, valid in
+            precondition(!controller.isVisible && valid() && origin == originalPointer,
+                "Centering must follow dismissal/restore and use the successful app PID")
+            centered.append(pid)
+        }
+        chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        completion?(42)
+        precondition(centered.isEmpty, "Centering defaults off")
+        settings.centerCursorOnAppSwitch = true
+        chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        completion?(nil)
+        precondition(centered.isEmpty, "Failed app launch never centers")
+        chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        completion?(42)
+        precondition(centered == [42])
+        chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        controller.show(waitingForLift: false)
+        completion?(43)
+        precondition(centered == [42], "A newer HUD cancels pending centering")
+        controller.dismiss()
+        chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        settings.centerCursorOnAppSwitch = false
+        completion?(44)
+        precondition(centered == [42], "Turning the flag off cancels pending centering")
+        settings.centerCursorOnAppSwitch = nil
+        controller.openApplication = { url, _, _ in openedApps.append(url) }
+        print("App selection centering passed: opt-in, successful PID, restored origin, failed launch, newer HUD and changed setting.")
         controller.show(waitingForLift: false)
         controller.setAlternateHeld(true)
         precondition(!controller.isVisible, "Changing modes cancels any partial selection")

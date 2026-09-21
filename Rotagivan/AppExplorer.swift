@@ -42,19 +42,24 @@ extension AppExplorerPresenting {
     private(set) var groupPath: [SwipeDirection] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
+    private let cursorCentering = ExplorerCursorCentering()
+    var cursorPosition: () -> CGPoint? = { CGEvent(source: nil)?.location }
+    var centerApplication: ((pid_t, CGPoint?, @escaping () -> Bool) -> Void)?
     private var tilingTarget: WindowTilingTarget?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
-    var openApplication: (URL, NSWorkspace.OpenConfiguration) -> Void = { url, configuration in
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+    var openApplication: (URL, NSWorkspace.OpenConfiguration, @escaping @MainActor (pid_t?) -> Void) -> Void = { url, configuration, completion in
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
             if let error {
                 // Launch Services may invoke this callback off the main actor.
                 // Keep logging local so it never accesses actor-isolated state.
                 let logger = Logger(subsystem: "local.rotagivan", category: "AppExplorer")
                 logger.error("Application open failed: \(error.localizedDescription, privacy: .public)")
             }
+            let pid = error == nil ? app?.processIdentifier : nil
+            Task { @MainActor in completion(pid) }
         }
     }
     var onDismiss: (() -> Void)?
@@ -109,6 +114,7 @@ extension AppExplorerPresenting {
 
     private func show(waitingForLift: Bool, windowManager: Bool) {
         guard !isVisible else { return }
+        cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
         heldKeys = ExplorerHeldKeys()
@@ -348,11 +354,27 @@ extension AppExplorerPresenting {
         let running = workspace.runningApplications.first { $0.bundleIdentifier == identifier && !$0.isTerminated }
         guard let url = running?.bundleURL ?? entry.url ?? applicationURL(identifier) else { return }
         let generation = selectionGeneration
+        let center = configuration().resolvedCenterCursorOnAppSwitch
+        let configurationID = editingStore?.activeConfigurationID
+        // Dismissal has restored/unhidden the original pointer before capture.
+        let cursorOrigin = cursorPosition()
         // A nonactivating panel restores focus as it closes. Submit the user's
         // activation on the next main-loop turn, after that teardown finishes.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false else { return }
-            self.openApplication(url, Self.activationConfiguration())
+            self.openApplication(url, Self.activationConfiguration()) { [weak self] pid in
+                guard let self, let pid, center else { return }
+                let isValid: () -> Bool = { [weak self] in
+                    guard let self else { return false }
+                    return self.selectionGeneration == generation && !self.isVisible &&
+                        self.configuration().resolvedCenterCursorOnAppSwitch &&
+                        self.editingStore?.settings.enabled != false &&
+                        self.editingStore?.activeConfigurationID == configurationID
+                }
+                guard isValid() else { return }
+                if let centerApplication = self.centerApplication { centerApplication(pid, cursorOrigin, isValid) }
+                else { self.cursorCentering.start(pid: pid, origin: cursorOrigin, isValid: isValid) }
+            }
         }
     }
 

@@ -74,8 +74,9 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   to the Apple trackpad. Click bindings remain macOS's responsibility, including
   its own “Tap to click” preference.
 - While an Apple-controlled **App Explorer or Window Manager** is open, a temporary
-  motion-only event filter holds the pointer still so swipes select HUD actions
-  without moving it. Closing the HUD, entering inline editing, disconnecting,
+  motion-only event filter saves, hides, and pins the actual cursor position so
+  swipes select HUD actions without moving it. Closing the HUD restores the saved
+  position before showing the cursor. Entering inline editing, disconnecting,
   disabling Apple actions, or stopping Rotagivan releases the filter. Done in the
   editor resumes HUD selection. A keyboard-opened HUD also pauses movement when
   an Apple trackpad is connected, until a different input source takes ownership.
@@ -83,7 +84,19 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   clicks, scrolling, and keys are not filtered. Navigator-owned HUDs are unchanged.
   This requires Accessibility permission. If capture fails the HUD closes with a
   status message; if macOS disables the filter, movement resumes and the HUD closes.
-  There is no cursor warping or persistent change to pointer association.
+  Hide/show calls are paired once per session, including failures and teardown.
+  Pinning uses [Apple's event-free cursor warp and balanced hide/show APIs](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/QuartzDisplayServicesConceptual/Articles/MouseCursor.html).
+  It does not steal app focus or change pointer association.
+- **App Explorer → Put mouse in center of selected app** is off by default and
+  saved per configuration profile (including YAML export and sync). When enabled,
+  an app selection first restores the cursor, then centers it in the successfully
+  activated app's focused window after its geometry settles. This works for
+  Navigator and Apple app selections, including nested groups and Recents.
+  URL/shortcut/media/tiling selections do not invoke it. No focused window,
+  failed launch, another HUD, changing focus, or moving the mouse yourself cancels
+  centering. Partially off-screen windows use the visible portion if their center
+  is outside the displays. Geometry checks use bounded retries and short
+  Accessibility timeouts; there is no unbounded wait.
 - Native gestures can happen **alongside** a Rotagivan binding. Choose bindings
   that do not conflict with macOS/app gestures, or change those gestures yourself
   in System Settings. Native mouse-down events cancel pending Apple gestures; a short

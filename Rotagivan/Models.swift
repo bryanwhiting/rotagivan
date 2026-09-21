@@ -144,8 +144,10 @@ struct AppExplorerSettings: Codable, Equatable {
     var holdLayers: [ExplorerHoldLayer]? = nil
     var theme: ExplorerTheme? = nil
     var animationsEnabled: Bool? = nil
+    var centerCursorOnAppSwitch: Bool? = nil
     var resolvedTheme: ExplorerTheme { theme ?? .vector }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
+    var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
     func projected(layerID: UUID?) -> Self {
         guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
         var result = self

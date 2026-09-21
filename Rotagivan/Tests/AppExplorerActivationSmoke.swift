@@ -67,9 +67,13 @@ import AppKit
         controller.applicationURL = { id in identifiers.firstIndex(of: id).map { bundles[$0] } }
         controller.configuration = { AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, bundleID: identifiers[1], name: "Test target")]) }
         controller.contextIsValid = { true }
-        controller.openApplication = { url, options in
+        controller.openApplication = { url, options, completion in
             options.addsToRecentItems = false
-            workspace.openApplication(at: url, configuration: options) { _, error in precondition(error == nil) }
+            workspace.openApplication(at: url, configuration: options) { app, error in
+                precondition(error == nil)
+                let pid = app?.processIdentifier
+                Task { @MainActor in completion(pid) }
+            }
         }
         func selectTarget() throws {
             controller.show(waitingForLift: false)

@@ -59,6 +59,17 @@ enum WindowTile {
 }
 
 @MainActor enum WindowTiling {
+    static func focusedWindowFrame(pid: pid_t) -> CGRect? {
+        guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let window = unsafeBitCast(value, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(window, 0.05)
+        guard (attribute(window, kAXMinimizedAttribute) as? Bool) != true else { return nil }
+        return frame(window)
+    }
+
     static func capture(pid: pid_t) -> WindowTilingTarget? {
         guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
@@ -112,6 +123,79 @@ enum WindowTile {
               dimensions.width > 0, dimensions.height > 0 else { return nil }
         return CGRect(origin: point, size: dimensions)
     }
+}
+
+/// Wait for a successful activation and stable window geometry, without
+/// stealing focus or jumping after the user has already moved the mouse.
+@MainActor final class ExplorerCursorCentering {
+    var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    var windowFrame: (pid_t) -> CGRect? = { WindowTiling.focusedWindowFrame(pid: $0) }
+    var position: () -> CGPoint? = { CGEvent(source: nil)?.location }
+    var move: (CGPoint) -> Void = { _ = CGWarpMouseCursorPosition($0) }
+    var displays: () -> [CGRect] = {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
+    }
+    private var task: Task<Void, Never>?
+    private let interval: UInt64
+    private let attempts: Int
+
+    init(interval: UInt64 = 50_000_000, attempts: Int = 40) {
+        self.interval = interval
+        self.attempts = attempts
+    }
+
+    func cancel() { task?.cancel(); task = nil }
+
+    static func target(window: CGRect, displays: [CGRect]) -> CGPoint? {
+        guard [window.minX, window.minY, window.width, window.height].allSatisfy(\.isFinite),
+              window.width > 0, window.height > 0 else { return nil }
+        let center = CGPoint(x: window.midX, y: window.midY)
+        if displays.contains(where: { $0.contains(center) }) { return center }
+        // A window may straddle a gap or extend off-screen. Pick the center
+        // of its largest visible portion instead of warping into that gap.
+        guard let visible = displays.map({ $0.intersection(window) })
+            .filter({ !$0.isNull && !$0.isEmpty })
+            .max(by: { $0.width * $0.height < $1.width * $1.height }) else { return nil }
+        return CGPoint(x: visible.midX, y: visible.midY)
+    }
+
+    func start(pid: pid_t, origin: CGPoint?, isValid: @escaping () -> Bool) {
+        cancel()
+        guard let origin, origin.x.isFinite, origin.y.isFinite else { return }
+        let previousPID = frontmostPID()
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var lastFrame: CGRect?
+            var targetWasActive = false
+            for _ in 0..<attempts {
+                do { try await Task.sleep(nanoseconds: interval) }
+                catch { return }
+                guard !Task.isCancelled, isValid(), let current = position(),
+                      hypot(current.x - origin.x, current.y - origin.y) <= 3 else { return }
+                let frontmost = frontmostPID()
+                guard frontmost == pid else {
+                    // Do not steal the cursor back from a third app, or from
+                    // a user who switched away after the target became active.
+                    if targetWasActive || frontmost != previousPID { return }
+                    continue
+                }
+                targetWasActive = true
+                guard let frame = windowFrame(pid) else { lastFrame = nil; continue }
+                guard lastFrame == frame else { lastFrame = frame; continue }
+                guard isValid(), frontmostPID() == pid,
+                      let latest = position(), hypot(latest.x - origin.x, latest.y - origin.y) <= 3,
+                      let point = Self.target(window: frame, displays: displays()) else { return }
+                move(point)
+                return
+            }
+        }
+    }
+
+    deinit { task?.cancel() }
 }
 
 struct WindowTileIcon: View {

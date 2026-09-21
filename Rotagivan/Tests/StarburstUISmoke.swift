@@ -6,7 +6,7 @@ import SwiftUI
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         let model = ExplorerModel()
-        model.theme = .starburst
+        model.theme = .starburstAir
         model.animationsEnabled = false
         let titles = ["Research", "Windows", "Music", "Notes", "Workspace", "Recent apps", "Development", "Design"]
         let directions: [ExplorerSlot] = [.up, .topRight, .right, .bottomRight, .down, .bottomLeft, .left, .topLeft]
@@ -15,11 +15,13 @@ import SwiftUI
         }
         var selected: [ExplorerSlot] = []
         var back = 0
-        let host = NSHostingView(rootView: AppExplorerView(model: model,
-            onSelect: { selected.append($0) }, onCancel: {}, onBack: { back += 1 }))
+        let view = AppExplorerView(model: model,
+            onSelect: { selected.append($0) }, onCancel: {}, onBack: { back += 1 })
+        let host = NSHostingView(rootView: AnyView(view))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 520),
             styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         panel.contentView = host
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -34,6 +36,8 @@ import SwiftUI
             }
             settle()
         }
+        for theme in [ExplorerTheme.starburst, .starburstAir] {
+        model.theme = theme
         for depth in 0...5 {
             model.groupNames = Array(["Workspace", "Design", "Research", "Projects", "Media Controls"].prefix(depth))
             model.groupDirections = Array([ExplorerSlot.down, .left, .topRight, .up, .right].prefix(depth))
@@ -43,7 +47,11 @@ import SwiftUI
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to:
-                URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("starburst-depth-\(depth).png"))
+                URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("\(theme.rawValue)-depth-\(depth).png"))
+            if theme.isFloating {
+                precondition(bitmap.colorAt(x: 5, y: bitmap.pixelsHigh / 2)!.alphaComponent < 0.01,
+                    "Air must leave the sides fully transparent, with no rectangular panel")
+            }
             for direction in directions {
                 // AppKit has a bottom-left origin; the fixed HUD wheel is
                 // centered near (235, 248), independent of nesting depth.
@@ -57,6 +65,25 @@ import SwiftUI
             click(CGPoint(x: 235, y: 248))
             precondition(back == count + 1, "Center must remain tappable at every level")
         }
-        print("Starburst native UI passed: all eight sector buttons and center at six depths; screenshots saved. No apps launched or system pointer events posted.")
+        }
+        for light in [true, false] {
+            model.theme = .starburstAir
+            model.groupNames = []; model.groupDirections = []
+            host.rootView = AnyView(view.background(light ? Color.white : Color.black))
+            settle()
+            host.layoutSubtreeIfNeeded()
+            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to:
+                URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("air-\(light ? "light" : "dark").png"))
+        }
+        var reducedView = view
+        reducedView.forceReduceTransparency = true
+        host.rootView = AnyView(reducedView)
+        settle()
+        let reduced = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+        host.cacheDisplay(in: host.bounds, to: reduced)
+        precondition(reduced.colorAt(x: 5, y: reduced.pixelsHigh / 2)!.alphaComponent < 0.01)
+        print("Starburst/Starburst Air native UI passed: sector and center hit tests at six depths, transparent edges (including Reduce Transparency), and light/dark screenshots. No apps launched or system pointer events posted.")
     }
 }

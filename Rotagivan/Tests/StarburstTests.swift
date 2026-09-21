@@ -27,7 +27,22 @@ import SwiftUI
         let settings = AppExplorerSettings(theme: .starburst)
         let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
         precondition(restored.resolvedTheme == .starburst)
-        precondition(AppExplorerSettings().resolvedTheme == .vector, "Do not change the user's existing theme")
-        print("Starburst passed: eight direction mappings, non-overlapping hit targets, center exclusion, five ancestor rings, bounds, persistence, unchanged default and reduced motion.")
+        precondition(ExplorerTheme.allCases == [.native, .starburst, .starburstAir])
+        precondition(AppExplorerSettings().resolvedTheme == .starburstAir)
+        for legacy in ["vector", "ember"] {
+            let current = try JSONEncoder().encode(AppExplorerSettings(theme: .starburstAir))
+            let legacyJSON = String(decoding: current, as: UTF8.self).replacingOccurrences(of: "starburstAir", with: legacy)
+            let migrated = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(legacyJSON.utf8))
+            precondition(migrated.resolvedTheme == .starburstAir)
+            let saved = try JSONEncoder().encode(migrated)
+            precondition(String(decoding: saved, as: UTF8.self).contains("starburstAir"))
+        }
+        for theme in ExplorerTheme.allCases {
+            let decoded = try JSONDecoder().decode(ExplorerTheme.self, from: JSONEncoder().encode(theme))
+            precondition(decoded == theme)
+        }
+        precondition(ExplorerTheme.starburstAir.isRadial && ExplorerTheme.starburstAir.isFloating)
+        precondition(!ExplorerHUDMotion.enabled(theme: .starburstAir, preference: true, reduceMotion: true))
+        print("Starburst passed: radial geometry, hit targets, center exclusion, nested rings, three-theme catalog, retired-theme migration, persistence and reduced motion.")
     }
 }

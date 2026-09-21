@@ -2,13 +2,22 @@
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
-## App Explorer appearance
+## HUD appearance
 
-Choose **App Explorer → Classic / Vector HUD / Ember / Starburst**, or use the
-palette menu while editing the Explorer directly. Vector HUD is the new default:
-dark instrument panels, cyan targeting brackets, a directional reticle, and a
-live destination preview in Window Manager. Ember uses a warm amber cockpit
-palette; Classic retains the native material appearance.
+Choose **HUD → Classic / Starburst / Starburst Air**, or use the palette menu
+while editing the HUD directly. Classic retains its native material appearance;
+Starburst keeps the violet radial panel. **Starburst Air** is the new default:
+floating charcoal sectors, thin mint-white perimeter arcs, and small text
+backplates, with the desktop visible around and between them. There is no full
+rectangular background or window shadow. Nested breadcrumb rings and sector
+hit targets remain stable. Reduce Transparency makes the individual elements
+opaque without filling the space around them.
+
+Vector HUD and Ember are retired. Saved/imported selections of either migrate
+to Starburst Air; Classic and Starburst selections are preserved. Layouts,
+actions, and pointer tuning are unchanged. Animations remain brief transitions
+only, respecting Reduce Motion and the animation toggle; no continuous drawing
+loop was added.
 
 **Starburst** is a violet radial HUD with eight pointed sectors. The outer
 choices retain their swipe directions while each group you enter leaves a

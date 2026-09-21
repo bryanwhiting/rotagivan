@@ -153,7 +153,7 @@ extension AppExplorerPresenting {
         panel.title = "App Explorer"
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = !model.theme.isFloating
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -806,7 +806,7 @@ struct ExplorerEntry {
     @Published var layerName: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
-    @Published var theme: ExplorerTheme = .vector
+    @Published var theme: ExplorerTheme = .starburstAir
     @Published var animationsEnabled = true
     @Published var slotCount = 8
     @Published var windowFullScreen = false
@@ -830,6 +830,7 @@ struct AppExplorerView: View {
     // Previews/tests may enforce reduced motion; they cannot override macOS's
     // accessibility preference in the opposite direction.
     var forceReduceMotion = false
+    var forceReduceTransparency = false
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
     private var animates: Bool {
@@ -838,6 +839,8 @@ struct AppExplorerView: View {
     }
     private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
     private var accent: Color { model.theme.accent }
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var opaqueChrome: Bool { reduceTransparency || forceReduceTransparency }
     private var guidance: String {
         if let message = model.message { return message }
         if let slot = model.selected, model.slotCount > 8,
@@ -865,6 +868,10 @@ struct AppExplorerView: View {
                 }
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
                     .buttonStyle(.plain).accessibilityLabel("Close App Explorer")
+            }.background {
+                if model.theme.isFloating {
+                    Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-10)
+                }
             }
             if model.showingWindowManager && model.windowFullScreen {
                 VStack(spacing: 20) {
@@ -872,7 +879,8 @@ struct AppExplorerView: View {
                     Button("Exit full screen") { onWindowCommand(.exitFullScreen) }.buttonStyle(.borderedProminent)
                     Text("Swipe up to exit full screen").font(.caption).foregroundStyle(.secondary)
                 }.frame(height: 260)
-            } else if model.theme == .starburst || model.slotCount != 8 {
+                    .background { if model.theme.isFloating { Circle().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)) } }
+            } else if model.theme.isRadial || model.slotCount != 8 {
                 starburst
             } else {
             VStack(spacing: 8) {
@@ -911,14 +919,18 @@ struct AppExplorerView: View {
             }
             Text(guidance)
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
+                .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-7) } }
             if model.showingAppWindows {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
                     Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
                     Button("Next") { onWindowPage(1) }.disabled(model.page + 1 >= model.pageCount)
-                }
+                }.background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-6) } }
             }
-            if !model.layerHint.isEmpty { Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
+            if !model.layerHint.isEmpty {
+                Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
+            }
         }
         .padding(26)
         .frame(width: 470, height: 520)
@@ -971,7 +983,7 @@ struct AppExplorerView: View {
                 }
                 .foregroundStyle(accent)
                 .frame(width: 54, height: 54)
-                .background(Circle().fill(model.theme.surface))
+                .background(Circle().fill(model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.88 : 1)))
                 .overlay(Circle().strokeBorder(accent.opacity(0.45)))
                 .contentShape(Circle())
             }
@@ -989,14 +1001,25 @@ struct AppExplorerView: View {
         let available = isAvailable(entry)
         let selected = model.selected == direction && available
         let shape = ExplorerStarburstSector(direction: direction,
-            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: 11,
+            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: model.theme.isFloating ? 2 : 11,
             halfAngle: 180 / Double(model.slotCount) - 2)
         let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
         return Button { onSelect(direction) } label: {
             ZStack {
-                shape.fill(LinearGradient(colors: [accent.opacity(selected ? 0.38 : 0.08),
-                    accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
-                shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
+                if model.theme.isFloating {
+                    shape.fill(model.theme.surface.opacity(opaqueChrome ? 1 : (selected ? 0.92 : 0.72)))
+                    shape.stroke(accent.opacity(selected ? 0.95 : 0.08), lineWidth: selected ? 1.25 : 0.5)
+                    Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
+                        .stroke(accent.opacity(selected ? 1 : available ? 0.5 : 0.15), style: StrokeStyle(lineWidth: selected ? 2 : 0.75, lineCap: .round))
+                        .frame(width: 294, height: 294)
+                        .rotationEffect(.degrees(direction.angle - 180 / Double(model.slotCount) + 4))
+                        .position(center)
+                        .allowsHitTesting(false)
+                } else {
+                    shape.fill(LinearGradient(colors: [accent.opacity(selected ? 0.38 : 0.08),
+                        accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
+                    shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
+                }
                 VStack(spacing: 3) {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
@@ -1007,7 +1030,7 @@ struct AppExplorerView: View {
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
                 }
-                .frame(width: model.slotCount > 8 ? 45 : 78, height: model.slotCount > 8 ? 40 : 50)
+                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 54 : 78), height: model.slotCount > 8 ? 40 : 50)
                 .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(0.85)) : Color.primary)
                 .position(point)
             }

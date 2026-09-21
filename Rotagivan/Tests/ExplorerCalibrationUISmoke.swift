@@ -688,7 +688,7 @@ import SwiftUI
             try render(view, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue).png")
             let reducedView = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {}, forceReduceMotion: true)
             try render(reducedView, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-reduced-motion.png")
-            if theme == .starburst {
+            if theme.isRadial {
                 let names = ["Workspace", "Design", "Research", "Projects", "Media Controls"]
                 let directions: [ExplorerSlot] = [.down, .left, .topRight, .up, .right]
                 for depth in 1...5 {
@@ -711,11 +711,11 @@ import SwiftUI
             themedModel.selected = .topRight
             try render(view, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-layouts.png")
         }
-        try render(ExplorerThemePicker(theme: .constant(.vector)).padding(16).frame(width: 510).background(Color(nsColor: .windowBackgroundColor)),
+        try render(ExplorerThemePicker(theme: .constant(.starburstAir)).padding(16).frame(width: 510).background(Color(nsColor: .windowBackgroundColor)),
             size: CGSize(width: 510, height: 150), path: CommandLine.arguments[1] + "/theme-picker.png")
-        print("Explorer theme snapshots passed: Classic/Vector/Ember/Starburst, nested Starburst levels, Reduce Motion, selected layouts, and appearance picker.")
-        precondition(!ExplorerHUDMotion.enabled(theme: .vector, preference: true, reduceMotion: true))
-        precondition(!ExplorerHUDMotion.enabled(theme: .ember, preference: false, reduceMotion: false))
+        print("Explorer theme snapshots passed: Classic/Starburst/Starburst Air, nested Starburst levels, Reduce Motion, selected layouts, and appearance picker.")
+        precondition(!ExplorerHUDMotion.enabled(theme: .starburstAir, preference: true, reduceMotion: true))
+        precondition(!ExplorerHUDMotion.enabled(theme: .starburstAir, preference: false, reduceMotion: false))
         precondition(!ExplorerHUDMotion.enabled(theme: .native, preference: true, reduceMotion: false))
         precondition(ExplorerHUDMotion.nearestAngle(from: 180, to: -135) == 225)
         precondition(ExplorerHUDMotion.nearestAngle(from: -135, to: 180) == -180)

@@ -181,7 +181,7 @@ struct ConfigurationTests {
         precondition(capacityRestored.settings.appExplorer == capacityConfig.settings.appExplorer)
         rejected(capacityYAML.replacingOccurrences(of: "slotCount: 16", with: "slotCount: 7"), "unsupported Explorer capacity")
         print("Explorer capacities, toggle layers and Window Manager commands YAML roundtrip passed.")
-        precondition(AppExplorerSettings().resolvedTheme == .vector)
+        precondition(AppExplorerSettings().resolvedTheme == .starburstAir)
         precondition(AppExplorerSettings().resolvedAnimationsEnabled)
         precondition(!AppExplorerSettings().resolvedCenterCursorOnAppSwitch)
         var centeredExplorer = layeredExplorer
@@ -200,6 +200,12 @@ struct ConfigurationTests {
             let themeYAML = try themed.yaml()
             let restored = try AppConfiguration.parse(themeYAML)
             precondition(restored.settings.appExplorer == themed.settings.appExplorer)
+            if theme == .starburstAir {
+                for legacy in ["vector", "ember"] {
+                    let imported = try AppConfiguration.parse(themeYAML.replacingOccurrences(of: "theme: starburstAir", with: "theme: \(legacy)"))
+                    precondition(imported.settings.appExplorer == themed.settings.appExplorer, "Retired themes migrate without changing layouts or other preferences")
+                }
+            }
             let projection = themed.settings.appExplorer!.projected(layerID: themed.settings.appExplorer!.holdLayers!.first!.id)
             precondition(projection.resolvedTheme == theme && !projection.resolvedAnimationsEnabled)
             rejected(themeYAML.replacingOccurrences(of: "theme: \(theme.rawValue)", with: "theme: unknownTheme"), "unknown Explorer theme")

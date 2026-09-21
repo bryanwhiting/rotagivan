@@ -16,14 +16,13 @@ extension ExplorerTheme {
     var accent: Color {
         switch self {
         case .native: return .teal
-        case .vector: return Color(red: 0.38, green: 0.94, blue: 0.91)
-        case .ember: return Color(red: 1, green: 0.69, blue: 0.35)
         case .starburst: return Color(red: 0.73, green: 0.65, blue: 1)
+        case .starburstAir: return Color(red: 0.76, green: 0.96, blue: 0.87)
         }
     }
     var surface: Color {
         if self == .starburst { return Color(red: 0.055, green: 0.043, blue: 0.105) }
-        return self == .ember ? Color(red: 0.10, green: 0.075, blue: 0.065) : Color(red: 0.035, green: 0.075, blue: 0.105)
+        return Color(red: 0.025, green: 0.045, blue: 0.045)
     }
 }
 
@@ -44,26 +43,8 @@ struct ExplorerHUDBackdrop: View {
                 .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(theme.accent.opacity(0.28)))
                 .accessibilityHidden(true).allowsHitTesting(false)
         } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 22).fill(theme.surface)
-                Canvas { context, size in
-                    var grid = Path()
-                    for x in stride(from: 18.0, to: size.width, by: 24) {
-                        grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height))
-                    }
-                    for y in stride(from: 18.0, to: size.height, by: 24) {
-                        grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y))
-                    }
-                    context.stroke(grid, with: .color(theme.accent.opacity(0.04)), lineWidth: 0.5)
-                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                    for radius in [76.0, 167.0] {
-                        let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-                        context.stroke(ring, with: .color(theme.accent.opacity(0.08)), style: StrokeStyle(lineWidth: 1, dash: [2, 6]))
-                    }
-                }.clipShape(RoundedRectangle(cornerRadius: 22))
-                RoundedRectangle(cornerRadius: 22).strokeBorder(theme.accent.opacity(0.27), lineWidth: 1)
-                ExplorerCornerMarks().stroke(theme.accent.opacity(0.8), style: StrokeStyle(lineWidth: 1.5, lineCap: .square)).padding(9)
-            }.accessibilityHidden(true).allowsHitTesting(false)
+            // Air leaves the desktop visible between every HUD element.
+            Color.clear.allowsHitTesting(false).accessibilityHidden(true)
         }
     }
 }
@@ -107,11 +88,17 @@ struct ExplorerThemePicker: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ZStack {
                             ExplorerHUDBackdrop(theme: option)
-                            if option == .starburst {
+                            if option.isRadial {
                                 ZStack {
                                     ForEach(ExplorerSlot.allCases, id: \.self) { direction in
                                         ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
-                                            .fill(option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
+                                            .fill(option.isFloating ? option.surface.opacity(0.75) : option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
+                                            .overlay {
+                                                if option.isFloating {
+                                                    ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
+                                                        .stroke(direction == .topRight ? option.accent : option.accent.opacity(0.3), lineWidth: 0.75)
+                                                }
+                                            }
                                     }
                                     Circle().stroke(option.accent.opacity(0.8), lineWidth: 1).frame(width: 12, height: 12)
                                 }.frame(width: 58, height: 58)

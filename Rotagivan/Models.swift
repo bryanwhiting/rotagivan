@@ -218,14 +218,29 @@ struct ExplorerWindowPlacement: Codable, Equatable {
 }
 
 enum ExplorerTheme: String, Codable, CaseIterable {
-    case native, vector, ember, starburst
+    case native, starburst, starburstAir
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if value == "vector" || value == "ember" { self = .starburstAir; return }
+        guard let theme = Self(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown HUD theme")
+        }
+        self = theme
+    }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
     var title: String {
-        switch self { case .native: return "Classic"; case .vector: return "Vector HUD"; case .ember: return "Ember"; case .starburst: return "Starburst" }
+        switch self { case .native: return "Classic"; case .starburst: return "Starburst"; case .starburstAir: return "Starburst Air" }
     }
     var subtitle: String {
-        switch self { case .native: return "Native · understated"; case .vector: return "Precision · electric"; case .ember: return "Warm · cinematic"; case .starburst: return "Radial · nested" }
+        switch self { case .native: return "Native · understated"; case .starburst: return "Radial · nested"; case .starburstAir: return "Floating · minimal" }
     }
     var isHUD: Bool { self != .native }
+    var isRadial: Bool { self == .starburst || self == .starburstAir }
+    var isFloating: Bool { self == .starburstAir }
 }
 
 enum ExplorerWindowLayout: String, Codable, CaseIterable {
@@ -327,7 +342,7 @@ struct AppExplorerSettings: Codable, Equatable {
     var centerCursorOnAppSwitch: Bool? = nil
     var slotCount: Int? = nil
     var windowManager: ExplorerWindowSettings? = nil
-    var resolvedTheme: ExplorerTheme { theme ?? .vector }
+    var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
     /// Present generated legacy window presets through the ordinary group editor.

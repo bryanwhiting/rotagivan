@@ -440,7 +440,7 @@ final class NavigatorHIDManager: ObservableObject {
         calibrationSource = nil
         explorer?.dismiss()
         suppressUntilLift = wasTouching
-        distanceScale = nil
+        updateDistanceScale(nil)
         navigatorDistanceScale = nil
         appleDistanceScale = nil
         cancelCalibration(reason: "The trackpad was disconnected or disabled. Reconnect and start again.")
@@ -487,7 +487,7 @@ final class NavigatorHIDManager: ObservableObject {
         }
         let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "ZSA Navigator"
         navigatorDistanceScale = Self.readDistanceScale(from: device)
-        if inputRouting.source?.isApple != true { distanceScale = navigatorDistanceScale }
+        if inputRouting.source?.isApple != true { updateDistanceScale(navigatorDistanceScale) }
         UserDefaults.standard.set(Date(), forKey: "debug.lastConnected")
         state = .connected(product)
     }
@@ -505,15 +505,22 @@ final class NavigatorHIDManager: ObservableObject {
         state = .looking
         gestures.reset()
         if inputRouting.source?.isApple == true {
-            distanceScale = appleDistanceScale
+            updateDistanceScale(appleDistanceScale)
             return
         }
         explorer?.dismiss()
-        distanceScale = appleTrackpadConnected ? appleDistanceScale : nil
+        updateDistanceScale(appleTrackpadConnected ? appleDistanceScale : nil)
         cancelCalibration(reason: "The trackpad disconnected. Reconnect and start again.")
         inputRouting.reset()
         contactsDown = false
         suppressUntilLift = false
+    }
+
+    /// Display metadata is not a frame stream. @Published emits even for equal
+    /// values, which otherwise redraws every settings column at report rate.
+    func updateDistanceScale(_ scale: TrackpadDistanceScale?) {
+        guard distanceScale != scale else { return }
+        distanceScale = scale
     }
 
     static func readDistanceScale(from device: IOHIDDevice) -> TrackpadDistanceScale? {
@@ -572,7 +579,7 @@ final class NavigatorHIDManager: ObservableObject {
             appleGestures.reset()
         }
         contactsDown = inputRouting.contactsDown
-        distanceScale = source.isApple ? appleDistanceScale : navigatorDistanceScale
+        updateDistanceScale(source.isApple ? appleDistanceScale : navigatorDistanceScale)
         if explorer?.isVisible == true {
             if explorerSource == nil {
                 explorerSource = source
@@ -653,7 +660,7 @@ final class NavigatorHIDManager: ObservableObject {
             inputRouting.reset(draining: interruptedSource)
             contactsDown = false
             suppressUntilLift = false
-            distanceScale = navigatorDistanceScale
+            updateDistanceScale(navigatorDistanceScale)
         }
     }
 

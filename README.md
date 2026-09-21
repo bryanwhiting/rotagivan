@@ -310,8 +310,9 @@ controls have finer resolution near zero; changing one never moves the other
 The graph plots the actual gain function, using a fixed square-root vertical
 scale so small sensitivities remain visible. It has no live marker or HID-driven
 UI updates. The transition's blend width and brief velocity smoothing are fixed
-to keep the editor simple. New curves use hardware timing so callback delays
-do not cause accidental acceleration changes.
+to keep the editor simple. Both new curves and legacy acceleration use hardware
+scan timing (capture uptime when unavailable), not main-thread processing time,
+so UI scheduling delays do not cause accidental acceleration changes.
 
 Existing layers retain their original scrolling until a curve control is
 edited. Opening settings alone does not migrate or rewrite anything. Initial
@@ -736,11 +737,19 @@ range so parameter changes remain visible; the response continues beyond its
 right edge without a hard cutoff. The vertical display uses a square-root scale
 to give low sensitivities more room. Fast is an asymptote, not the graph endpoint.
 
-The live dot shows measured input and applied sensitivity for the active layer.
+The live dot shows one-finger Navigator input and applied sensitivity for the
+active layer. It does not plot two-finger scrolling or native Apple pointer motion.
 Live samples are buffered separately from settings. Only the marker and readout
 refresh, at 20 Hz; the response curve and layer controls do not rebuild for
 each input event. Switch **Live** off to pause the display without changing
 cursor behavior.
+The sampler stays alive across parent view updates and cancels when the overlay
+is removed. Input reports publish distance metadata only when it actually changes,
+including when switching devices; repeated equal values do not invalidate the UI.
+Regression tests exercise 20,000 cursor/scroll reports with zero HID view
+notifications and render the Live marker under 125 Hz parent updates, including
+off/on, layer changes, and finger lift. Physical smoothness still needs hardware
+verification on the installed build.
 Smoothing adjusts time-based filtering of both velocity and applied sensitivity.
 Sensitivity changes are eased in relative
 terms and rate-limited through steep bends, with a quicker return to fine

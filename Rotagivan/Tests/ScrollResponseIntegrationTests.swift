@@ -13,7 +13,8 @@ private final class ScrollPoster: GestureEventPosting {
 }
 
 @main struct ScrollResponseIntegrationTests {
-    @MainActor static func sample(speed:Double,curve:ScrollResponse?,jitter:Double=0,invert:Bool=false) -> Double {
+    @MainActor static func sample(speed:Double,curve:ScrollResponse?,jitter:Double=0,invert:Bool=false,
+        hardwareTime:Bool=true, processingDelay:Double=0) -> Double {
         let suite = "Rotagivan.ScrollCurveTests.\(UUID().uuidString)"
         let prefs = UserDefaults(suiteName:suite)!
         prefs.set(true,forKey:"migration.rotagivan.v1")
@@ -35,8 +36,8 @@ private final class ScrollPoster: GestureEventPosting {
             TrackpadReport(contacts:[0,1].map {FingerContact(id:UInt8($0),x:500+Double($0)*200,y:500+delta,touching:true,confident:true)},buttonDown:false,scanTime:scan)
         }
         engine.process(report(0,0),receivedAt:1000)
-        now=now.addingTimeInterval(0.01+jitter)
-        engine.process(report(speed*0.01,100),receivedAt:1000.01+jitter)
+        now=now.addingTimeInterval(0.01+jitter+processingDelay)
+        engine.process(report(speed*0.01,hardwareTime ? 100 : 0),receivedAt:1000.01+jitter)
         return (poster.scrolls.last ?? 0)/(speed*0.01)
     }
     @MainActor static func main() {
@@ -47,11 +48,19 @@ private final class ScrollPoster: GestureEventPosting {
         precondition(abs(sample(speed:1200,curve:curve,jitter:0.04)-sample(speed:1200,curve:curve))<1e-9)
         precondition(sample(speed:1000,curve:curve,invert:true)<0)
         precondition(sample(speed:1000,curve:ScrollResponse(slowMultiplier:0,fastMultiplier:0))==0)
-        // Date's reference epoch slightly rounds a 10 ms interval. Compare
-        // against the same measured interval used by the legacy engine.
-        let start = Date(timeIntervalSince1970:1000)
-        let legacyInterval = start.addingTimeInterval(0.01).timeIntervalSince(start)
-        precondition(abs(sample(speed:1000,curve:nil)-pow(10/legacyInterval/250,1.2-1))<1e-12)
-        print("Scroll integration passed: runtime curve, slow/fast separation, hardware timing despite callback jitter, inversion, true zero, and unchanged legacy acceleration.")
+        precondition(abs(sample(speed:1000,curve:nil)-pow(1000/250,1.2-1))<1e-12,
+            "Legacy acceleration formula stays the same, measured using hardware time")
+        for response in [Optional(curve), nil] {
+            let baseline = sample(speed:1200,curve:response)
+            for jitter in [-0.009, 0.04] {
+                precondition(abs(sample(speed:1200,curve:response,jitter:jitter,processingDelay:0.08)-baseline)<1e-9,
+                    "Queued and delayed reports must not distort either scroll response mode")
+            }
+            let fallback = sample(speed:1200,curve:response,hardwareTime:false)
+            precondition(abs(fallback-baseline)<1e-8)
+            precondition(abs(sample(speed:1200,curve:response,hardwareTime:false,processingDelay:0.08)-fallback)<1e-9,
+                "Missing scan time uses capture uptime, not time spent waiting for UI")
+        }
+        print("Scroll integration passed: both modes resist callback/processing jitter; capture-time fallback, slow/fast separation, inversion, true zero, unchanged acceleration formula.")
     }
 }

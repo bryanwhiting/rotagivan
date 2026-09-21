@@ -87,7 +87,6 @@ final class GestureEngine {
     private var cursorGainFilter = CursorGainFilter()
     private var cursorInterval = 1.0 / 125
     private var lastCursorProfileID: UInt32 = 0
-    private var lastReportTime = Date.distantPast
     private var momentumTimer: Timer?
     private var cursorDecelerationTimer: Timer?
     private var pendingDragEnd: Timer?
@@ -270,7 +269,6 @@ final class GestureEngine {
             cursorDecelerationTimer?.invalidate(); cursorDecelerationTimer = nil
             cursorVelocity = .zero
             endCursorTelemetry()
-            lastReportTime = now
             return
         }
 
@@ -288,7 +286,6 @@ final class GestureEngine {
                 endCursorTelemetry()
                 maximumMovement = max(maximumMovement, twoFingerNavigation.travel)
                 previousContacts = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
-                lastReportTime = now
                 if let direction = navigation.direction, let settings {
                     cancelPendingTap()
                     dispatchTap(settings.action(for: direction), shortcut: settings[direction])
@@ -307,7 +304,6 @@ final class GestureEngine {
             }
             if previousCount > 0 { finishTouch(at: now) }
             previousContacts.removeAll()
-            lastReportTime = now
             return
         }
 
@@ -316,13 +312,12 @@ final class GestureEngine {
             holdingTapMotion = false
             cancelTapDragCandidate()
             endCursorTelemetry()
-            handleScroll(current, at: now)
+            handleScroll(current)
         } else if let finger = current.first {
             handleCursor(finger, at: now)
         }
 
         previousContacts = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
-        lastReportTime = now
     }
 
     private func beginTouch(_ contacts: [FingerContact], at now: Date) {
@@ -466,7 +461,7 @@ final class GestureEngine {
         store.cursorTelemetry.record(CursorSample(profileID: store.activeProfileID, speed: fingerSpeed, gain: scale, touching: true))
     }
 
-    private func handleScroll(_ contacts: [FingerContact], at now: Date) {
+    private func handleScroll(_ contacts: [FingerContact]) {
         let matching = contacts.compactMap { current -> (FingerContact, FingerContact)? in
             guard let previous = previousContacts[current.id] else { return nil }
             return (current, previous)
@@ -478,7 +473,9 @@ final class GestureEngine {
         guard maximumMovement > activeGestures.gestures.tapMaxMovement else { return }
         guard synthesizesPointerEvents else { return }
         let profile = store.activeProfile
-        let dt = profile.scrollResponse == nil ? max(0.001, now.timeIntervalSince(lastReportTime)) : cursorInterval
+        // Both response modes must use capture timing. Processing-time gaps
+        // shrink/expand when the UI is busy and distort acceleration/inertia.
+        let dt = cursorInterval
         if scrollProfileID != store.activeProfileID || scrollResponseSnapshot != profile.scrollResponse {
             scrollSpeedFilter = CursorVelocityFilter()
             scrollProfileID = store.activeProfileID

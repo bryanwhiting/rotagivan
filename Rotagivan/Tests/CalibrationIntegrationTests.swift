@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Combine
 
 @MainActor private final class ExplorerStub: AppExplorerPresenting {
     var isVisible = false { didSet { onPresentationChanged?() } }
@@ -147,6 +148,46 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        check { f in
+            var taps = f.store.activeGestures
+            taps.gestures.tapToClick = false
+            taps.twoFingerSwipe = nil
+            f.store.updateGestures(taps, for: 1)
+            let saved = f.preferences.data(forKey: "settings.v1")
+            var notifications = 0
+            let observation = f.hid.objectWillChange.sink { notifications += 1 }
+            defer { observation.cancel() }
+            for index in 0..<10_000 {
+                f.send(1 + Double(index) * 0.008, x: 500 + Double(index % 200))
+            }
+            precondition(f.poster.moves > 0 && f.store.cursorTelemetry.latest.touching,
+                "Real input must still move and feed the Live buffer")
+            f.send(82)
+            for index in 0..<10_000 {
+                let time = f.start + 83 + Double(index) * 0.008
+                f.now = Date(timeIntervalSince1970: time)
+                let contacts = [0, 1].map { FingerContact(id: UInt8($0), x: 500 + Double($0) * 100,
+                    y: 500 + Double(index % 200), touching: true, confident: true) }
+                f.hid.receive(TrackpadReport(contacts: contacts, buttonDown: false,
+                    scanTime: UInt16(truncatingIfNeeded: index * 80)), at: time)
+            }
+            precondition(f.poster.scrolls > 0, "Scroll reports must still be delivered")
+            precondition(notifications == 0, "20,000 motion/scroll reports must not republish display metadata")
+            precondition(f.preferences.data(forKey: "settings.v1") == saved, "Input must not rewrite tuning")
+            let axes = [UInt32(0x30), 0x31].map {
+                TrackpadDistanceScale.Axis(usage: $0, logicalMin: 0, logicalMax: 2048,
+                    physicalMin: 0, physicalMax: 550, unit: 0x11, unitExponent: 0xE)
+            }
+            let scale = TrackpadDistanceScale(axes: axes)!
+            f.hid.updateDistanceScale(scale)
+            precondition(notifications == 1 && f.hid.distanceScale == scale, "Changed scale must notify the UI")
+            for _ in 0..<10_000 { f.hid.updateDistanceScale(scale) }
+            precondition(notifications == 1, "Equal non-nil metadata must also stay silent")
+            f.hid.updateDistanceScale(nil)
+            f.hid.updateDistanceScale(nil)
+            precondition(notifications == 2 && f.hid.distanceScale == nil, "Disconnect clears scale once")
+        }
+        print("HID display isolation passed: 20,000 cursor/scroll reports, no view invalidations or tuning writes; real scale changes publish once.")
         check { f in
             var taps = f.store.activeGestures
             taps.oneFingerTap = .enter

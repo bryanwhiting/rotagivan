@@ -63,7 +63,7 @@ struct MotionCurveEditor: View {
                 Text("Sensitivity ↑ · √ scale").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Toggle("Live", isOn: $showLivePreview).toggleStyle(.switch).controlSize(.mini)
-                    .font(.caption).help("Show a lightweight live marker. Turn off to pause the preview; cursor response stays the same.")
+                    .font(.caption).help("Show one-finger Navigator cursor motion in the active layer. Two-finger scrolling and native Apple pointer motion are not plotted. Turning Live off does not change cursor response.")
             }
             responseGraph
             HStack {
@@ -73,7 +73,7 @@ struct MotionCurveEditor: View {
                 Spacer()
                 Text("Fast").foregroundStyle(.orange)
             }.font(.system(size: 10, weight: .medium))
-            Text(!showLivePreview ? "Live preview paused" : isActive ? "Move your finger to see the live response" : "Activate this layer to see live motion")
+            Text(!showLivePreview ? "Live preview paused" : isActive ? "Move one finger on Navigator to see live motion" : "Activate this layer to see live motion")
                 .font(.system(size: 10)).foregroundStyle(.secondary).frame(height: 14)
             Text("LOG-NORMAL · CONTINUOUS BLEND")
                 .font(.system(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(.secondary)
@@ -273,14 +273,13 @@ struct MotionCurveEditor: View {
 
 /// Only this subtree refreshes for telemetry. It performs no curve sampling,
 /// settings writes, or layout of the profile controls. No stale-sample queue.
-private struct LiveCursorOverlay: View {
+struct LiveCursorOverlay: View {
     let telemetry: CursorTelemetry
     let profileID: UInt32
     let inputRange: Double
     let size: CGSize
     let inset: CGFloat
     @State private var sample = CursorSample()
-    private let ticker = Timer.publish(every: 1.0 / 20, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -300,9 +299,18 @@ private struct LiveCursorOverlay: View {
             }
         }
         .frame(width: size.width, height: size.height)
-        .onReceive(ticker) { _ in
-            let latest = telemetry.latest
-            if sample != latest { sample = latest }
+        // A publisher constructed in a View value can restart on every parent
+        // update, starving its first tick. This task belongs to the mounted
+        // overlay identity, not to each transient View value. Removing the
+        // overlay (Live off / inactive layer / closed settings) cancels it.
+        .task(id: ObjectIdentifier(telemetry)) { @MainActor in
+            sample = telemetry.latest
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 50_000_000) }
+                catch { return }
+                let latest = telemetry.latest
+                if sample != latest { sample = latest }
+            }
         }
         .transaction { $0.animation = nil }
         .accessibilityHidden(true)

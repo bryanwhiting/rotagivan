@@ -382,6 +382,21 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+**Tile actions:** the **•••** picker uses native macOS menus in both Settings
+and the HUD editor. Actions are organized into:
+
+- **Hotkeys:** assign or edit a keyboard shortcut.
+- **App launches:** choose an app, open a URL, or show the chosen app's windows.
+- **Recent apps:** create a dynamically populated recent-app group.
+- **Create tile group…:** add a named group with its own tiles and layers.
+- **Window management:** open a Window Manager group; resize (including Fill
+  desktop); toggle/exit full screen; show app windows; minimize; or close.
+- **Media controls:** open the volume and playback controls.
+
+These menu choices configure the tile; the action runs when selected in the HUD.
+Existing groups keep their edit/rename controls instead of offering replacements
+that could discard their contents. Remove a group explicitly to change its type.
+
 **Move or reuse whole groups:** open a tile's **••• → Move or copy…**, choose
 the destination layer/group, then a slot. **Move / swap** moves into an empty
 slot or swaps occupied tiles; **Copy** requires an empty slot and keeps the
@@ -410,8 +425,8 @@ eight-directional—the expanded radial geometry is Explorer-only.
 
 **Window Manager groups:** use the **Window Manager** settings page for the
 shared group, or a tile's **••• → Edit Window Manager group…** for its own setup.
-Each slot is editable: **Window position** assigns a target direction and size
-(halves/quarters, thirds, two thirds, or fourths); **Window commands** offers
+Each slot is editable: **Window management → Resize window** assigns a target direction and size
+(halves/quarters, thirds, two thirds, or fourths); **Window management** offers
 Fill desktop, full-screen toggles, minimize, close, and app windows. A swipe's
 direction is independent of the assigned window position. Apps, URLs, shortcuts,
 and nested groups also work. Drag to swap, move/copy groups, choose 4/8/12/16 slots,
@@ -428,9 +443,9 @@ When the target is full screen, Window Manager shows only **Exit full screen**.
 Other tiling and window commands are blocked; Escape still closes the HUD.
 Reopen Window Manager after exiting full screen to tile the window.
 
-**App windows and window commands:** an app tile's **••• → Show this app’s
+**App windows and window commands:** an app tile's **••• → App launches → Show this app’s
 windows** option opens that running app's window list instead of activating its
-default window. Or assign **Window commands → Show app windows** to inspect the
+default window. Or assign **Window management → Show app windows** to inspect the
 app that was active when Explorer opened. Window lists include minimized
 windows and paginate in sets of 16 (Previous/Next buttons or left/right arrow
 keys). Selecting restores and raises that specific window. Window titles and
@@ -438,7 +453,7 @@ handles are temporary and are never saved or synced. Apps must expose their
 windows through macOS Accessibility; there is no screenshot or screen-recording
 requirement.
 
-Assignable **Window commands** also include Fill desktop, Toggle full screen,
+Assignable **Window management** actions also include Fill desktop, Toggle full screen,
 Exit full screen, Minimize window and Close window. Close uses the app's normal
 close button, preserving any save confirmation; it does not force-quit the app.
 Window Manager's settings can bind these commands to local hotkeys too. Apps
@@ -450,7 +465,7 @@ may refuse resizing or full-screen changes; the HUD reports those failures.
 owns its keys: for example, hold **Y** for thirds inside one Window Manager and
 hold **Y** for two thirds inside another. Group layers replace only that group's
 apps, URLs, shortcuts and nested groups. Window Manager layers replace its tiles
-the same way. Assign each tile's size through **••• → Window position**. Select
+the same way. Assign each tile's size through **••• → Window management → Resize window**. Select
 a layer and use **Edit…** to change its name, activation behavior or key.
 
 These keys take effect after entering their tile, not on the Explorer root.
@@ -516,14 +531,15 @@ No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
 In **General → App Explorer**, choose the default mode (initially **Favorites**)
 and assign an application, web URL, or named group to each of the eight positions.
-Each empty/app/URL slot menu offers **Choose app or URL…**, **Set URL…** (or **Edit URL…**),
-and **New Explorer group…**. Create a group, give it a name, and fill its own
+Each empty/app/URL slot menu offers **App launches → Choose app…**,
+**App launches → Open URL…** (or **Edit URL…**),
+and **Create tile group…**. Create a group, give it a name, and fill its own
 eight slots. **Edit group** opens its grid; breadcrumbs and the center **Back**
 button return to its parent. **Rename…** preserves all contents. Removing a
 group asks for confirmation and removes its descendants too. Groups may contain
 more groups (up to four levels and 256 total entries); names, contents, and
 positions export and sync along with the rest of the configuration.
-Choose **New Recent apps group** in a slot menu to add an automatically filled
+Choose **Recent apps → Create recent apps group** in a slot menu to add an automatically filled
 group, or open an existing group's editor and set **Group contents → Recent apps**.
 You can rename it, nest it inside other groups, and tap the HUD center to go back.
 Its slots are ranked **left, top-left, top, top-right, right, bottom-right, bottom,
@@ -551,7 +567,7 @@ shortcut is required. When opened directly, center tap closes the tiling HUD.
 The binding follows the active layer, supports tap overrides for specific apps,
 and exports/syncs with your configuration. Existing bindings are not changed.
 
-Choose **Set shortcut…** from a slot's **•••** menu to assign a keyboard shortcut
+Choose **Hotkeys → Assign hotkey…** from a slot's **•••** menu to assign a keyboard shortcut
 instead of an app or URL. Record the chord or use **••• → Set shortcut manually…**
 if another app intercepts it. Give it an optional name (for example, “Go back”).
 Swipe to the slot and lift: Explorer closes, then sends the shortcut using the
@@ -568,7 +584,7 @@ Favorites keep their exact slots, including empty or unavailable slots, and can
 launch apps that are not running. Bundle IDs, positions, mode, and the optional
 hold shortcut export and sync; absolute application paths are not included.
 
-**Choose app or URL…** fuzzy-searches `/Applications`, `~/Applications` (including
+**App launches → Choose app…** fuzzy-searches `/Applications`, `~/Applications` (including
 nested Chrome app folders), and `/System/Applications` off the main thread.
 Type a partial name or abbreviation such as `gchr`, select an app, and press
 Return. Results include app icons and folder locations. Paste a full `https://`

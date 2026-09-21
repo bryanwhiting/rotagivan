@@ -199,7 +199,7 @@ struct AppExplorerSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if windowManagerOnly {
-                Text("Slot direction and window position are independent. Use ••• → Window position to assign halves, quarters, thirds, or two thirds to any slot.")
+                Text("Slot direction and window position are independent. Use ••• → Window management → Resize window to assign any position and size.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Picker("Slots in this group / layer", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
@@ -438,58 +438,7 @@ struct AppExplorerSettingsView: View {
                         if favorite?.isWindowManager != true { Button("Edit group…") { groupPath.append(direction) } }
                         Button("Rename group…") { editingGroupPath = groupPath + [direction] }
                     } else {
-                        Button("Choose app or URL…") { editingApplicationPath = groupPath + [direction] }
-                        Button(favorite?.url != nil ? "Edit URL…" : "Set URL…") { editingURLPath = groupPath + [direction] }
-                        Button(favorite?.shortcut != nil ? "Edit shortcut…" : "Set shortcut…") { editingShortcutPath = groupPath + [direction] }
-                        Divider()
-                        Button("Window Manager") {
-                            let tile = windowManagerOnly
-                                ? AppExplorerFavorite(direction: direction, name: "Window positions", children: ExplorerWindowPlacement.tiles(layout: .halves))
-                                : AppExplorerFavorite(direction: direction, name: "Window Manager", action: .windowManager)
-                            edit { $0.setFavorite(tile, at: direction, in: groupPath) }
-                        }
-                        Button("Media Controls") {
-                            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls), at: direction, in: groupPath) }
-                        }
-                        Menu("Window commands") {
-                            ForEach([AppExplorerAction.appWindows] + AppExplorerAction.windowCommands, id: \.self) { action in
-                                Button(action.title) {
-                                    edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: action.title, action: action), at: direction, in: groupPath) }
-                                }
-                            }
-                        }
-                        Menu("Window position") {
-                            ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
-                                Menu(layout.title) {
-                                    ForEach(SwipeDirection.allCases, id: \.self) { placementDirection in
-                                        let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
-                                        Button(placement.title) {
-                                            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: placement.title,
-                                                windowPlacement: placement), at: direction, in: groupPath) }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let favorite, favorite.bundleID != nil {
-                            Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in
-                                var updated = favorite; updated.showsWindows = enabled
-                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
-                            }))
-                        }
-                        Button("New Explorer group…") { editingGroupPath = groupPath + [direction] }
-                            .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
-                        Button("New Recent apps group") {
-                            var next = settings
-                            let group = AppExplorerFavorite(direction: direction, name: "Recent apps", children: [], groupMode: .recent)
-                            guard next.setFavorite(group, at: direction, in: groupPath), next.hasValidFavorites else {
-                                groupError = "The parent group must still exist and stay within the group limits."
-                                return
-                            }
-                            guard save(next) else { return }
-                            groupError = nil
-                            groupPath.append(direction)
-                        }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+                        assignmentMenu(direction, favorite: favorite)
                     }
                     if favorite != nil {
                         Divider()
@@ -549,7 +498,13 @@ struct AppExplorerSettingsView: View {
             if favorite != nil {
                 HStack(spacing: 12) {
                     if favorite?.isGroup == true {
-                        Button("Edit group") { groupPath.append(direction) }
+                        Button("Edit group") {
+                            if let favorite, favorite.isWindowManager {
+                                tileLayerSnapshot = favorite
+                                tileLayerOwnerID = selectedLayerID
+                                editingTileLayers = groupPath + [direction]
+                            } else { groupPath.append(direction) }
+                        }
                     }
                     Button("Remove") {
                         if favorite?.isGroup == true { removingGroupPath = groupPath + [direction] }
@@ -563,6 +518,83 @@ struct AppExplorerSettingsView: View {
             .background(GeometryReader { proxy in
                 Color.clear.preference(key: ExplorerSlotFramesKey.self, value: [direction: proxy.frame(in: .named(slotSpace))])
             })
+    }
+
+    /// SwiftUI Menu, Button and Toggle render as native macOS menu controls.
+    /// Shared by Settings and the HUD's inline editor.
+    @ViewBuilder private func assignmentMenu(_ direction: ExplorerSlot, favorite: AppExplorerFavorite?) -> some View {
+        Menu {
+            Button(favorite?.shortcut != nil ? "Edit hotkey…" : "Assign hotkey…", systemImage: "keyboard") {
+                editingShortcutPath = groupPath + [direction]
+            }
+        } label: { Label("Hotkeys", systemImage: "keyboard") }
+        Menu {
+            Button("Choose app…", systemImage: "app") { editingApplicationPath = groupPath + [direction] }
+            Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") { editingURLPath = groupPath + [direction] }
+            if let favorite, favorite.bundleID != nil {
+                Divider()
+                Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in
+                    var updated = favorite; updated.showsWindows = enabled
+                    edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                }))
+            }
+        } label: { Label("App launches", systemImage: "app") }
+        Menu {
+            Button("Create recent apps group", systemImage: "clock.arrow.circlepath") {
+                var next = settings
+                let group = AppExplorerFavorite(direction: direction, name: "Recent apps", children: [], groupMode: .recent)
+                guard next.setFavorite(group, at: direction, in: groupPath), next.hasValidFavorites else {
+                    groupError = "The parent group must still exist and stay within the group limits."
+                    return
+                }
+                guard save(next) else { return }
+                groupError = nil
+                groupPath.append(direction)
+            }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+        } label: { Label("Recent apps", systemImage: "clock.arrow.circlepath") }
+        Button("Create tile group…", systemImage: "folder.badge.plus") { editingGroupPath = groupPath + [direction] }
+            .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+        Divider()
+        Menu {
+            Button("Open Window Manager group", systemImage: "rectangle.split.2x2") {
+                let tile = windowManagerOnly
+                    ? AppExplorerFavorite(direction: direction, name: "Window positions", children: ExplorerWindowPlacement.tiles(layout: .halves))
+                    : AppExplorerFavorite(direction: direction, name: "Window Manager", action: .windowManager)
+                edit { $0.setFavorite(tile, at: direction, in: groupPath) }
+            }
+            Menu("Resize window") {
+                windowActionButton(.maximize, at: direction)
+                Divider()
+                ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
+                    Menu(layout.title) {
+                        ForEach(SwipeDirection.allCases, id: \.self) { placementDirection in
+                            let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
+                            Button(placement.title) {
+                                edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: placement.title,
+                                    windowPlacement: placement), at: direction, in: groupPath) }
+                            }
+                        }
+                    }
+                }
+            }
+            Menu("Full screen") {
+                windowActionButton(.toggleFullScreen, at: direction)
+                windowActionButton(.exitFullScreen, at: direction)
+            }
+            Divider()
+            windowActionButton(.appWindows, at: direction)
+            windowActionButton(.minimize, at: direction)
+            windowActionButton(.closeWindow, at: direction)
+        } label: { Label("Window management", systemImage: "macwindow") }
+        Button("Media controls", systemImage: "speaker.wave.2.fill") {
+            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls), at: direction, in: groupPath) }
+        }
+    }
+
+    private func windowActionButton(_ action: AppExplorerAction, at direction: ExplorerSlot) -> some View {
+        Button(action.title, systemImage: action.symbol) {
+            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: action.title, action: action), at: direction, in: groupPath) }
+        }
     }
 
     private func updateSlotDrag(from source: ExplorerSlot, at point: CGPoint) {

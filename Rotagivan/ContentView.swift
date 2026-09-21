@@ -10,7 +10,7 @@ struct ContentView: View {
     @State private var actionDevice: GestureDevice = .navigator
 
     private let sections = [("Devices", "computermouse"), ("Layers", "square.3.layers.3d"),
-        ("App Explorer", "safari"), ("App overrides", "app.badge"),
+        ("App Explorer", "safari"), ("Window Manager", "rectangle.split.2x2"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
@@ -75,6 +75,7 @@ struct ContentView: View {
                         case "General": general
                         case "Devices": devices
                         case "App Explorer": AppExplorerSettingsView(store: store)
+                        case "Window Manager": WindowManagerSettingsView(store: store)
                         case "App overrides": AppOverridesView(store: store)
                         default: profiles
                         }

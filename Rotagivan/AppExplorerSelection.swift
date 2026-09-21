@@ -4,18 +4,19 @@ import CoreGraphics
 /// Pure input gate: consume the trigger's remaining contact, then use a fresh
 /// one-finger displacement. No cursor events or app activation occur here.
 struct AppExplorerSelection {
-    enum Result: Equatable { case waiting, highlight(SwipeDirection?), select(SwipeDirection), back, cancel }
+    enum Result: Equatable { case waiting, highlight(ExplorerSlot?), select(ExplorerSlot), back, cancel }
     var waitingForLift: Bool
+    var slotCount = 8
     private var contactID: UInt8?
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
-    private var selected: SwipeDirection?
+    private var selected: ExplorerSlot?
     private var finished = false
     private var started = Date.distantPast
     private var maximumTravel = 0.0
     static let minimumDistance = 60.0
 
-    init(waitingForLift: Bool) { self.waitingForLift = waitingForLift }
+    init(waitingForLift: Bool, slotCount: Int = 8) { self.waitingForLift = waitingForLift; self.slotCount = slotCount }
 
     mutating func process(_ report: TrackpadReport, at now: Date = Date()) -> Result {
         guard !finished else { return .waiting }
@@ -46,7 +47,7 @@ struct AppExplorerSelection {
         last = point
         let dx = point.x - origin.x, dy = point.y - origin.y
         maximumTravel = max(maximumTravel, hypot(dx, dy))
-        let direction = hypot(dx, dy) >= Self.minimumDistance ? SwipeDirection.classify(dx: dx, dy: dy) : nil
+        let direction = hypot(dx, dy) >= Self.minimumDistance ? ExplorerSlot.classify(dx: dx, dy: dy, count: slotCount) : nil
         guard selected != direction else { return .waiting }
         selected = direction
         return .highlight(direction)
@@ -65,9 +66,9 @@ struct AppExplorerRecents {
         identifiers.insert(identifier, at: 0)
         identifiers = Array(identifiers.prefix(64))
     }
-    func ordered(available: [String], excluding: Set<String>) -> [String] {
+    func ordered(available: [String], excluding: Set<String>, limit: Int = 8) -> [String] {
         let allowed = Set(available).subtracting(excluding)
         var seen = Set<String>()
-        return Array((identifiers + available).filter { allowed.contains($0) && seen.insert($0).inserted }.prefix(8))
+        return Array((identifiers + available).filter { allowed.contains($0) && seen.insert($0).inserted }.prefix(max(0, min(16, limit))))
     }
 }

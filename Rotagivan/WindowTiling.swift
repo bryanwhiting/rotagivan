@@ -4,7 +4,7 @@ import SwiftUI
 
 enum WindowTile {
     static func title(_ direction: SwipeDirection, layout: ExplorerWindowLayout = .halves) -> String {
-        if layout != .halves { return "\(direction.title) \(layout == .thirds ? "⅓" : "⅔")" }
+        if layout != .halves { return "\(direction.title) \(layout == .thirds ? "⅓" : layout == .fourths ? "¼" : "⅔")" }
         switch direction {
         case .left: return "Left half"
         case .right: return "Right half"
@@ -54,11 +54,38 @@ enum WindowTile {
 }
 
 @MainActor struct WindowTilingTarget {
+    var isFullScreen: () -> Bool = { false }
+    var command: (AppExplorerAction) -> String? = { _ in "This window command is unavailable." }
     // Returns a user-visible error, or nil on success. Injectable for HUD tests.
     var apply: (SwipeDirection, ExplorerWindowLayout) -> String?
 }
 
 @MainActor enum WindowTiling {
+    struct AppWindow {
+        var title: String
+        var minimized: Bool
+        var activate: () -> String?
+    }
+    static func windows(pid: pid_t) -> [AppWindow] {
+        guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return [] }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+        return windows.compactMap { window in
+            AXUIElementSetMessagingTimeout(window, 0.1)
+            guard (attribute(window, kAXRoleAttribute) as? String) == kAXWindowRole else { return nil }
+            let title = (attribute(window, kAXTitleAttribute) as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Untitled window"
+            return AppWindow(title: title, minimized: (attribute(window, kAXMinimizedAttribute) as? Bool) == true) {
+                guard AXIsProcessTrusted(), let running = NSRunningApplication(processIdentifier: pid), !running.isTerminated else { return "The application is no longer available." }
+                if (attribute(window, kAXMinimizedAttribute) as? Bool) == true {
+                    guard AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success else { return "Could not restore this window." }
+                }
+                guard running.activate(options: []) else { return "Could not activate this application." }
+                _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+                return AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success ? nil : "The window is no longer available or cannot be raised."
+            }
+        }
+    }
     static func focusedWindowFrame(pid: pid_t) -> CGRect? {
         guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
@@ -77,7 +104,7 @@ enum WindowTile {
         guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let window = unsafeBitCast(value, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(window, 0.2)
-        return WindowTilingTarget { direction, layout in
+        var target = WindowTilingTarget { direction, layout in
             guard AXIsProcessTrusted() else { return "Enable Accessibility for Rotagivan, then try again." }
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return "The original app is no longer active. Reopen Explorer over that window." }
             if (attribute(window, "AXFullScreen") as? Bool) == true { return "Exit full screen before tiling this window." }
@@ -105,6 +132,42 @@ enum WindowTile {
             }
             return nil
         }
+        target.isFullScreen = { (attribute(window, "AXFullScreen") as? Bool) == true }
+        target.command = { command in
+            guard AXIsProcessTrusted() else { return "Enable Accessibility for Rotagivan, then try again." }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return "The original app is no longer active. Reopen Explorer over that window." }
+            let fullScreen = (attribute(window, "AXFullScreen") as? Bool) == true
+            if fullScreen && command != .exitFullScreen && command != .toggleFullScreen { return "Exit full screen before using other window commands." }
+            switch command {
+            case .toggleFullScreen, .exitFullScreen:
+                if command == .exitFullScreen && !fullScreen { return nil }
+                let enabled = command == .toggleFullScreen && !fullScreen
+                return AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, enabled ? kCFBooleanTrue : kCFBooleanFalse) == .success ? nil : "This app does not support changing full-screen mode."
+            case .minimize:
+                return AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success ? nil : "This window cannot be minimized."
+            case .closeWindow:
+                guard let value = attribute(window, kAXCloseButtonAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return "This window has no close button." }
+                return AXUIElementPerformAction(unsafeBitCast(value, to: AXUIElement.self), kAXPressAction as CFString) == .success ? nil : "This window could not be closed."
+            case .maximize:
+                guard let current = frame(window), let primary = NSScreen.screens.first else { return "The window is no longer available." }
+                let screens = NSScreen.screens
+                let frames = screens.map { WindowTile.accessibilityFrame($0.frame, primaryTop: primary.frame.maxY) }
+                guard let index = WindowTile.screenIndex(for: current, frames: frames) else { return "No display is available." }
+                let desired = WindowTile.accessibilityFrame(screens[index].visibleFrame, primaryTop: primary.frame.maxY)
+                var size = desired.size, point = desired.origin
+                guard let s = AXValueCreate(.cgSize, &size), let p = AXValueCreate(.cgPoint, &point) else { return "Could not calculate desktop bounds." }
+                _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, s)
+                let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, p)
+                let resized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, s)
+                guard moved == .success && resized == .success else { return "This app limits its window size or position." }
+                if let actual = frame(window), abs(actual.width - desired.width) > 8 || abs(actual.height - desired.height) > 8 {
+                    return "This app limits its window size; it could not fill the desktop."
+                }
+                return nil
+            default: return "Unsupported window command."
+            }
+        }
+        return target
     }
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {

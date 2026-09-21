@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ExplorerDestinationPicker: View {
-    let direction: SwipeDirection
+    let direction: ExplorerSlot
     var onSave: (AppExplorerFavorite, ExplorerApplication?) -> Void
     var onCancel: () -> Void
     @State var query = ""

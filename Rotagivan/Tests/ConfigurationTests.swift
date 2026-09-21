@@ -144,6 +144,17 @@ struct ConfigurationTests {
         let tileLayerRoundtrip = try AppConfiguration.parse(tileLayerYAML)
         precondition(tileLayerRoundtrip.settings.appExplorer == tileLayerConfig.settings.appExplorer)
         print("Tile-owned Explorer layers YAML roundtrip passed with reused keys in independent scopes.")
+        var capacityConfig = factory
+        capacityConfig.settings.appExplorer = AppExplorerSettings(favorites: ExplorerSlot.slots(16).enumerated().map {
+            AppExplorerFavorite(direction: $0.element, name: "Command \($0.offset)", action: .appWindows)
+        }, slotCount: 16, windowManager: ExplorerWindowSettings(layout: .fourths,
+            layers: [ExplorerHoldLayer(name: "Halves", holdShortcut: localY, activation: .toggle)],
+            shortcuts: [ExplorerWindowShortcut(command: .maximize, shortcut: RecordedShortcut(keyCode: 46, modifiers: 0, keyLabel: "M"))]))
+        let capacityYAML = try capacityConfig.yaml()
+        let capacityRestored = try AppConfiguration.parse(capacityYAML)
+        precondition(capacityRestored.settings.appExplorer == capacityConfig.settings.appExplorer)
+        rejected(capacityYAML.replacingOccurrences(of: "slotCount: 16", with: "slotCount: 7"), "unsupported Explorer capacity")
+        print("Explorer capacities, toggle layers and Window Manager commands YAML roundtrip passed.")
         precondition(AppExplorerSettings().resolvedTheme == .vector)
         precondition(AppExplorerSettings().resolvedAnimationsEnabled)
         precondition(!AppExplorerSettings().resolvedCenterCursorOnAppSwitch)

@@ -9,7 +9,7 @@ import Combine
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var input = AppExplorerSelection(waitingForLift: false)
-    var selections: [SwipeDirection] = []
+    var selections: [ExplorerSlot] = []
     var alternateHeld = false
     var windowManagerShows = 0
     func showWindowManager(waitingForLift: Bool) {

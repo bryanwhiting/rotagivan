@@ -53,7 +53,92 @@ enum AppExplorerMode: String, Codable, CaseIterable {
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
-enum AppExplorerAction: String, Codable { case windowManager, mediaControls }
+enum AppExplorerAction: String, Codable, CaseIterable {
+    case windowManager, mediaControls, appWindows, maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
+    var title: String {
+        switch self {
+        case .windowManager: return "Window Manager"
+        case .mediaControls: return "Media Controls"
+        case .appWindows: return "Show app windows"
+        case .maximize: return "Fill desktop"
+        case .toggleFullScreen: return "Toggle full screen"
+        case .exitFullScreen: return "Exit full screen"
+        case .minimize: return "Minimize window"
+        case .closeWindow: return "Close window"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .windowManager: return "rectangle.split.2x2"
+        case .mediaControls: return "speaker.wave.2.fill"
+        case .appWindows: return "macwindow.on.rectangle"
+        case .maximize: return "arrow.up.left.and.arrow.down.right"
+        case .toggleFullScreen: return "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
+        case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
+        case .minimize: return "minus.rectangle"
+        case .closeWindow: return "xmark.rectangle"
+        }
+    }
+    static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
+}
+
+/// Explorer geometry is independent of the eight physical swipe bindings.
+/// Existing saved direction strings keep exactly the same meaning.
+struct ExplorerSlot: RawRepresentable, Codable, Hashable {
+    let rawValue: String
+    static let legacy: [Self] = [.up, .topRight, .right, .bottomRight, .down, .bottomLeft, .left, .topLeft]
+    static let allCases = legacy
+    static let up = Self(unchecked: "up"), topRight = Self(unchecked: "topRight"), right = Self(unchecked: "right"), bottomRight = Self(unchecked: "bottomRight")
+    static let down = Self(unchecked: "down"), bottomLeft = Self(unchecked: "bottomLeft"), left = Self(unchecked: "left"), topLeft = Self(unchecked: "topLeft")
+    private init(unchecked: String) { rawValue = unchecked }
+    init(_ direction: SwipeDirection) { rawValue = direction.rawValue }
+    init?(rawValue: String) {
+        guard Self.legacy.contains(where: { $0.rawValue == rawValue }) ||
+            [12, 16].flatMap({ Self.slots($0) }).contains(where: { $0.rawValue == rawValue }) else { return nil }
+        self.rawValue = rawValue
+    }
+    init(from decoder: Decoder) throws {
+        let box = try decoder.singleValueContainer(), value = try box.decode(String.self)
+        guard let slot = Self(rawValue: value) else { throw DecodingError.dataCorruptedError(in: box, debugDescription: "Invalid Explorer slot") }
+        self = slot
+    }
+    func encode(to encoder: Encoder) throws { var box = encoder.singleValueContainer(); try box.encode(rawValue) }
+    var angle: Double {
+        if let index = Self.legacy.firstIndex(of: self) { return Double(index) * 45 - 90 }
+        return Double(rawValue.dropFirst(5))! / 10 - 90
+    }
+    var swipeDirection: SwipeDirection? { SwipeDirection(rawValue: rawValue) }
+    var title: String { swipeDirection?.title ?? "\(Int((angle + 90).rounded()))° clockwise" }
+    static func slots(_ count: Int) -> [Self] {
+        let count = [4, 8, 12, 16].contains(count) ? count : 8
+        return (0..<count).map { index in
+            let tenths = index * 3600 / count
+            return tenths % 450 == 0 ? legacy[tenths / 450] : Self(unchecked: "angle\(tenths)")
+        }
+    }
+    static func classify(dx: Double, dy: Double, count: Int) -> Self? {
+        guard dx.isFinite, dy.isFinite, dx != 0 || dy != 0 else { return nil }
+        let slots = slots(count), angle = atan2(dy, dx) * 180 / .pi
+        let ranked = slots.map { ($0, distance($0.angle, angle)) }.sorted { $0.1 < $1.1 }
+        // Leave a small neutral seam, avoiding jitter on sector boundaries.
+        return ranked[0].1 <= 180 / Double(slots.count) - 1.5 ? ranked[0].0 : nil
+    }
+    static func distance(_ a: Double, _ b: Double) -> Double {
+        let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+        return min(d, 360 - d)
+    }
+}
+
+enum ExplorerLayerActivation: String, Codable, CaseIterable { case hold, toggle }
+struct ExplorerWindowShortcut: Codable, Equatable {
+    var command: AppExplorerAction
+    var shortcut: RecordedShortcut
+}
+struct ExplorerWindowSettings: Codable, Equatable {
+    var layout: ExplorerWindowLayout = .halves
+    var layers: [ExplorerHoldLayer] = []
+    var shortcuts: [ExplorerWindowShortcut] = []
+}
 
 enum ExplorerTheme: String, Codable, CaseIterable {
     case native, vector, ember, starburst
@@ -67,9 +152,9 @@ enum ExplorerTheme: String, Codable, CaseIterable {
 }
 
 enum ExplorerWindowLayout: String, Codable, CaseIterable {
-    case halves, thirds, twoThirds
-    var title: String { switch self { case .halves: return "Halves & quarters"; case .thirds: return "Thirds"; case .twoThirds: return "Two thirds" } }
-    var fraction: Double { switch self { case .halves: return 0.5; case .thirds: return 1.0 / 3; case .twoThirds: return 2.0 / 3 } }
+    case halves, thirds, twoThirds, fourths
+    var title: String { switch self { case .halves: return "Halves & quarters"; case .thirds: return "Thirds"; case .twoThirds: return "Two thirds"; case .fourths: return "Fourths (25%)" } }
+    var fraction: Double { switch self { case .halves: return 0.5; case .thirds: return 1.0 / 3; case .twoThirds: return 2.0 / 3; case .fourths: return 0.25 } }
 }
 
 struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
@@ -78,6 +163,8 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var holdShortcut: RecordedShortcut?
     var favorites: [AppExplorerFavorite] = []
     var windowLayout: ExplorerWindowLayout = .halves
+    var slotCount: Int? = nil
+    var activation: ExplorerLayerActivation? = nil
 }
 
 // Explorer-local keys never register globally or alter cursor/tap layers.
@@ -94,7 +181,7 @@ struct ExplorerHeldKeys {
 }
 
 struct AppExplorerFavorite: Codable, Equatable {
-    var direction: SwipeDirection
+    var direction: ExplorerSlot
     var bundleID: String? = nil
     var name: String
     var url: String? = nil
@@ -107,6 +194,8 @@ struct AppExplorerFavorite: Codable, Equatable {
     // Nil inherits the enclosing Explorer's keys; [] explicitly has no layers.
     // Stored on the tile so layers follow renames, moves, swaps and copies.
     var holdLayers: [ExplorerHoldLayer]? = nil
+    var slotCount: Int? = nil
+    var showsWindows: Bool? = nil
     var supportsHoldLayers: Bool { isGroup || isWindowManager }
     var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
@@ -116,6 +205,8 @@ struct AppExplorerFavorite: Codable, Equatable {
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
         guard holdLayers == nil || supportsHoldLayers else { return false }
+        guard slotCount == nil || (isGroup && [4, 8, 12, 16].contains(slotCount!)) else { return false }
+        guard showsWindows != true || (bundleID != nil && action == nil && !isGroup && url == nil && shortcut == nil) else { return false }
         if let shortcut {
             return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil
         }
@@ -140,7 +231,7 @@ struct AppExplorerFavorite: Codable, Equatable {
 }
 
 struct AppExplorerSettings: Codable, Equatable {
-    static let recentDirections: [SwipeDirection] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
+    static let recentDirections: [ExplorerSlot] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
     static let maximumGroupDepth = 4
     static let maximumFavorites = 256
     var defaultMode: AppExplorerMode = .favorites
@@ -150,6 +241,8 @@ struct AppExplorerSettings: Codable, Equatable {
     var theme: ExplorerTheme? = nil
     var animationsEnabled: Bool? = nil
     var centerCursorOnAppSwitch: Bool? = nil
+    var slotCount: Int? = nil
+    var windowManager: ExplorerWindowSettings? = nil
     var resolvedTheme: ExplorerTheme { theme ?? .vector }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
@@ -159,10 +252,11 @@ struct AppExplorerSettings: Codable, Equatable {
         result.favorites = layer.favorites
         result.defaultMode = .favorites
         result.holdLayers = nil
+        result.slotCount = layer.slotCount ?? slotCount
         return result
     }
     func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
-    func favorites(at path: [SwipeDirection]) -> [AppExplorerFavorite]? {
+    func favorites(at path: [ExplorerSlot]) -> [AppExplorerFavorite]? {
         var current = favorites
         for (index, direction) in path.enumerated() {
             guard let group = current.first(where: { $0.direction == direction }),
@@ -172,14 +266,40 @@ struct AppExplorerSettings: Codable, Equatable {
         }
         return current
     }
-    func favorite(at path: [SwipeDirection]) -> AppExplorerFavorite? {
+    func favorite(at path: [ExplorerSlot]) -> AppExplorerFavorite? {
         guard let direction = path.last else { return nil }
         return favorites(at: Array(path.dropLast()))?.first { $0.direction == direction }
     }
-    func layers(at path: [SwipeDirection]) -> [ExplorerHoldLayer] {
+    func layers(at path: [ExplorerSlot]) -> [ExplorerHoldLayer] {
         path.isEmpty ? (holdLayers ?? []) : (favorite(at: path)?.holdLayers ?? [])
     }
-    func layerScope(at path: [SwipeDirection]) -> [SwipeDirection] {
+    func count(at path: [ExplorerSlot]) -> Int { path.isEmpty ? (slotCount ?? 8) : (favorite(at: path)?.slotCount ?? 8) }
+    @discardableResult mutating func resize(to count: Int, at path: [ExplorerSlot]) -> Bool {
+        guard [4, 8, 12, 16].contains(count),
+              let old = path.isEmpty ? favorites : favorite(at: path)?.children, old.count <= count else { return false }
+        var available = ExplorerSlot.slots(count), placed: [AppExplorerFavorite] = []
+        // Keep exact positions first, then place remaining tiles in the closest free sector.
+        for entry in old.sorted(by: { available.contains($0.direction) && !available.contains($1.direction) }) {
+            guard let index = available.indices.min(by: {
+                ExplorerSlot.distance(available[$0].angle, entry.direction.angle) < ExplorerSlot.distance(available[$1].angle, entry.direction.angle)
+            }) else { return false }
+            var moved = entry; moved.direction = available.remove(at: index); placed.append(moved)
+        }
+        func preserveLayerCounts(_ layers: [ExplorerHoldLayer]?, previous: Int) -> [ExplorerHoldLayer]? {
+            layers?.map { layer in var copy = layer; copy.slotCount = layer.slotCount ?? previous; return copy }
+        }
+        if path.isEmpty {
+            holdLayers = preserveLayerCounts(holdLayers, previous: slotCount ?? 8)
+            favorites = placed; slotCount = count
+        }
+        else if var group = favorite(at: path), let direction = path.last {
+            group.holdLayers = preserveLayerCounts(group.holdLayers, previous: group.slotCount ?? 8)
+            group.children = placed; group.slotCount = count
+            return setFavorite(group, at: direction, in: Array(path.dropLast()))
+        } else { return false }
+        return true
+    }
+    func layerScope(at path: [ExplorerSlot]) -> [ExplorerSlot] {
         for length in stride(from: path.count, through: 1, by: -1) {
             let prefix = Array(path.prefix(length))
             if favorite(at: prefix)?.holdLayers != nil { return prefix }
@@ -188,56 +308,72 @@ struct AppExplorerSettings: Codable, Equatable {
     }
     /// Runtime projection retains definitions so another key at the same
     /// scope can temporarily replace this layer, then return on key release.
-    func applying(_ layer: ExplorerHoldLayer, at path: [SwipeDirection]) -> Self {
+    func applying(_ layer: ExplorerHoldLayer, at path: [ExplorerSlot]) -> Self {
         var next = self
         if path.isEmpty {
             next.favorites = layer.favorites
             next.defaultMode = .favorites
+            next.slotCount = layer.slotCount ?? slotCount
         } else if var tile = favorite(at: path), tile.isGroup, let direction = path.last {
             tile.children = layer.favorites
             tile.groupMode = .favorites
+            tile.slotCount = layer.slotCount ?? tile.slotCount
             next.setFavorite(tile, at: direction, in: Array(path.dropLast()))
         }
         return next
     }
     var hasValidFavorites: Bool {
+        guard slotCount == nil || [4, 8, 12, 16].contains(slotCount!) else { return false }
         var remaining = Self.maximumFavorites
         var remainingLayers = 128
-        func validLayers(_ layers: [ExplorerHoldLayer], depth: Int, groupDepth: Int) -> Bool {
+        func validLayers(_ layers: [ExplorerHoldLayer], depth: Int, groupDepth: Int, count: Int = 8) -> Bool {
             guard depth <= 12, layers.count <= 16, Set(layers.map(\.id)).count == layers.count else { return false }
             var keys = Set<String>()
             for layer in layers {
                 remainingLayers -= 1
                 guard remainingLayers >= 0, !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      layer.name.count <= 128 else { return false }
+                      layer.name.count <= 128, layer.slotCount == nil || [4, 8, 12, 16].contains(layer.slotCount!) else { return false }
                 if let key = layer.holdShortcut {
                     guard key.isValidExplorerShortcut, key.keyCode != 53,
                           !(key.keyCode == holdShortcut?.keyCode && key.modifiers == holdShortcut?.modifiers),
                           keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
                 }
-                guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1) else { return false }
+                guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count) else { return false }
             }
             return true
         }
-        func valid(_ entries: [AppExplorerFavorite], depth: Int, nesting: Int = 0) -> Bool {
-            guard depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= 8,
+        func valid(_ entries: [AppExplorerFavorite], depth: Int, nesting: Int = 0, count: Int = 8) -> Bool {
+            guard [4, 8, 12, 16].contains(count), depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= count,
+                  entries.allSatisfy({ ExplorerSlot.slots(count).contains($0.direction) }),
                   Set(entries.map(\.direction)).count == entries.count else { return false }
             for entry in entries {
                 remaining -= 1
                 guard remaining >= 0, entry.isValidDestination else { return false }
-                if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1) { return false }
+                if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1, count: entry.slotCount ?? 8) { return false }
                 if let layers = entry.holdLayers {
                     guard !entry.isWindowManager || layers.allSatisfy({ $0.favorites.isEmpty }),
-                          validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth) else { return false }
+                          validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth, count: entry.slotCount ?? 8) else { return false }
                 }
             }
             return true
         }
-        return validLayers(holdLayers ?? [], depth: 0, groupDepth: 0) && valid(favorites, depth: 0)
+        if let windowManager {
+            guard windowManager.layers.allSatisfy({ $0.favorites.isEmpty }),
+                  validLayers(windowManager.layers, depth: 0, groupDepth: 0) else { return false }
+            var keys = Set(windowManager.layers.compactMap { $0.holdShortcut }.map { "\($0.keyCode):\($0.modifiers)" })
+            var commands = Set<AppExplorerAction>()
+            for binding in windowManager.shortcuts {
+                let key = binding.shortcut
+                guard AppExplorerAction.windowCommands.contains(binding.command), commands.insert(binding.command).inserted,
+                      key.isValidExplorerShortcut, key.keyCode != 53,
+                      keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
+            }
+        }
+        return validLayers(holdLayers ?? [], depth: 0, groupDepth: 0, count: slotCount ?? 8) && valid(favorites, depth: 0, count: slotCount ?? 8)
     }
     @discardableResult
-    mutating func swapFavorites(from source: SwipeDirection, to destination: SwipeDirection,
-                                in path: [SwipeDirection] = []) -> Bool {
+    mutating func swapFavorites(from source: ExplorerSlot, to destination: ExplorerSlot,
+                                in path: [ExplorerSlot] = []) -> Bool {
         guard source != destination, hasValidFavorites,
               let slots = favorites(at: path),
               let moving = slots.first(where: { $0.direction == source }) else { return false }
@@ -250,8 +386,8 @@ struct AppExplorerSettings: Codable, Equatable {
     }
 
     @discardableResult
-    mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: SwipeDirection, in path: [SwipeDirection] = []) -> Bool {
-        func replace(_ entries: inout [AppExplorerFavorite], path: ArraySlice<SwipeDirection>) -> Bool {
+    mutating func setFavorite(_ favorite: AppExplorerFavorite?, at direction: ExplorerSlot, in path: [ExplorerSlot] = []) -> Bool {
+        func replace(_ entries: inout [AppExplorerFavorite], path: ArraySlice<ExplorerSlot>) -> Bool {
             if let head = path.first {
                 guard let index = entries.firstIndex(where: { $0.direction == head }),
                       !entries[index].isRecentGroup,
@@ -275,18 +411,19 @@ struct ExplorerScopedHeldKeys {
         let key: UInt16
         let modifiers: UInt64
         let id: UUID
-        let scope: [SwipeDirection]
+        let scope: [ExplorerSlot]
+        let toggled: Bool
     }
     private var held: [Press] = []
     var activeID: UUID? { held.last?.id }
-    var activeScope: [SwipeDirection]? { held.last?.scope }
+    var activeScope: [ExplorerSlot]? { held.last?.scope }
     func resolved(_ original: AppExplorerSettings) -> AppExplorerSettings {
         held.reduce(original) { settings, press in
             guard let layer = settings.layers(at: press.scope).first(where: { $0.id == press.id }) else { return settings }
             return settings.applying(layer, at: press.scope)
         }
     }
-    func activeLayer(at path: [SwipeDirection], in original: AppExplorerSettings) -> ExplorerHoldLayer? {
+    func activeLayer(at path: [ExplorerSlot], in original: AppExplorerSettings) -> ExplorerHoldLayer? {
         var settings = original
         var active: ExplorerHoldLayer?
         for press in held {
@@ -296,19 +433,22 @@ struct ExplorerScopedHeldKeys {
         }
         return active
     }
-    mutating func press(key: UInt16, modifiers: UInt64, path: [SwipeDirection], settings: AppExplorerSettings) -> Bool {
-        if held.contains(where: { $0.key == key }) { return true }
+    mutating func press(key: UInt16, modifiers: UInt64, path: [ExplorerSlot], settings: AppExplorerSettings) -> Bool {
+        if let existing = held.first(where: { $0.key == key }) {
+            if existing.toggled { held.removeAll { $0.key == key } }
+            return true
+        }
         let current = resolved(settings)
         let scope = current.layerScope(at: path)
         guard let layer = current.layers(at: scope).first(where: {
             $0.holdShortcut?.keyCode == key && $0.holdShortcut?.modifiers == modifiers
         }) else { return false }
-        held.append(Press(key: key, modifiers: modifiers, id: layer.id, scope: scope))
+        held.append(Press(key: key, modifiers: modifiers, id: layer.id, scope: scope, toggled: layer.activation == .toggle))
         return true
     }
-    mutating func release(key: UInt16) { held.removeAll { $0.key == key } }
-    mutating func updateModifiers(_ flags: UInt64) { held.removeAll { $0.modifiers & flags != $0.modifiers } }
-    mutating func leave(to path: [SwipeDirection]) { held.removeAll { !path.starts(with: $0.scope) } }
+    mutating func release(key: UInt16) { held.removeAll { $0.key == key && !$0.toggled } }
+    mutating func updateModifiers(_ flags: UInt64) { held.removeAll { !$0.toggled && $0.modifiers & flags != $0.modifiers } }
+    mutating func leave(to path: [ExplorerSlot]) { held.removeAll { !path.starts(with: $0.scope) } }
     mutating func reconcile(_ original: AppExplorerSettings) {
         var current = original
         held = held.filter { press in
@@ -322,17 +462,17 @@ struct ExplorerScopedHeldKeys {
 // A drag is local to one grid and one settings snapshot. A sync or edit during
 // the gesture must not move a different app that happens to occupy that slot.
 struct ExplorerSlotDrag {
-    let source: SwipeDirection
-    let path: [SwipeDirection]
+    let source: ExplorerSlot
+    let path: [ExplorerSlot]
     let snapshot: AppExplorerSettings
 
-    init?(source: SwipeDirection, path: [SwipeDirection], settings: AppExplorerSettings) {
+    init?(source: ExplorerSlot, path: [ExplorerSlot], settings: AppExplorerSettings) {
         guard settings.hasValidFavorites,
               settings.favorites(at: path)?.contains(where: { $0.direction == source }) == true else { return nil }
         self.source = source; self.path = path; self.snapshot = settings
     }
 
-    func apply(to destination: SwipeDirection, in currentPath: [SwipeDirection], settings: inout AppExplorerSettings) -> Bool {
+    func apply(to destination: ExplorerSlot, in currentPath: [ExplorerSlot], settings: inout AppExplorerSettings) -> Bool {
         guard currentPath == path, settings == snapshot else { return false }
         return settings.swapFavorites(from: source, to: destination, in: path)
     }

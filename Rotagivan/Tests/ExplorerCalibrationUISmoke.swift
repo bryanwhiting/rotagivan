@@ -683,16 +683,16 @@ import SwiftUI
             ]
             themedModel.selected = .right
             let view = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {})
-            try render(view, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue).png")
+            try render(view, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue).png")
             let reducedView = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {}, forceReduceMotion: true)
-            try render(reducedView, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-reduced-motion.png")
+            try render(reducedView, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-reduced-motion.png")
             if theme == .starburst {
                 let names = ["Workspace", "Design", "Research", "Projects", "Media Controls"]
-                let directions: [SwipeDirection] = [.down, .left, .topRight, .up, .right]
+                let directions: [ExplorerSlot] = [.down, .left, .topRight, .up, .right]
                 for depth in 1...5 {
                     themedModel.groupNames = Array(names.prefix(depth))
                     themedModel.groupDirections = Array(directions.prefix(depth))
-                    try render(view, size: CGSize(width: 470, height: 464),
+                    try render(view, size: CGSize(width: 470, height: 520),
                         path: CommandLine.arguments[1] + "/starburst-level-\(depth + 1).png")
                 }
                 themedModel.groupNames = []
@@ -704,10 +704,10 @@ import SwiftUI
             themedModel.layerName = "Precision layout"
             themedModel.windowLayout = .thirds
             themedModel.entries = ExplorerModel.directions.map {
-                ExplorerEntry(direction: $0, bundleID: nil, name: WindowTile.title($0, layout: .thirds), icon: nil, url: nil, tilingDirection: $0)
+                ExplorerEntry(direction: $0, bundleID: nil, name: WindowTile.title($0.swipeDirection!, layout: .thirds), icon: nil, url: nil, tilingDirection: $0.swipeDirection)
             }
             themedModel.selected = .topRight
-            try render(view, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-layouts.png")
+            try render(view, size: CGSize(width: 470, height: 520), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-layouts.png")
         }
         try render(ExplorerThemePicker(theme: .constant(.vector)).padding(16).frame(width: 510).background(Color(nsColor: .windowBackgroundColor)),
             size: CGSize(width: 510, height: 150), path: CommandLine.arguments[1] + "/theme-picker.png")

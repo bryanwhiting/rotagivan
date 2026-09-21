@@ -21,7 +21,12 @@ import SwiftUI
         let hid = NavigatorHIDManager(store: store)
         let sync = SettingsSync(store: store, hid: hid) // Never start input, sync or Keychain access.
         let output = CommandLine.arguments[1]
-        for (index, section) in ["Layers", "Devices", "App Explorer", "Pointer & scrolling", "General", "Layers", "App overrides"].enumerated() {
+        for (index, section) in ["Layers", "Devices", "App Explorer", "Pointer & scrolling", "General", "Layers", "App overrides", "Window Manager", "App Explorer"].enumerated() {
+            if index == 8 {
+                store.settings.appExplorer = AppExplorerSettings(favorites: ExplorerSlot.slots(16).map {
+                    AppExplorerFavorite(direction: $0, name: "App", url: "https://example.com")
+                }, slotCount: 16)
+            }
             if index == 5 {
                 store.settings.devices = ProfileDevices(shareTapActions: false)
                 store.updateAppleGestures(store.settings.effectiveGestures(for: store.defaultProfileID), for: store.defaultProfileID)

@@ -109,7 +109,7 @@ struct ExplorerThemePicker: View {
                             ExplorerHUDBackdrop(theme: option)
                             if option == .starburst {
                                 ZStack {
-                                    ForEach(SwipeDirection.allCases, id: \.self) { direction in
+                                    ForEach(ExplorerSlot.allCases, id: \.self) { direction in
                                         ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
                                             .fill(option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
                                     }
@@ -146,19 +146,10 @@ struct ExplorerThemePicker: View {
 /// Fixed direction geometry: labels and hit targets never rotate when drilling
 /// into groups. Ancestors add inner rings; the current choices stay on the rim.
 enum ExplorerStarburstLayout {
-    static func angle(_ direction: SwipeDirection) -> Double {
-        switch direction {
-        case .up: return -90
-        case .topRight: return -45
-        case .right: return 0
-        case .bottomRight: return 45
-        case .down: return 90
-        case .bottomLeft: return 135
-        case .left: return 180
-        case .topLeft: return 225
-        }
+    static func angle(_ direction: ExplorerSlot) -> Double {
+        direction.angle
     }
-    static func point(_ direction: SwipeDirection, radius: Double, center: CGPoint) -> CGPoint {
+    static func point(_ direction: ExplorerSlot, radius: Double, center: CGPoint) -> CGPoint {
         let radians = angle(direction) * .pi / 180
         return CGPoint(x: center.x + cos(radians) * radius, y: center.y + sin(radians) * radius)
     }
@@ -167,14 +158,15 @@ enum ExplorerStarburstLayout {
 }
 
 struct ExplorerStarburstSector: Shape {
-    let direction: SwipeDirection
+    let direction: ExplorerSlot
     let innerRadius: Double
     let outerRadius: Double
     var tip: Double = 0
+    var halfAngle: Double = 20.5
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let middle = ExplorerStarburstLayout.angle(direction)
-        let start = Angle.degrees(middle - 20.5), end = Angle.degrees(middle + 20.5)
+        let start = Angle.degrees(middle - halfAngle), end = Angle.degrees(middle + halfAngle)
         func point(_ angle: Angle, _ radius: Double) -> CGPoint {
             CGPoint(x: center.x + cos(angle.radians) * radius, y: center.y + sin(angle.radians) * radius)
         }

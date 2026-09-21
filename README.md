@@ -377,6 +377,53 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+**4 / 8 / 12 / 16 slots:** choose the capacity above the favorites grid. Each
+group and each alternate layer has its own capacity. Eight-slot layouts retain
+their existing positions; other capacities use evenly spaced radial sectors in
+every HUD theme. The settings grid lists those sectors clockwise from the top.
+Resizing moves assigned tiles to the closest free sectors without dropping
+their contents. Remove tiles first if you want fewer slots than are assigned.
+Changing a default page's capacity does not change its alternate layers.
+Recent-app groups use their configured capacity as well.
+
+**Group layers:** use **••• → Tile layers…** on a group and add another layer,
+then select that layer to edit its slots and capacity. Its recorded key can be
+**Hold** or **Tap to toggle**. Toggle state lasts only for this HUD session;
+leaving the group cancels its local layer. Physical tap/swipe bindings remain
+eight-directional—the expanded radial geometry is Explorer-only.
+
+**Window Manager applet:** the dedicated **Window Manager** settings page owns
+its default sizing, alternate size layers, and command hotkeys. Record keys
+for halves/quarters, thirds, two thirds, or fourths; choose hold or toggle for
+each layer. Applet keys are local to the open Window Manager, not global
+shortcuts. Existing tile-specific window layers continue to override these
+applet layers; existing Explorer-wide keys remain the fallback until you save
+an applet configuration.
+
+**Fill desktop** resizes the target within the desktop's usable bounds;
+**Toggle full screen** changes macOS full-screen mode. These are different
+operations, matching Apple's distinction between [desktop tiling](https://support.apple.com/en-ph/guide/mac-help/mchlef287e5d/mac)
+and a [full-screen Space](https://developer.apple.com/library/archive/documentation/General/Conceptual/MOSXAppProgrammingGuide/FullScreenApp/FullScreenApp.html).
+When the target is full screen, Window Manager shows only **Exit full screen**.
+Other tiling and window commands are blocked; Escape still closes the HUD.
+Reopen Window Manager after exiting full screen to tile the window.
+
+**App windows and window commands:** an app tile's **••• → Show this app’s
+windows** option opens that running app's window list instead of activating its
+default window. Or assign **Window commands → Show app windows** to inspect the
+app that was active when Explorer opened. Window lists include minimized
+windows and paginate in sets of 16 (Previous/Next buttons or left/right arrow
+keys). Selecting restores and raises that specific window. Window titles and
+handles are temporary and are never saved or synced. Apps must expose their
+windows through macOS Accessibility; there is no screenshot or screen-recording
+requirement.
+
+Assignable **Window commands** also include Fill desktop, Toggle full screen,
+Exit full screen, Minimize window and Close window. Close uses the app's normal
+close button, preserving any save confirmation; it does not force-quit the app.
+Window Manager's settings can bind these commands to local hotkeys too. Apps
+may refuse resizing or full-screen changes; the HUD reports those failures.
+
 **Tile-specific layers:** open a group or Window Manager tile's **••• → Tile
 layers…**, enable **Use tile-specific layers**, then **Add layer**. Each tile
 owns its keys: for example, hold **Y** for thirds inside one Window Manager and

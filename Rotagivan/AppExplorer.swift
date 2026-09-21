@@ -37,16 +37,20 @@ extension AppExplorerPresenting {
     private var deadline = Date.distantPast
     private var alternateHeld = false
     private var heldKeys = ExplorerScopedHeldKeys()
-    private var baseGroupPath: [SwipeDirection] = []
+    private var windowKeys = ExplorerScopedHeldKeys()
+    private var windowList: [WindowTiling.AppWindow] = []
+    private var windowPage = 0
+    var listWindows: (pid_t) -> [WindowTiling.AppWindow] = { WindowTiling.windows(pid: $0) }
+    private var baseGroupPath: [ExplorerSlot] = []
     var performMedia: (ExplorerMediaAction) -> Void = { ExplorerMediaAction.perform($0) }
-    private(set) var groupPath: [SwipeDirection] = []
+    private(set) var groupPath: [ExplorerSlot] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
     private let cursorCentering = ExplorerCursorCentering()
     var cursorPosition: () -> CGPoint? = { CGEvent(source: nil)?.location }
     var centerApplication: ((pid_t, CGPoint?, @escaping () -> Bool) -> Void)?
     private var tilingTarget: WindowTilingTarget?
-    private var controlDirection: SwipeDirection?
+    private var controlDirection: ExplorerSlot?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
@@ -71,7 +75,7 @@ extension AppExplorerPresenting {
     var isVisible: Bool { panel != nil }
     var isEditing: Bool { model.isEditing }
     var displayedEntries: [ExplorerEntry] { model.entries }
-    var displayedLevelDirections: [SwipeDirection] { model.groupDirections }
+    var displayedLevelDirections: [ExplorerSlot] { model.groupDirections }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -120,6 +124,8 @@ extension AppExplorerPresenting {
         selectionGeneration &+= 1
         groupPath = []
         heldKeys = ExplorerScopedHeldKeys()
+        windowKeys = ExplorerScopedHeldKeys()
+        windowList = []; windowPage = 0; model.showingAppWindows = false
         baseGroupPath = []
         model.showingMediaControls = false
         model.showingWindowManager = windowManager
@@ -136,8 +142,8 @@ extension AppExplorerPresenting {
         }
         loadEntries()
         model.selected = nil
-        input = AppExplorerSelection(waitingForLift: waitingForLift)
-        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 464),
+        input = AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount)
+        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 520),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
         panel.title = "App Explorer"
@@ -152,7 +158,9 @@ extension AppExplorerPresenting {
         panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
-            onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() }))
+            onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() },
+            onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
+            onWindowPage: { [weak self] in self?.changeWindowPage($0) }))
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
@@ -171,6 +179,9 @@ extension AppExplorerPresenting {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if (!self.isEditing && Date() >= self.deadline) || self.contextIsValid?() == false { self.dismiss() }
+                else if self.isVisible && self.model.showingWindowManager && self.model.windowFullScreen != (self.tilingTarget?.isFullScreen() == true) {
+                    self.refreshGroup()
+                }
             }
         }
         self.timer = timer
@@ -187,14 +198,50 @@ extension AppExplorerPresenting {
         }
     }
 
-    private var layerScopePath: [SwipeDirection] {
+    private var layerScopePath: [ExplorerSlot] {
         if (model.showingWindowManager && !model.directWindowManager) || model.showingMediaControls,
            let controlDirection { return groupPath + [controlDirection] }
         return groupPath
     }
+    private var windowConfiguration: AppExplorerSettings {
+        let saved = configuration(), projected = heldKeys.resolved(saved)
+        let local = projected.favorite(at: layerScopePath)?.holdLayers
+        return AppExplorerSettings(holdLayers: local ?? saved.windowManager?.layers ?? saved.holdLayers ?? [])
+    }
 
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
         guard isVisible, !isEditing, contextIsValid?() != false else { return false }
+        if event.type == .keyDown && event.keyCode == 53 { return false }
+        if model.showingAppWindows {
+            if event.type == .keyDown && [123, 124].contains(event.keyCode) {
+                changeWindowPage(event.keyCode == 123 ? -1 : 1); return true
+            }
+            return false
+        }
+        if model.showingWindowManager {
+            if event.type == .keyDown && event.isARepeat { return true }
+            let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
+            let fullScreen = tilingTarget?.isFullScreen() == true
+            if event.type == .keyDown, let binding = configuration().windowManager?.shortcuts.first(where: {
+                $0.shortcut.keyCode == event.keyCode && $0.shortcut.modifiers == flags
+            }) {
+                if !fullScreen || [.exitFullScreen, .toggleFullScreen].contains(binding.command) {
+                    performWindowCommand(fullScreen ? .exitFullScreen : binding.command)
+                }
+                return true
+            }
+            guard !fullScreen else { return true }
+            let previous = windowKeys.activeID
+            var handled = false
+            switch event.type {
+            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: [], settings: windowConfiguration)
+            case .keyUp: windowKeys.release(key: event.keyCode)
+            case .flagsChanged: windowKeys.updateModifiers(flags)
+            default: return false
+            }
+            if previous != windowKeys.activeID { refreshGroup(); handled = true }
+            return handled
+        }
         let previous = heldKeys.activeID
         let previousSettings = heldKeys.resolved(configuration())
         let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
@@ -233,28 +280,65 @@ extension AppExplorerPresenting {
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         model.groupDirections = groupPath
-        if model.showingMediaControls || (model.showingWindowManager && !model.directWindowManager),
-           let controlDirection { model.groupDirections.append(controlDirection) }
+        model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
+        if model.showingAppWindows || model.showingMediaControls || (model.showingWindowManager && !model.directWindowManager),
+           let controlDirection {
+            model.groupDirections.append(controlDirection)
+            model.groupSlotCounts.append(settings.count(at: groupPath))
+        }
         let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
         model.showingRecents = model.mode == .recent || recentGroup
-        model.canEdit = editingStore != nil && !model.showingWindowManager && !model.showingMediaControls && layer == nil
+        model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingMediaControls && layer == nil
+        model.slotCount = settings.count(at: groupPath)
+        if model.showingAppWindows {
+            model.slotCount = 16
+            model.groupNames.append("App windows")
+            model.layerHint = ""
+            model.page = windowPage; model.pageCount = max(1, (windowList.count + 15) / 16)
+            model.entries = windowList.dropFirst(windowPage * 16).prefix(16).enumerated().map { offset, window in
+                ExplorerEntry(direction: ExplorerSlot.slots(16)[offset], bundleID: nil,
+                    name: window.title + (window.minimized ? " (minimized)" : ""), icon: nil, url: nil, windowIndex: windowPage * 16 + offset)
+            }
+            model.message = windowList.isEmpty ? "No accessible windows. Enable Accessibility and make sure the app is running." : nil
+            return
+        }
         if model.showingMediaControls {
+            model.slotCount = 8
             model.groupNames.append("Media Controls")
             model.entries = ExplorerMediaAction.allCases.map { action in
-                ExplorerEntry(direction: action.direction, bundleID: nil, name: action.title, icon: nil, url: nil, mediaAction: action)
+                ExplorerEntry(direction: ExplorerSlot(action.direction), bundleID: nil, name: action.title, icon: nil, url: nil, mediaAction: action)
             }
             return
         }
         if model.showingWindowManager {
+            model.slotCount = 8
+            let windowLayer = windowKeys.activeLayer(at: [], in: windowConfiguration)
+            model.windowLayout = windowLayer?.windowLayout ?? original.windowManager?.layout ?? .halves
+            model.layerName = windowLayer?.name
+            let wasFullScreen = model.windowFullScreen
+            model.windowFullScreen = tilingTarget?.isFullScreen() == true
+            if wasFullScreen && !model.windowFullScreen { model.message = nil }
+            model.layerHint = model.windowFullScreen ? "" : (windowConfiguration.holdLayers ?? []).compactMap {
+                guard let key = $0.holdShortcut else { return nil }
+                return "\(key.displayName): \($0.name) (\($0.activation == .toggle ? "toggle" : "hold"))"
+            }.joined(separator: " · ")
             model.groupNames.append("Window Manager")
+            if model.windowFullScreen {
+                model.entries = [ExplorerEntry(direction: .up, bundleID: nil, name: "Exit full screen", icon: nil, url: nil, command: .exitFullScreen)]
+                model.message = "This window is full screen. Exit full screen to enable tiling."
+                return
+            }
             model.entries = SwipeDirection.allCases.map { direction in
-                ExplorerEntry(direction: direction, bundleID: nil, name: WindowTile.title(direction, layout: model.windowLayout),
+                ExplorerEntry(direction: ExplorerSlot(direction), bundleID: nil, name: WindowTile.title(direction, layout: model.windowLayout),
                     icon: nil, url: nil, tilingDirection: direction)
             }
             return
         }
         if model.mode == .favorites && !recentGroup {
             model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
+                if let action = favorite.action, action != .windowManager && action != .mediaControls {
+                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action)
+                }
                 if favorite.action == .mediaControls {
                     return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
                 }
@@ -277,7 +361,7 @@ extension AppExplorerPresenting {
                 }
                 let url = favorite.bundleID.flatMap(applicationURL)
                 return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
-                    name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url)
+                    name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
             }
             return
         }
@@ -286,9 +370,12 @@ extension AppExplorerPresenting {
             $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
             $0.bundleIdentifier != "local.rotagivan"
         }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
-        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [])
+        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [], limit: model.slotCount)
+        let slots = ExplorerSlot.slots(model.slotCount).sorted { a, b in
+            (a.angle + 180).truncatingRemainder(dividingBy: 360) < (b.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
         model.entries = ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
-            ExplorerEntry(direction: ExplorerModel.directions[$0.offset], app: $0.element)
+            ExplorerEntry(direction: slots[$0.offset], app: $0.element)
         }
     }
 
@@ -308,10 +395,34 @@ extension AppExplorerPresenting {
         }
     }
 
-    private func choose(_ direction: SwipeDirection) {
+    private func choose(_ direction: ExplorerSlot) {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if model.showingWindowManager && model.windowFullScreen && entry?.command != .exitFullScreen {
+            input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
+            model.selected = nil; return
+        }
+        if let index = entry?.windowIndex, windowList.indices.contains(index) {
+            let window = windowList[index]
+            let originalPID = sourcePID
+            dismiss()
+            let generation = selectionGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false,
+                      self.frontmostPID() == originalPID else { return }
+                if let error = window.activate() { Self.showWindowError(error) }
+            }
+            return
+        }
+        if entry?.command == .appWindows || entry?.showsWindows == true {
+            let pid = entry?.bundleID.flatMap { id in workspace.runningApplications.first { $0.bundleIdentifier == id && !$0.isTerminated }?.processIdentifier } ?? (entry?.showsWindows == true ? nil : sourcePID)
+            controlDirection = direction
+            windowList = pid.map(listWindows) ?? []; windowPage = 0
+            model.showingAppWindows = true
+            refreshGroup(); return
+        }
+        if let command = entry?.command { performWindowCommand(command); return }
         if let media = entry?.mediaAction {
             performMedia(media)
             model.selected = nil
@@ -337,6 +448,7 @@ extension AppExplorerPresenting {
             return
         }
         if entry?.isWindowManager == true {
+            windowKeys = ExplorerScopedHeldKeys()
             controlDirection = direction
             model.showingWindowManager = true
             tilingTarget = sourcePID.flatMap(captureWindow)
@@ -398,8 +510,36 @@ extension AppExplorerPresenting {
         }
     }
 
+    private func performWindowCommand(_ command: AppExplorerAction) {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
+        guard let target = tilingTarget else {
+            model.message = "No controllable window. Enable Accessibility and open Explorer over a window."; return
+        }
+        if target.isFullScreen() && command != .exitFullScreen && command != .toggleFullScreen {
+            refreshGroup(); return
+        }
+        if let error = target.command(command) { model.message = error }
+        else { dismiss() }
+    }
+
+    private static func showWindowError(_ message: String) {
+        let alert = NSAlert(); alert.messageText = "Window unavailable"; alert.informativeText = message
+        alert.addButton(withTitle: "OK"); alert.runModal()
+    }
+
+    private func changeWindowPage(_ delta: Int) {
+        guard model.showingAppWindows else { return }
+        windowPage = max(0, min(max(0, (windowList.count - 1) / 16), windowPage + delta))
+        refreshGroup()
+    }
+
     func goBack() {
         guard isVisible, !isEditing else { return }
+        if model.showingAppWindows {
+            model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = nil
+            model.message = nil; refreshGroup(); return
+        }
         if model.showingMediaControls {
             guard contextIsValid?() != false else { dismiss(); return }
             model.showingMediaControls = false
@@ -412,6 +552,7 @@ extension AppExplorerPresenting {
             guard contextIsValid?() != false else { dismiss(); return }
             if model.directWindowManager { dismiss(); return }
             model.showingWindowManager = false
+            windowKeys = ExplorerScopedHeldKeys()
             controlDirection = nil
             heldKeys.leave(to: groupPath)
             model.message = nil
@@ -429,12 +570,12 @@ extension AppExplorerPresenting {
         selectionGeneration &+= 1
         loadEntries()
         model.selected = nil
-        input = AppExplorerSelection(waitingForLift: contactIsDown)
+        input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
         deadline = Date().addingTimeInterval(15)
     }
 
     func beginEditing() {
-        guard let store = editingStore, let previous = panel, !isEditing, !model.showingWindowManager, !model.showingMediaControls, heldKeys.activeID == nil,
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingWindowManager, !model.showingMediaControls, heldKeys.activeID == nil,
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
         model.isEditing = true
@@ -505,6 +646,9 @@ extension AppExplorerPresenting {
         groupPath = []
         model.groupNames = []
         model.groupDirections = []
+        model.groupSlotCounts = []
+        model.showingAppWindows = false
+        windowList = []; windowPage = 0; windowKeys = ExplorerScopedHeldKeys()
         model.showingWindowManager = false
         model.directWindowManager = false
         model.showingMediaControls = false
@@ -525,6 +669,12 @@ private final class ExplorerPanel: NSPanel {
     override var canBecomeMain: Bool { false }
     override func resignKey() { super.resignKey(); if !allowsEditing { onCancel?() } }
     override func cancelOperation(_ sender: Any?) { onCancel?() }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Recorded Command-key chords must reach the applet before menu-bar
+        // commands (for example Cmd-M) can act on Rotagivan's own window.
+        if !allowsEditing, onKey?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
     override func keyDown(with event: NSEvent) {
         if allowsEditing { super.keyDown(with: event); return }
         if onKey?(event) == true { return }
@@ -543,7 +693,7 @@ private final class ExplorerPanel: NSPanel {
 }
 
 struct ExplorerEntry {
-    var direction: SwipeDirection
+    var direction: ExplorerSlot
     var bundleID: String?
     var name: String
     var icon: NSImage?
@@ -556,7 +706,10 @@ struct ExplorerEntry {
     var shortcut: RecordedShortcut?
     var isMediaControls: Bool
     var mediaAction: ExplorerMediaAction?
-    init(direction: SwipeDirection, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil) {
+    var command: AppExplorerAction?
+    var showsWindows: Bool
+    var windowIndex: Int?
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
@@ -566,8 +719,9 @@ struct ExplorerEntry {
         self.shortcut = shortcut
         self.isMediaControls = isMediaControls
         self.mediaAction = mediaAction
+        self.command = command; self.showsWindows = showsWindows; self.windowIndex = windowIndex
     }
-    init(direction: SwipeDirection, app: NSRunningApplication) {
+    init(direction: ExplorerSlot, app: NSRunningApplication) {
         self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
     }
 }
@@ -576,10 +730,11 @@ struct ExplorerEntry {
     // MRU starts at the left and proceeds clockwise. Positions freeze on open.
     static let directions = AppExplorerSettings.recentDirections
     @Published var entries: [ExplorerEntry] = []
-    @Published var selected: SwipeDirection?
+    @Published var selected: ExplorerSlot?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
-    @Published var groupDirections: [SwipeDirection] = []
+    @Published var groupDirections: [ExplorerSlot] = []
+    @Published var groupSlotCounts: [Int] = []
     @Published var canEdit = false
     @Published var isEditing = false
     @Published var showingRecents = false
@@ -592,6 +747,11 @@ struct ExplorerEntry {
     @Published var windowLayout: ExplorerWindowLayout = .halves
     @Published var theme: ExplorerTheme = .vector
     @Published var animationsEnabled = true
+    @Published var slotCount = 8
+    @Published var windowFullScreen = false
+    @Published var showingAppWindows = false
+    @Published var page = 0
+    @Published var pageCount = 1
 }
 
 struct AppExplorerView: View {
@@ -600,14 +760,16 @@ struct AppExplorerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var appeared = false
     @State private var reticleRotation = -135.0
-    var onSelect: (SwipeDirection) -> Void
+    var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
     var onBack: () -> Void = {}
     var onEdit: () -> Void = {}
+    var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
+    var onWindowPage: (Int) -> Void = { _ in }
     // Previews/tests may enforce reduced motion; they cannot override macOS's
     // accessibility preference in the opposite direction.
     var forceReduceMotion = false
-    private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
+    private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var canGoBack: Bool { !model.directWindowManager && !model.groupNames.isEmpty }
     private var animates: Bool {
         ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
@@ -615,6 +777,16 @@ struct AppExplorerView: View {
     }
     private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
     private var accent: Color { model.theme.accent }
+    private var guidance: String {
+        if let message = model.message { return message }
+        if let slot = model.selected, model.slotCount > 8,
+           let entry = model.entries.first(where: { $0.direction == slot }) { return "\(entry.name) · lift to choose" }
+        if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
+        if model.showingMediaControls { return "Swipe to control · repeat to adjust · center tap to go back" }
+        if model.showingWindowManager { return "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" }
+        if model.entries.isEmpty { return model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites." }
+        return model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -633,7 +805,13 @@ struct AppExplorerView: View {
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
                     .buttonStyle(.plain).accessibilityLabel("Close App Explorer")
             }
-            if model.theme == .starburst {
+            if model.showingWindowManager && model.windowFullScreen {
+                VStack(spacing: 20) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 48, weight: .light)).foregroundStyle(accent)
+                    Button("Exit full screen") { onWindowCommand(.exitFullScreen) }.buttonStyle(.borderedProminent)
+                    Text("Swipe up to exit full screen").font(.caption).foregroundStyle(.secondary)
+                }.frame(height: 260)
+            } else if model.theme == .starburst || model.slotCount != 8 {
                 starburst
             } else {
             VStack(spacing: 8) {
@@ -645,7 +823,7 @@ struct AppExplorerView: View {
                                 Button(action: onBack) {
                                     VStack(spacing: 7) {
                                         if model.theme.isHUD && model.showingWindowManager {
-                                            ExplorerLayoutPreview(direction: model.selected, layout: model.windowLayout, accent: accent)
+                                            ExplorerLayoutPreview(direction: model.selected?.swipeDirection, layout: model.windowLayout, accent: accent)
                                         } else {
                                             ZStack {
                                                 if model.theme.isHUD {
@@ -669,12 +847,25 @@ struct AppExplorerView: View {
                 }
             }
             }
-            Text(model.message ?? (model.showingMediaControls ? "Swipe to control · repeat to adjust · center tap to go back" : (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit")))))
+            Text(guidance)
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
-            if !model.layerHint.isEmpty { Text("Hold \(model.layerHint)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
+            if model.showingWindowManager && !model.windowFullScreen {
+                HStack {
+                    Button("Fill desktop") { onWindowCommand(.maximize) }
+                    Button("Toggle full screen") { onWindowCommand(.toggleFullScreen) }
+                }.font(.caption)
+            }
+            if model.showingAppWindows {
+                HStack {
+                    Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
+                    Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
+                    Button("Next") { onWindowPage(1) }.disabled(model.page + 1 >= model.pageCount)
+                }
+            }
+            if !model.layerHint.isEmpty { Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
         }
         .padding(26)
-        .frame(width: 470, height: 464)
+        .frame(width: 470, height: 520)
         .background(ExplorerHUDBackdrop(theme: model.theme))
         .tint(accent)
         .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
@@ -703,15 +894,16 @@ struct AppExplorerView: View {
             ForEach(0..<depth, id: \.self) { level in
                 let radius = ExplorerStarburstLayout.ringRadius(level)
                 let direction = model.groupDirections.indices.contains(level) ? model.groupDirections[level] : nil
-                ForEach(SwipeDirection.allCases, id: \.self) { sector in
-                    ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6)
+                let count = model.groupSlotCounts.indices.contains(level) ? model.groupSlotCounts[level] : 8
+                ForEach(ExplorerSlot.slots(count), id: \.self) { sector in
+                    ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6, halfAngle: 180 / Double(count) - 2)
                         .fill(direction == sector ? accent.opacity(0.95 - Double(level) * 0.1) : accent.opacity(0.12))
                         .frame(width: 418, height: 310)
                         .accessibilityHidden(true)
                 }
                 .transition(.opacity)
             }
-            ForEach(SwipeDirection.allCases, id: \.self) { direction in
+            ForEach(ExplorerSlot.slots(model.slotCount), id: \.self) { direction in
                 starburstChoice(direction, depth: depth, center: center)
             }
             Button(action: onBack) {
@@ -736,13 +928,14 @@ struct AppExplorerView: View {
         .animation(feedback, value: names)
     }
 
-    private func starburstChoice(_ direction: SwipeDirection, depth: Int, center: CGPoint) -> some View {
+    private func starburstChoice(_ direction: ExplorerSlot, depth: Int, center: CGPoint) -> some View {
         let entry = model.entries.first { $0.direction == direction }
         let available = isAvailable(entry)
         let selected = model.selected == direction && available
         let shape = ExplorerStarburstSector(direction: direction,
-            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: 11)
-        let point = ExplorerStarburstLayout.point(direction, radius: 116, center: center)
+            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: 11,
+            halfAngle: 180 / Double(model.slotCount) - 2)
+        let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
         return Button { onSelect(direction) } label: {
             ZStack {
                 shape.fill(LinearGradient(colors: [accent.opacity(selected ? 0.38 : 0.08),
@@ -750,16 +943,16 @@ struct AppExplorerView: View {
                 shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
                 VStack(spacing: 3) {
                     if let entry {
-                        entrySymbol(entry).scaleEffect(0.55).frame(width: 24, height: 24)
-                        Text(entry.name).font(.system(size: 9, weight: .medium))
+                        entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
+                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: .medium))
                             .lineLimit(2).multilineTextAlignment(.center)
                     } else {
                         Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
                 }
-                .frame(width: 78, height: 50)
-                .foregroundStyle(selected ? Color.white : Color.white.opacity(0.85))
+                .frame(width: model.slotCount > 8 ? 45 : 78, height: model.slotCount > 8 ? 40 : 50)
+                .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(0.85)) : Color.primary)
                 .position(point)
             }
             .frame(width: 418, height: 310)
@@ -775,11 +968,15 @@ struct AppExplorerView: View {
     private func isAvailable(_ entry: ExplorerEntry?) -> Bool {
         guard let entry else { return false }
         return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
-            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil
+            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.command != nil || entry.windowIndex != nil
     }
 
     @ViewBuilder private func entrySymbol(_ entry: ExplorerEntry) -> some View {
-        if entry.isMediaControls || entry.mediaAction != nil {
+        if let command = entry.command {
+            Image(systemName: command.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.windowIndex != nil {
+            Image(systemName: "macwindow").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.isMediaControls || entry.mediaAction != nil {
             Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if entry.shortcut != nil {
             Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
@@ -796,21 +993,11 @@ struct AppExplorerView: View {
         }
     }
 
-    private func reticleAngle(_ direction: SwipeDirection?) -> Double {
-        switch direction {
-        case .up: return -135
-        case .topRight: return -90
-        case .right: return -45
-        case .bottomRight: return 0
-        case .down: return 45
-        case .bottomLeft: return 90
-        case .left: return 135
-        case .topLeft: return 180
-        case nil: return -135
-        }
+    private func reticleAngle(_ direction: ExplorerSlot?) -> Double {
+        (direction?.angle ?? -90) - 45
     }
 
-    private func tile(_ direction: SwipeDirection) -> some View {
+    private func tile(_ direction: ExplorerSlot) -> some View {
         let entry = model.entries.first { $0.direction == direction }
         let available = isAvailable(entry)
         let selected = model.selected == direction && available

@@ -55,6 +55,9 @@ xcrun swiftc "${common[@]}" Rotagivan/Tests/SwipeDirectionTests.swift -o "$test_
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/AppExplorerSelection.swift \
   Rotagivan/Tests/AppExplorerTests.swift -o "$test_dir/AppExplorerTests"
 "$test_dir/AppExplorerTests"
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/AppExplorerSelection.swift \
+  Rotagivan/Tests/ExplorerCapacityTests.swift -o "$test_dir/ExplorerCapacityTests"
+"$test_dir/ExplorerCapacityTests"
 xcrun swiftc "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/Tests/ExplorerApplicationCatalogTests.swift \
   -framework AppKit -o "$test_dir/ExplorerApplicationCatalogTests"
 "$test_dir/ExplorerApplicationCatalogTests"

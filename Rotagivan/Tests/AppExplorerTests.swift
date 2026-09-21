@@ -25,7 +25,7 @@ import Foundation
         precondition(settings.favorite(at: [.down, .right])?.bundleID == app.bundleID)
         precondition(settings.favorite(at: [.down, .left])?.url == web.url)
         let stable = settings
-        for path: [SwipeDirection] in [[.up], [.topLeft], [.down, .right]] {
+        for path: [ExplorerSlot] in [[.up], [.topLeft], [.down, .right]] {
             precondition(!settings.swapFavorites(from: .left, to: .right, in: path))
             precondition(ExplorerSlotDrag(source: .left, path: path, settings: settings) == nil)
         }
@@ -40,9 +40,9 @@ import Foundation
         precondition(settings == changed, "Concurrent changes are never overwritten")
         let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
         precondition(restored == settings)
-        for source in SwipeDirection.allCases {
-            for destination in SwipeDirection.allCases where source != destination {
-                var full = AppExplorerSettings(favorites: SwipeDirection.allCases.map {
+        for source in ExplorerSlot.allCases {
+            for destination in ExplorerSlot.allCases where source != destination {
+                var full = AppExplorerSettings(favorites: ExplorerSlot.allCases.map {
                     AppExplorerFavorite(direction: $0, bundleID: "test.\($0.rawValue)", name: $0.title)
                 })
                 precondition(full.swapFavorites(from: source, to: destination))
@@ -164,9 +164,9 @@ import Foundation
         precondition(AppExplorerSettings(favorites: [chain]).hasValidFavorites)
         chain = AppExplorerFavorite(direction: .left, name: "Too deep", children: [chain])
         precondition(!AppExplorerSettings(favorites: [chain]).hasValidFavorites)
-        let eight = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, bundleID: "com.apple.Safari", name: "Safari") }
-        let sixtyFour = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: eight) }
-        let excessive = SwipeDirection.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: sixtyFour) }
+        let eight = ExplorerSlot.allCases.map { AppExplorerFavorite(direction: $0, bundleID: "com.apple.Safari", name: "Safari") }
+        let sixtyFour = ExplorerSlot.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: eight) }
+        let excessive = ExplorerSlot.allCases.map { AppExplorerFavorite(direction: $0, name: "Group", children: sixtyFour) }
         precondition(!AppExplorerSettings(favorites: excessive).hasValidFavorites)
         let time = Date(timeIntervalSince1970: 1_000)
         var centerTap = AppExplorerSelection(waitingForLift: false)
@@ -177,7 +177,7 @@ import Foundation
         var hold = AppExplorerSelection(waitingForLift: false)
         _ = hold.process(report(500), at: time)
         precondition(hold.process(report(), at: time.addingTimeInterval(0.6)) == .cancel, "A hold is not a back tap")
-        let directions: [(SwipeDirection, Double, Double)] = [(.up,500,400),(.topRight,600,400),(.right,600,500),(.bottomRight,600,600),(.down,500,600),(.bottomLeft,400,600),(.left,400,500),(.topLeft,400,400)]
+        let directions: [(ExplorerSlot, Double, Double)] = [(.up,500,400),(.topRight,600,400),(.right,600,500),(.bottomRight,600,600),(.down,500,600),(.bottomLeft,400,600),(.left,400,500),(.topLeft,400,400)]
         for (direction, x, y) in directions {
             var input = AppExplorerSelection(waitingForLift: true)
             precondition(input.process(report(500)) == .waiting)

@@ -21,9 +21,13 @@ struct AppOverridesView: View {
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             if !apps.isEmpty {
-                Picker("Application", selection: $selected) {
-                    ForEach(apps) { Text($0.name).tag($0.bundleID) }
-                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(apps) { app in
+                        AppOverrideChip(app: app, isSelected: selected == app.bundleID) {
+                            selected = app.bundleID
+                        }
+                    }
+                }.accessibilityLabel("Applications with overrides")
             }
             if let app {
                 HStack {
@@ -116,5 +120,45 @@ struct AppOverridesView: View {
         }
         selected = id
         error = nil
+    }
+}
+
+private struct AppOverrideChip: View {
+    let app: AppGestureOverride
+    let isSelected: Bool
+    let onSelect: () -> Void
+    @State private var icon: NSImage?
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Group {
+                    if let icon { Image(nsImage: icon).resizable() }
+                    else { Image(systemName: "app.dashed").resizable().foregroundStyle(.secondary) }
+                }
+                .scaledToFit().frame(width: 24, height: 24).accessibilityHidden(true)
+                Text(app.name).font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.teal).opacity(isSelected ? 1 : 0).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(isSelected ? Color.teal.opacity(0.13) : Color(nsColor: .controlBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? Color.teal.opacity(0.55) : Color.primary.opacity(0.09), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .help("\(app.name) · \(app.bundleID)\(app.enabled ? "" : " · Overrides disabled")")
+        .accessibilityLabel(app.name)
+        .accessibilityValue(app.enabled ? "Overrides enabled" : "Overrides disabled")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityIdentifier("app-override-chip-\(app.bundleID)")
+        .task(id: app.bundleID) {
+            // Resolve once per chip, not on every gesture or settings refresh.
+            icon = ExplorerApplicationCatalog.applicationURL(for: app.bundleID)
+                .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        }
     }
 }

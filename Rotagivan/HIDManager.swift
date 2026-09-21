@@ -42,6 +42,13 @@ final class NavigatorHIDManager: ObservableObject {
     private var explorerProfileID: UInt32?
     private var explorerSettings: ProfileGestures?
     private var appObserver: NSObjectProtocol?
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
+    private var pendingAppleHUD: Timer?
+    private var appleClickVetoUntil: TimeInterval = 0
+    private var appleClickDraining = false
+    private let appleHUDDelay: TimeInterval
+    private var nextAppleTrustCheck: TimeInterval = 0
 
     var isCalibrating: Bool { calibrationCapturing }
     var canCalibrate: Bool {
@@ -57,12 +64,14 @@ final class NavigatorHIDManager: ObservableObject {
 
     init(store: SettingsStore, gestures: GestureEngine? = nil, explorer: (any AppExplorerPresenting)? = nil,
          appleGestures: GestureEngine? = nil, inputPreferences: UserDefaults = .standard,
-         explorerPointer: (any ExplorerPointerControlling)? = nil) {
+         explorerPointer: (any ExplorerPointerControlling)? = nil,
+         appleHUDDelay: TimeInterval = 0.08) {
         self.store = store
         self.gestures = gestures ?? GestureEngine(store: store)
         self.appleGestures = appleGestures ?? GestureEngine(store: store, inputMode: .nativeActions)
         self.inputPreferences = inputPreferences
         self.explorerPointer = explorerPointer ?? ExplorerPointerLock()
+        self.appleHUDDelay = appleHUDDelay
         appleTrackpadEnabled = inputPreferences.bool(forKey: "input.appleTrackpadActions")
         self.explorerPointer.onInterruption = { [weak self] in
             self?.explorer?.dismiss()
@@ -70,11 +79,17 @@ final class NavigatorHIDManager: ObservableObject {
         appleInput.onStatus = { [weak self] status in self?.appleStatusChanged(status) }
         appleInput.onReport = { [weak self] identity, report, scale, time in
             guard let self, self.started, self.appleTrackpadEnabled, self.store.settings.enabled else { return }
-            guard AXIsProcessTrusted() else {
-                self.appleInput.stop()
-                self.resetAppleSession()
-                self.appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
-                return
+            // Accessibility is process-wide, not per touch. Avoid a trust query
+            // on every high-frequency Apple frame sharing Navigator's run loop.
+            if time >= self.nextAppleTrustCheck {
+                self.nextAppleTrustCheck = time + 1
+                guard AXIsProcessTrusted() else {
+                    self.stopClickObservation()
+                    self.appleInput.stop()
+                    self.resetAppleSession()
+                    self.appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
+                    return
+                }
             }
             self.appleDistanceScale = scale
             // Observation only. A held mouse button conservatively vetoes tap
@@ -115,8 +130,8 @@ final class NavigatorHIDManager: ObservableObject {
             }
             self.gestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
             self.gestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
-            self.appleGestures.onAppExplorer = { [weak self] in self?.openAppExplorer() }
-            self.appleGestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
+            self.appleGestures.onAppExplorer = { [weak self] in self?.scheduleAppleHUD() }
+            self.appleGestures.onWindowManager = { [weak self] in self?.scheduleAppleHUD(windowManager: true) }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
@@ -137,6 +152,9 @@ final class NavigatorHIDManager: ObservableObject {
 
     deinit {
         if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
+        if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        pendingAppleHUD?.invalidate()
     }
 
     func foregroundAppChanged(_ bundleID: String?) {
@@ -146,6 +164,7 @@ final class NavigatorHIDManager: ObservableObject {
             return
         }
         explorer?.dismiss()
+        cancelAppleHUD()
         gestures.reset()
         appleGestures.reset()
         suppressUntilLift = contactsDown
@@ -155,6 +174,9 @@ final class NavigatorHIDManager: ObservableObject {
     private func openAppExplorer(windowManager: Bool = false) {
         guard explorer?.isEditing != true else { return }
         guard store.settings.enabled, !calibrationCapturing else { return }
+        cancelAppleHUD()
+        gestures.reset()
+        appleGestures.reset()
         explorerProfileID = store.activeProfileID
         explorerSettings = store.activeGestures
         explorerConfiguration = store.settings.appExplorer
@@ -162,6 +184,65 @@ final class NavigatorHIDManager: ObservableObject {
         if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
         else { explorer?.show(waitingForLift: contactsDown) }
         updateExplorerPointer()
+    }
+
+    private func cancelAppleHUD() {
+        pendingAppleHUD?.invalidate()
+        pendingAppleHUD = nil
+    }
+
+    // Native click events can arrive after the raw touch-lift callback. Give
+    // macOS a short arbitration window before presenting a touch-triggered HUD.
+    private func scheduleAppleHUD(windowManager: Bool = false) {
+        guard let source = inputRouting.source, source.isApple,
+              ProcessInfo.processInfo.systemUptime >= appleClickVetoUntil else { return }
+        cancelAppleHUD()
+        let profile = store.activeProfileID
+        let configuration = store.activeGestures
+        let open = { [weak self] in
+            guard let self else { return }
+            self.pendingAppleHUD = nil
+            guard self.inputRouting.source == source, self.store.activeProfileID == profile,
+                  self.store.activeGestures == configuration,
+                  ProcessInfo.processInfo.systemUptime >= self.appleClickVetoUntil else { return }
+            self.openAppExplorer(windowManager: windowManager)
+        }
+        if appleHUDDelay == 0 { open(); return } // Deterministic input-fixture seam.
+        let timer = Timer(timeInterval: appleHUDDelay, repeats: false) { _ in
+            MainActor.assumeIsolated { open() }
+        }
+        pendingAppleHUD = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    // Passive mouse-down observation covers clicks between raw touch frames,
+    // including native secondary tap-to-click. Never consumes the mouse event.
+    func nativeClickObserved() {
+        guard appleTrackpadEnabled else { return }
+        appleClickVetoUntil = ProcessInfo.processInfo.systemUptime + 0.12
+        appleClickDraining = inputRouting.source?.isApple == true && contactsDown
+        cancelAppleHUD()
+        appleGestures.reset()
+    }
+
+    private func startClickObservation() {
+        guard globalClickMonitor == nil, localClickMonitor == nil else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            MainActor.assumeIsolated { self?.nativeClickObserved() }
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            MainActor.assumeIsolated { self?.nativeClickObserved() }
+            return event
+        }
+    }
+
+    private func stopClickObservation() {
+        if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        globalClickMonitor = nil
+        localClickMonitor = nil
+        cancelAppleHUD()
     }
 
     private func updateExplorerPointer() {
@@ -203,6 +284,7 @@ final class NavigatorHIDManager: ObservableObject {
 
     // Separate from connection setup so the input gate can be tested without a physical device.
     func startCalibrationSession(_ session: GestureCalibrationSession, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        cancelAppleHUD()
         explorer?.dismiss()
         endCalibration()
         gestures.reset()
@@ -326,6 +408,7 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func stop() {
+        stopClickObservation()
         explorerPointer.setLocked(false)
         let wasTouching = contactsDown
         started = false
@@ -461,7 +544,11 @@ final class NavigatorHIDManager: ObservableObject {
         }
         guard inputRouting.accept(source, touching: touching, lockedTo: lock) else { return }
         if previousSource != inputRouting.source {
-            gestures.reset()
+            // The two engines have separate contact state. An Apple touch must
+            // not cancel Navigator cursor falloff or scroll momentum. Discrete
+            // pending taps still cancel rather than firing under a new owner.
+            cancelAppleHUD()
+            gestures.cancelPendingActionsForSourceChange()
             appleGestures.reset()
         }
         contactsDown = inputRouting.contactsDown
@@ -486,6 +573,18 @@ final class NavigatorHIDManager: ObservableObject {
             if !contactsDown { suppressUntilLift = false }
             return
         }
+        if source.isApple {
+            if report.buttonDown || ProcessInfo.processInfo.systemUptime < appleClickVetoUntil {
+                cancelAppleHUD()
+                appleGestures.reset()
+                appleClickDraining = touching
+                return
+            }
+            if appleClickDraining {
+                appleClickDraining = touching
+                return
+            }
+        }
         if source.isApple { appleGestures.process(report, receivedAt: receivedAt) }
         else { gestures.process(report, receivedAt: receivedAt) }
     }
@@ -499,6 +598,7 @@ final class NavigatorHIDManager: ObservableObject {
             started = true
             startAppleInput()
         } else {
+            stopClickObservation()
             appleInput.stop()
             appleTrackpadStatus = enabled ? "Rotagivan is disabled" : "Disabled on this Mac"
             resetAppleSession()
@@ -511,10 +611,13 @@ final class NavigatorHIDManager: ObservableObject {
             appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
             return
         }
+        startClickObservation()
         appleInput.start()
     }
 
     private func resetAppleSession() {
+        cancelAppleHUD()
+        appleClickDraining = false
         appleGestures.reset()
         if inputRouting.source?.isApple == true {
             let interruptedSource = contactsDown ? inputRouting.source : nil

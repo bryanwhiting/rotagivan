@@ -74,7 +74,7 @@ private final class CalibrationPoster: GestureEventPosting {
     var appleEngine: GestureEngine!
     var hid: NavigatorHIDManager!
 
-    init(appleActionsEnabled: Bool = false) {
+    init(appleActionsEnabled: Bool = false, appleHUDDelay: TimeInterval = 0) {
         preferences = UserDefaults(suiteName: suite)!
         preferences.set(true, forKey: "migration.rotagivan.v1")
         preferences.set(appleActionsEnabled, forKey: "input.appleTrackpadActions")
@@ -94,7 +94,8 @@ private final class CalibrationPoster: GestureEventPosting {
         engine = GestureEngine(store: store, poster: poster, clock: { [unowned self] in self.now })
         appleEngine = GestureEngine(store: store, poster: applePoster, clock: { [unowned self] in self.now }, inputMode: .nativeActions)
         hid = NavigatorHIDManager(store: store, gestures: engine, explorer: explorer,
-            appleGestures: appleEngine, inputPreferences: preferences, explorerPointer: pointer)
+            appleGestures: appleEngine, inputPreferences: preferences, explorerPointer: pointer,
+            appleHUDDelay: appleHUDDelay)
     }
 
     func begin(_ mode: GestureCalibrationMode = .doubleTap) -> GestureCalibrationSession {
@@ -110,9 +111,10 @@ private final class CalibrationPoster: GestureEventPosting {
         hid.receive(TrackpadReport(contacts: contacts, buttonDown: button, scanTime: 0), at: start + time)
     }
 
-    func sendApple(_ time: Double, x: Double? = nil, y: Double = 500, deviceID: UInt64 = 42) {
+    func sendApple(_ time: Double, x: Double? = nil, y: Double = 500, deviceID: UInt64 = 42, twoFingers: Bool = false) {
         now = Date(timeIntervalSince1970: start + time)
-        let contacts = x.map { [FingerContact(id: 0, x: $0, y: y, touching: true, confident: true)] } ?? []
+        var contacts = x.map { [FingerContact(id: 0, x: $0, y: y, touching: true, confident: true)] } ?? []
+        if twoFingers, let x { contacts.append(FingerContact(id: 1, x: x + 100, y: y, touching: true, confident: true)) }
         hid.receive(TrackpadReport(contacts: contacts, buttonDown: false, scanTime: 0),
             from: .apple(deviceID), at: start + time)
     }
@@ -145,6 +147,60 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        for action in [TapAction.appExplorer, .windowManager] {
+            for clickAfterLift in [false, true] {
+                let f = CalibrationFixture(appleActionsEnabled: true, appleHUDDelay: 0.08)
+                var taps = f.store.activeGestures
+                taps.twoFingerTap = action
+                taps.twoFingerDoubleTap = TapAction.none
+                taps.twoFingerTripleTap = TapAction.none
+                taps.twoFingerSingleTapSwipe = nil
+                taps.twoFingerDoubleTapSwipe = nil
+                f.store.updateGestures(taps, for: 1)
+                f.sendApple(1, x: 500, twoFingers: true)
+                if !clickAfterLift { f.hid.nativeClickObserved() }
+                f.sendApple(1.03)
+                precondition(!f.explorer.isVisible, "Apple HUD waits for native click arbitration")
+                if clickAfterLift { f.hid.nativeClickObserved() }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.16))
+                precondition(!f.explorer.isVisible && !f.pointer.locked, "Native secondary click wins before or just after touch lift")
+                f.sendApple(2, x: 500, twoFingers: true); f.sendApple(2.03)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+                precondition(f.explorer.isVisible, "A fresh intentional gesture still opens the HUD")
+                f.explorer.dismiss()
+                f.finish()
+            }
+        }
+        check { f in
+            var taps = f.store.activeGestures
+            taps.gestures.tapToClick = false
+            taps.twoFingerSwipe = nil
+            f.store.updateGestures(taps, for: 1)
+            f.sendApple(1, x: 500) // Finger resting on the built-in trackpad.
+            f.send(1.01, x: 500); f.send(1.03, x: 650)
+            precondition(f.poster.moves > 0, "Resting Apple finger must not starve Navigator cursor reports")
+            f.send(1.04)
+            f.sendApple(1.05, x: 500); f.sendApple(1.06)
+            f.store.settings.normal.kineticScroll = true
+            f.store.settings.normal.kineticDecay = 0.95
+            f.store.settings.normal.scrollMultiplier = 1
+            @MainActor func scroll(_ t: Double, y: Double?) {
+                f.now = Date(timeIntervalSince1970: f.start + t)
+                let contacts = y.map { y in [
+                    FingerContact(id: 0, x: 500, y: y, touching: true, confident: true),
+                    FingerContact(id: 1, x: 650, y: y, touching: true, confident: true)
+                ] } ?? []
+                f.hid.receive(TrackpadReport(contacts: contacts, buttonDown: false, scanTime: 0), at: f.start + t)
+            }
+            scroll(2, y: 500); scroll(2.02, y: 530); scroll(2.04, y: 565); scroll(2.06, y: 610); scroll(2.08, y: nil)
+            let before = f.poster.scrolls
+            precondition(before > 0)
+            f.sendApple(2.09, x: 500)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+            precondition(f.poster.scrolls > before, "Apple touch must not reset Navigator's scroll momentum")
+            f.sendApple(2.2)
+        }
+        print("Native click arbitration and Navigator priority/momentum regression tests passed.")
         for action in [TapAction.appExplorer, .windowManager] {
             let f = CalibrationFixture(appleActionsEnabled: true)
             var taps = f.store.activeGestures

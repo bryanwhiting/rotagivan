@@ -173,6 +173,16 @@ final class GestureEngine {
         if synthesizesPointerEvents { store.cursorTelemetry.reset() }
     }
 
+    // Switching input devices invalidates discrete gesture sequences, but is
+    // not a new Navigator touch: preserve its cursor tail and scroll coasting.
+    func cancelPendingActionsForSourceChange() {
+        cancelPendingTap()
+        cancelTapSwipe(blockUntilLift: false)
+        cancelTapDragCandidate()
+        lastTap = .distantPast
+        lastTapProfileID = nil
+    }
+
     func process(_ report: TrackpadReport, receivedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard store.settings.enabled else { reset(); return }
         if !synthesizesPointerEvents {

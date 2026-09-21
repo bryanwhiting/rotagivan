@@ -7,10 +7,11 @@ import Foundation
         let otherApple = TrackpadInputSource.apple(8)
         precondition(!gate.accept(.navigator, touching: false), "Idle frames cannot claim a session")
         precondition(gate.accept(apple, touching: true))
-        precondition(!gate.accept(.navigator, touching: true), "Do not combine devices")
-        precondition(gate.accept(apple, touching: false))
-        precondition(!gate.accept(.navigator, touching: true), "Drain a competing contact until it lifts")
-        precondition(!gate.accept(.navigator, touching: false))
+        precondition(gate.accept(.navigator, touching: true), "Navigator preempts a resting Apple contact outside a HUD")
+        precondition(!gate.accept(apple, touching: true), "Preempted Apple contact drains until lift")
+        precondition(gate.accept(.navigator, touching: false))
+        precondition(!gate.accept(apple, touching: true))
+        precondition(!gate.accept(apple, touching: false))
         precondition(gate.accept(.navigator, touching: true))
         precondition(gate.source == .navigator)
         precondition(gate.accept(.navigator, touching: false))
@@ -26,6 +27,7 @@ import Foundation
         precondition(!gate.accept(otherApple, touching: true), "Restart drains a contact inherited from the old stream")
         precondition(!gate.accept(otherApple, touching: false))
         precondition(gate.accept(otherApple, touching: true), "Fresh contact works after restart lift")
+        precondition(!gate.accept(.navigator, touching: true, lockedTo: otherApple), "Navigator cannot preempt a source-locked HUD/calibration")
         print("Trackpad input routing passed: device ownership, competing-contact draining, HUD/calibration locks, and reset.")
     }
 }

@@ -54,11 +54,19 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   There is no cursor warping or persistent change to pointer association.
 - Native gestures can happen **alongside** a Rotagivan binding. Choose bindings
   that do not conflict with macOS/app gestures, or change those gestures yourself
-  in System Settings. A physical click may also resemble a configured tap to the
-  private touch interface; custom actions do not replace native clicking.
+  in System Settings. Native mouse-down events cancel pending Apple gestures; a short
+  80 ms arbitration window before touch-triggered HUDs lets secondary clicks
+  arrive even after the raw finger-lift frame. Both physical clicks and macOS
+  secondary tap-to-click take priority over opening a HUD. Custom actions do not
+  replace native clicking. Mouse buttons are observed globally, so a simultaneous
+  click on another mouse also conservatively cancels an Apple gesture.
 - Calibration accepts either trackpad and locks each session to its first device.
   Explorer similarly locks to the triggering/first trackpad. Concurrent touches
   from different devices cannot combine into a gesture.
+- Outside a HUD or calibration, Navigator takes priority over a resting Apple
+  finger. The interrupted Apple contact is ignored until lift. Apple touches do
+  not reset Navigator's cursor falloff or kinetic scrolling, and no speed,
+  acceleration, or saved layer values are changed by this arbitration.
 
 This feature dynamically loads Apple's **private, undocumented MultitouchSupport
 framework**, because the public event APIs do not supply system-wide raw contacts

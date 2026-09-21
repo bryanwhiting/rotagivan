@@ -28,10 +28,15 @@ struct TrackpadInputRouting {
             return false
         }
         if source != candidate {
-            guard !contactsDown, touching else {
+            // Outside a HUD/calibration, a resting Apple finger must never
+            // starve Navigator's cursor/scroll reports. Discard that Apple
+            // contact until lift instead of splicing it into a later gesture.
+            let navigatorPriority = candidate == .navigator && lockedTo == nil && touching
+            guard touching, !contactsDown || navigatorPriority else {
                 if touching { drain.insert(candidate) }
                 return false
             }
+            if contactsDown, let source { drain.insert(source) }
             source = candidate
         }
         contactsDown = touching

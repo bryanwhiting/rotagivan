@@ -9,12 +9,12 @@
     <key>CFBundleName</key><string>Rotagivan</string>
     <key>CFBundleIconFile</key><string>Rotagivan</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.1.83</string>
-  <key>CFBundleVersion</key><string>85</string>
+  <key>CFBundleShortVersionString</key><string>1.1.84</string>
+  <key>CFBundleVersion</key><string>86</string>
     <key>RotagivanSyncURL</key><string>https://rotagivan-sync.bryan-b4b.workers.dev</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSInputMonitoringUsageDescription</key><string>Rotagivan reads ZSA Navigator touch reports and, when enabled, Apple trackpad touches for gesture actions. Native Apple cursor movement and scrolling are unchanged.</string>
+    <key>NSInputMonitoringUsageDescription</key><string>Rotagivan reads ZSA Navigator touch reports and, when enabled, Apple trackpad touches for gesture actions. Pointer movement pauses while an Apple-controlled App Explorer or Window Manager is open; normal movement resumes when it closes or enters editing.</string>
     <key>NSHumanReadableCopyright</key><string>Independent trackpad utility</string>
 </dict>
 </plist>

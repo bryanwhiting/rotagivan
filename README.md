@@ -37,10 +37,21 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   Explorer hold layers, tiling sizes, and media controls remain available.
 - macOS still owns Apple pointer acceleration, scrolling/momentum, clicks, and
   dragging. Rotagivan does **not** post extra mouse events for Apple touches,
-  change System Settings, seize the device, or block native gestures.
+  change System Settings, or seize the device.
   Navigator motion/scroll sliders and synthetic click/drag bindings do not apply
   to the Apple trackpad. Click bindings remain macOS's responsibility, including
   its own “Tap to click” preference.
+- While an Apple-controlled **App Explorer or Window Manager** is open, a temporary
+  motion-only event filter holds the pointer still so swipes select HUD actions
+  without moving it. Closing the HUD, entering inline editing, disconnecting,
+  disabling Apple actions, or stopping Rotagivan releases the filter. Done in the
+  editor resumes HUD selection. A keyboard-opened HUD also pauses movement when
+  an Apple trackpad is connected, until a different input source takes ownership.
+  macOS has a shared pointer, so other mice also pause during this interval;
+  clicks, scrolling, and keys are not filtered. Navigator-owned HUDs are unchanged.
+  This requires Accessibility permission. If capture fails the HUD closes with a
+  status message; if macOS disables the filter, movement resumes and the HUD closes.
+  There is no cursor warping or persistent change to pointer association.
 - Native gestures can happen **alongside** a Rotagivan binding. Choose bindings
   that do not conflict with macOS/app gestures, or change those gestures yourself
   in System Settings. A physical click may also resemble a configured tap to the

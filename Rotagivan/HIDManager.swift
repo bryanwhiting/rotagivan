@@ -23,6 +23,7 @@ final class NavigatorHIDManager: ObservableObject {
     private let inputPreferences: UserDefaults
     private let appleInput = AppleTrackpadInput()
     private let appleGestures: GestureEngine
+    private let explorerPointer: any ExplorerPointerControlling
     private var inputRouting = TrackpadInputRouting()
     private var explorerSource: TrackpadInputSource?
     private var calibrationSource: TrackpadInputSource?
@@ -55,12 +56,17 @@ final class NavigatorHIDManager: ObservableObject {
     private var reportBuffer = [UInt8](repeating: 0, count: 64)
 
     init(store: SettingsStore, gestures: GestureEngine? = nil, explorer: (any AppExplorerPresenting)? = nil,
-         appleGestures: GestureEngine? = nil, inputPreferences: UserDefaults = .standard) {
+         appleGestures: GestureEngine? = nil, inputPreferences: UserDefaults = .standard,
+         explorerPointer: (any ExplorerPointerControlling)? = nil) {
         self.store = store
         self.gestures = gestures ?? GestureEngine(store: store)
         self.appleGestures = appleGestures ?? GestureEngine(store: store, inputMode: .nativeActions)
         self.inputPreferences = inputPreferences
+        self.explorerPointer = explorerPointer ?? ExplorerPointerLock()
         appleTrackpadEnabled = inputPreferences.bool(forKey: "input.appleTrackpadActions")
+        self.explorerPointer.onInterruption = { [weak self] in
+            self?.explorer?.dismiss()
+        }
         appleInput.onStatus = { [weak self] status in self?.appleStatusChanged(status) }
         appleInput.onReport = { [weak self] identity, report, scale, time in
             guard let self, self.started, self.appleTrackpadEnabled, self.store.settings.enabled else { return }
@@ -93,6 +99,7 @@ final class NavigatorHIDManager: ObservableObject {
         if gestures == nil || explorer != nil {
             let explorer: any AppExplorerPresenting = explorer ?? AppExplorerController()
             self.explorer = explorer
+            explorer.onPresentationChanged = { [weak self] in self?.updateExplorerPointer() }
             (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
             (explorer as? AppExplorerController)?.editingStore = store
             (explorer as? AppExplorerController)?.onEditingChanged = { [weak self] editing in
@@ -115,6 +122,7 @@ final class NavigatorHIDManager: ObservableObject {
                 self.gestures.reset()
                 self.appleGestures.reset()
                 self.explorerSource = nil
+                self.explorerPointer.setLocked(false)
                 self.suppressUntilLift = self.contactsDown
             }
             explorer.contextIsValid = { [weak self] in
@@ -153,6 +161,19 @@ final class NavigatorHIDManager: ObservableObject {
         explorerSource = inputRouting.source
         if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
         else { explorer?.show(waitingForLift: contactsDown) }
+        updateExplorerPointer()
+    }
+
+    private func updateExplorerPointer() {
+        let lock = ExplorerPointerLock.shouldLock(enabled: store.settings.enabled,
+            appleEnabled: appleTrackpadEnabled, visible: explorer?.isVisible == true,
+            editing: explorer?.isEditing == true, owner: explorerSource,
+            appleConnected: appleTrackpadConnected)
+        guard explorerPointer.setLocked(lock) else {
+            appleTrackpadStatus = "Could not hold the pointer still. Check Accessibility permission and Reconnect."
+            explorer?.dismiss()
+            return
+        }
     }
 
     func explorerHold(_ down: Bool) {
@@ -166,6 +187,7 @@ final class NavigatorHIDManager: ObservableObject {
             openAppExplorer()
             // A keyboard-opened HUD may be controlled by either trackpad.
             explorerSource = nil
+            updateExplorerPointer()
         } else {
             if explorer?.isEditing != true { explorer?.dismiss() }
             explorer?.setAlternateHeld(false)
@@ -304,6 +326,7 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func stop() {
+        explorerPointer.setLocked(false)
         let wasTouching = contactsDown
         started = false
         appleInput.stop()
@@ -445,6 +468,8 @@ final class NavigatorHIDManager: ObservableObject {
         distanceScale = source.isApple ? appleDistanceScale : navigatorDistanceScale
         if explorer?.isVisible == true {
             if explorerSource == nil { explorerSource = source }
+            updateExplorerPointer()
+            guard explorer?.isVisible == true else { return }
             explorer?.process(report)
             if explorer?.isEditing != true { return }
         }
@@ -468,6 +493,7 @@ final class NavigatorHIDManager: ObservableObject {
     func setAppleTrackpadEnabled(_ enabled: Bool) {
         guard appleTrackpadEnabled != enabled else { return }
         appleTrackpadEnabled = enabled
+        updateExplorerPointer()
         inputPreferences.set(enabled, forKey: "input.appleTrackpadActions")
         if enabled, store.settings.enabled {
             started = true
@@ -515,6 +541,9 @@ final class NavigatorHIDManager: ObservableObject {
             }
         }
         if !appleTrackpadConnected { resetAppleSession() }
+        // A keyboard-opened HUD can be waiting for its first touch with no owner.
+        // Release its preemptive pointer capture if the Apple device disappears.
+        updateExplorerPointer()
     }
 
     nonisolated private static let deviceMatched: IOHIDDeviceCallback = { context, _, _, device in

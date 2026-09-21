@@ -2,8 +2,9 @@ import Foundation
 import CoreGraphics
 
 @MainActor private final class ExplorerStub: AppExplorerPresenting {
-    var isVisible = false
-    var isEditing = false
+    var isVisible = false { didSet { onPresentationChanged?() } }
+    var isEditing = false { didSet { onPresentationChanged?() } }
+    var onPresentationChanged: (() -> Void)?
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     var input = AppExplorerSelection(waitingForLift: false)
@@ -35,6 +36,16 @@ import CoreGraphics
     }
 }
 
+@MainActor private final class PointerStub: ExplorerPointerControlling {
+    var onInterruption: (() -> Void)?
+    var locked = false
+    var failCapture = false
+    @discardableResult func setLocked(_ value: Bool) -> Bool {
+        locked = value && !failCapture
+        return !value || !failCapture
+    }
+}
+
 private final class CalibrationPoster: GestureEventPosting {
     var dragging = false
     var actions = 0
@@ -56,15 +67,17 @@ private final class CalibrationPoster: GestureEventPosting {
     let poster = CalibrationPoster()
     let applePoster = CalibrationPoster()
     let explorer = ExplorerStub()
+    let pointer = PointerStub()
     let start = ProcessInfo.processInfo.systemUptime
     var now = Date()
     var engine: GestureEngine!
     var appleEngine: GestureEngine!
     var hid: NavigatorHIDManager!
 
-    init() {
+    init(appleActionsEnabled: Bool = false) {
         preferences = UserDefaults(suiteName: suite)!
         preferences.set(true, forKey: "migration.rotagivan.v1")
+        preferences.set(appleActionsEnabled, forKey: "input.appleTrackpadActions")
         store = SettingsStore(defaults: preferences)
         store.settings.defaultProfileID = 1
         store.setActiveProfile(1)
@@ -81,7 +94,7 @@ private final class CalibrationPoster: GestureEventPosting {
         engine = GestureEngine(store: store, poster: poster, clock: { [unowned self] in self.now })
         appleEngine = GestureEngine(store: store, poster: applePoster, clock: { [unowned self] in self.now }, inputMode: .nativeActions)
         hid = NavigatorHIDManager(store: store, gestures: engine, explorer: explorer,
-            appleGestures: appleEngine, inputPreferences: preferences)
+            appleGestures: appleEngine, inputPreferences: preferences, explorerPointer: pointer)
     }
 
     func begin(_ mode: GestureCalibrationMode = .doubleTap) -> GestureCalibrationSession {
@@ -132,6 +145,48 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        for action in [TapAction.appExplorer, .windowManager] {
+            let f = CalibrationFixture(appleActionsEnabled: true)
+            var taps = f.store.activeGestures
+            taps.oneFingerTap = action
+            f.store.updateGestures(taps, for: 1)
+            f.sendApple(1, x: 500); f.sendApple(1.03)
+            precondition(f.pointer.locked && f.explorer.isVisible, "Apple-opened HUD holds the pointer still")
+            f.explorer.isEditing = true
+            precondition(!f.pointer.locked, "Editing always restores pointer control")
+            f.explorer.isEditing = false
+            precondition(f.pointer.locked, "Returning to the gesture HUD recaptures the pointer")
+            f.sendApple(1.1, x: 500); f.sendApple(1.14, x: 600); f.sendApple(1.18)
+            precondition(f.explorer.selections == [.right] && !f.pointer.locked, "Selection releases capture")
+            f.sendApple(2, x: 500); f.sendApple(2.03)
+            f.pointer.locked = false; f.pointer.onInterruption?()
+            precondition(!f.explorer.isVisible, "System tap disable cancels the HUD without recapturing")
+            f.pointer.failCapture = true
+            f.sendApple(3, x: 500); f.sendApple(3.03)
+            precondition(!f.explorer.isVisible && !f.pointer.locked)
+            precondition(f.hid.appleTrackpadStatus.contains("Could not hold"))
+            f.pointer.failCapture = false
+            f.sendApple(4, x: 500); f.sendApple(4.03)
+            precondition(f.pointer.locked)
+            f.hid.stop()
+            precondition(!f.pointer.locked)
+            f.send(5, x: 500); f.send(5.03)
+            precondition(f.explorer.isVisible && !f.pointer.locked, "Navigator never freezes the native pointer")
+            f.explorer.dismiss()
+            f.finish()
+        }
+        do {
+            let f = CalibrationFixture(appleActionsEnabled: true)
+            var taps = f.store.activeGestures
+            taps.oneFingerTap = .appExplorer
+            f.store.updateGestures(taps, for: 1)
+            f.sendApple(1, x: 500); f.sendApple(1.03)
+            precondition(f.pointer.locked)
+            f.hid.setAppleTrackpadEnabled(false)
+            precondition(!f.pointer.locked && !f.explorer.isVisible, "Disabling Apple actions releases capture immediately")
+            f.finish()
+        }
+        print("Pointer/HUD integration passed: Apple capture, editor escape, selection/stop/disable/timeout release, denial fallback, Navigator isolation.")
         for action in [TapAction.appExplorer, .windowManager] {
             check { f in
                 var taps = f.store.activeGestures

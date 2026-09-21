@@ -133,10 +133,22 @@ import SwiftUI
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { settings }
         controller.contextIsValid = { true }
+        var presentations: [String] = []
+        // Capture denial must close a not-yet-presented panel without reopening it.
+        controller.onPresentationChanged = { [weak controller] in
+            if controller?.isVisible == true { controller?.dismiss() }
+        }
+        controller.show(waitingForLift: false)
+        precondition(!controller.isVisible, "Owner can safely decline HUD presentation")
+        controller.onPresentationChanged = { [weak controller] in
+            guard let controller else { return }
+            presentations.append(!controller.isVisible ? "closed" : controller.isEditing ? "editing" : "hud")
+        }
         var openedURLs: [URL] = []
         controller.openWebURL = { openedURLs.append($0); return true }
         controller.show(waitingForLift: false)
         precondition(controller.isVisible)
+        precondition(presentations == ["hud"])
         let hud = NSApp.windows.first { $0.title == "App Explorer" }!.contentView!
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         hud.layoutSubtreeIfNeeded()
@@ -149,6 +161,7 @@ import SwiftUI
         controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
         controller.process(report(nil))
         precondition(!controller.isVisible && openedURLs.map(\.absoluteString) == ["https://example.com/docs"], "Open web favorite exactly once, through URL opener, not app activation")
+        precondition(presentations == ["hud", "closed"], "Pointer lifecycle sees selection dismissal")
         var openedApps: [URL] = []
         controller.openApplication = { url, options in
             precondition(!controller.isVisible, "HUD must close before activating an app")
@@ -314,6 +327,7 @@ import SwiftUI
         controller.finishEditing()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         precondition(controller.isVisible && !controller.isEditing && controller.groupPath == [.left] && editingChanges == [true, false])
+        precondition(Array(presentations.suffix(4)) == ["hud", "editing", "closed", "hud"], "Pointer lifecycle releases for editing and recaptures after Done")
         precondition(store.settings.appExplorer?.favorite(at: [.left, .down])?.name == "New URL")
         controller.process(report(500))
         controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: 500, y: 600, touching: true, confident: true)], buttonDown: false, scanTime: 0))

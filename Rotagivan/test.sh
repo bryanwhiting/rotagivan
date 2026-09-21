@@ -24,6 +24,9 @@ xcrun swiftc Rotagivan/TrackpadReport.swift Rotagivan/Tests/ReportTests.swift -o
 "$test_dir/ReportTests"
 xcrun swiftc Rotagivan/TrackpadInputRouting.swift Rotagivan/Tests/TrackpadInputRoutingTests.swift -o "$test_dir/TrackpadInputRoutingTests"
 "$test_dir/TrackpadInputRoutingTests"
+xcrun swiftc Rotagivan/TrackpadInputRouting.swift Rotagivan/ExplorerPointerLock.swift \
+  Rotagivan/Tests/ExplorerPointerLockTests.swift -framework CoreGraphics -o "$test_dir/ExplorerPointerLockTests"
+"$test_dir/ExplorerPointerLockTests"
 xcrun swiftc Rotagivan/TrackpadReport.swift Rotagivan/TrackpadDistance.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/Tests/AppleTrackpadInputTests.swift -framework AppKit -framework IOKit -o "$test_dir/AppleTrackpadInputTests"
 "$test_dir/AppleTrackpadInputTests"
@@ -87,6 +90,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/MediaControls.swift \
   Rotagivan/ExplorerHoldLayerEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
+  Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"

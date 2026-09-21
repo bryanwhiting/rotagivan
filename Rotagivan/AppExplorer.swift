@@ -7,6 +7,7 @@ import OSLog
     var isEditing: Bool { get }
     var onDismiss: (() -> Void)? { get set }
     var contextIsValid: (() -> Bool)? { get set }
+    var onPresentationChanged: (() -> Void)? { get set }
     func show(waitingForLift: Bool)
     func showWindowManager(waitingForLift: Bool)
     func process(_ report: TrackpadReport)
@@ -14,6 +15,7 @@ import OSLog
     func setAlternateHeld(_ held: Bool)
 }
 extension AppExplorerPresenting {
+    var onPresentationChanged: (() -> Void)? { get { nil } set {} }
     var isEditing: Bool { false }
     func setAlternateHeld(_ held: Bool) {}
 }
@@ -56,6 +58,7 @@ extension AppExplorerPresenting {
         }
     }
     var onDismiss: (() -> Void)?
+    var onPresentationChanged: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     weak var editingStore: SettingsStore?
     var onEditingChanged: ((Bool) -> Void)?
@@ -146,6 +149,9 @@ extension AppExplorerPresenting {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
         }
         self.panel = panel
+        onPresentationChanged?()
+        // The owner may decline presentation if pointer capture is unavailable.
+        guard self.panel === panel else { return }
         panel.makeKeyAndOrderFront(nil)
         // Selection uses raw HID, not per-event SwiftUI pointer updates.
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -386,6 +392,7 @@ extension AppExplorerPresenting {
         selectionGeneration &+= 1
         model.isEditing = true
         model.selected = nil
+        onPresentationChanged?()
         onEditingChanged?(true)
         // Use an activating panel for text fields and native picker sheets.
         // Recreate it in place; toggling NSPanel's nonactivating style at runtime
@@ -441,6 +448,7 @@ extension AppExplorerPresenting {
         guard let panel else { return }
         selectionGeneration &+= 1
         self.panel = nil
+        onPresentationChanged?()
         if model.isEditing { model.isEditing = false; onEditingChanged?(false) }
         panel.orderOut(nil)
         panel.close()

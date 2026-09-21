@@ -71,6 +71,14 @@ struct AppExplorerSettingsView: View {
     @State private var slotFrames: [ExplorerSlot: CGRect] = [:]
     @State private var slotDrag: ExplorerSlotDrag?
     @State private var dropTarget: ExplorerSlot?
+    @State private var tileTransfer: ExplorerTileTransfer?
+    private let transferRoot: (() -> AppExplorerSettings)?
+    private let transferSave: ((AppExplorerSettings) -> Bool)?
+    private let transferPrefix: [ExplorerTilePathStep]
+    private var transferSettings: AppExplorerSettings { transferRoot?() ?? baseSettings }
+    private var transferPath: [ExplorerTilePathStep] {
+        transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + groupPath.map { .group($0) }
+    }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var baseSettings: AppExplorerSettings { configurationOverride?.wrappedValue ?? store.settings.appExplorer ?? AppExplorerSettings() }
     private let configurationOverride: Binding<AppExplorerSettings>?
@@ -100,6 +108,8 @@ struct AppExplorerSettingsView: View {
 
     init(store: SettingsStore, groupPath: [ExplorerSlot] = [], compact: Bool = false, initialLayerID: UUID? = nil,
          configurationOverride: Binding<AppExplorerSettings>? = nil, scopeTitle: String? = nil, windowManagerOnly: Bool = false, windowApplet: Bool = false,
+         transferRoot: (() -> AppExplorerSettings)? = nil, transferSave: ((AppExplorerSettings) -> Bool)? = nil,
+         transferPrefix: [ExplorerTilePathStep] = [],
          onGroupPathChange: (([ExplorerSlot]) -> Void)? = nil) {
         self.store = store
         _groupPath = State(initialValue: groupPath)
@@ -109,6 +119,9 @@ struct AppExplorerSettingsView: View {
         self.scopeTitle = scopeTitle
         self.windowManagerOnly = windowManagerOnly
         self.windowApplet = windowApplet
+        self.transferRoot = transferRoot
+        self.transferSave = transferSave
+        self.transferPrefix = transferPrefix
         self.onGroupPathChange = onGroupPathChange
     }
 
@@ -275,12 +288,21 @@ struct AppExplorerSettingsView: View {
             .onPreferenceChange(ExplorerSlotFramesKey.self) { slotFrames = $0 }
             Text(isRecentGroup
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
-                : "Drag an icon or name to another slot to swap; drop into an empty slot to move. Use ••• to choose apps, URLs, shortcuts, or groups. Changes save automatically. Tap the center in the HUD to go back.")
+                : "Drag tiles to move or swap here. Use ••• → Move or copy… to send a whole group to another layer or group, including all its contents. Changes save automatically.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .overlay(alignment: .bottomLeading) {
             if let groupError { Text(groupError).font(.caption).foregroundStyle(.red).padding(6).background(.regularMaterial) }
+        }
+        .sheet(item: $tileTransfer) { transfer in
+            ExplorerTileTransferEditor(transfer: transfer, onSave: { destination, slot, copy in
+                var next = transferSettings
+                if let error = transfer.apply(to: destination, slot: slot, copy: copy, settings: &next) { return error }
+                guard commitTransfer(next) else { return "The configuration changed or could not be saved. Reopen Move or copy." }
+                tileTransfer = nil
+                return nil
+            }, onCancel: { tileTransfer = nil })
         }
         .confirmationDialog("Remove this tile’s custom layers and inherit enclosing Explorer keys?", isPresented: $inheritTileLayers, titleVisibility: .visible) {
             Button("Remove custom layers", role: .destructive) {
@@ -293,7 +315,14 @@ struct AppExplorerSettingsView: View {
                 VStack(alignment: .trailing) {
                     ScrollView {
                         AnyView(AppExplorerSettingsView(store: store, configurationOverride: tileLayerBinding(path),
-                            scopeTitle: tile.name, windowManagerOnly: tile.isWindowManager)).padding(24)
+                            scopeTitle: tile.name, windowManagerOnly: tile.isWindowManager,
+                            transferRoot: { transferSettings }, transferSave: { next in
+                                guard commitTransfer(next) else { return false }
+                                // A transfer may move the group whose editor is open. Return to
+                                // the parent instead of leaving a stale binding to its old slot.
+                                editingTileLayers = nil
+                                return true
+                            }, transferPrefix: transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) })).padding(24)
                     }
                     Button("Done") { editingTileLayers = nil }.keyboardShortcut(.cancelAction).padding()
                 }.frame(width: 660, height: tile.isWindowManager ? 350 : 620)
@@ -466,6 +495,9 @@ struct AppExplorerSettingsView: View {
                     }
                     if favorite != nil {
                         Divider()
+                        Button("Move or copy…") {
+                            tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
+                        }
                         Menu("Move or swap with") {
                             ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
                                 Button(target.title) { edit { $0.swapFavorites(from: direction, to: target, in: groupPath) } }
@@ -575,6 +607,13 @@ struct AppExplorerSettingsView: View {
         return true
     }
 
+    private func commitTransfer(_ next: AppExplorerSettings) -> Bool {
+        guard next.hasValidFavorites else { return false }
+        guard transferSave?(next) ?? saveBase(next) else { return false }
+        groupError = nil
+        return true
+    }
+
     private func tileLayerBinding(_ path: [ExplorerSlot]) -> Binding<AppExplorerSettings> {
         Binding(get: {
             let tile = settings.favorite(at: path)
@@ -623,6 +662,85 @@ struct AppExplorerSettingsView: View {
         let icon = NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage
         icon?.size = NSSize(width: 16, height: 16)
         return icon
+    }
+}
+
+/// A single destination picker works in Settings and in the HUD's inline editor.
+struct ExplorerTileTransferEditor: View {
+    let transfer: ExplorerTileTransfer
+    var onSave: ([ExplorerTilePathStep], ExplorerSlot, Bool) -> String?
+    var onCancel: () -> Void
+    @State private var destination: [ExplorerTilePathStep]
+    @State private var target: ExplorerSlot?
+    @State private var copy = false
+    @State private var error: String?
+
+    init(transfer: ExplorerTileTransfer,
+         onSave: @escaping ([ExplorerTilePathStep], ExplorerSlot, Bool) -> String?, onCancel: @escaping () -> Void) {
+        self.transfer = transfer; self.onSave = onSave; self.onCancel = onCancel
+        _destination = State(initialValue: transfer.source)
+    }
+
+    private var containers: [ExplorerTileContainer] {
+        transfer.snapshot.tileContainers().filter { !$0.id.starts(with: transfer.source + [.group(transfer.slot)]) }
+    }
+    private var selected: ExplorerTileContainer? { containers.first { $0.id == destination } }
+    private var displaced: AppExplorerFavorite? { selected?.favorites.first { $0.direction == target } }
+    private var validation: String? {
+        guard let target else { return "Choose a destination slot." }
+        var preview = transfer.snapshot
+        return transfer.apply(to: destination, slot: target, copy: copy, settings: &preview)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Move or copy \(transfer.favorite?.name ?? "tile")", systemImage: "square.on.square")
+                .font(.title2.weight(.semibold))
+            Text("All nested tiles, group layouts, and custom layers travel together.")
+                .font(.callout).foregroundStyle(.secondary)
+            Picker("Operation", selection: $copy) {
+                Text("Move / swap").tag(false)
+                Text("Copy").tag(true)
+            }.pickerStyle(.segmented).labelsHidden()
+            Picker("To layer / group", selection: $destination) {
+                ForEach(containers) { container in Text(container.title).tag(container.id) }
+            }.accessibilityIdentifier("explorer-transfer-container")
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
+                    ForEach(ExplorerSlot.slots(selected?.count ?? 8), id: \.self) { slot in
+                        let occupant = selected?.favorites.first { $0.direction == slot }
+                        let isSource = destination == transfer.source && slot == transfer.slot
+                        Button { target = slot; error = nil } label: {
+                            VStack(spacing: 6) {
+                                Text(slot.title).font(.caption).foregroundStyle(.secondary)
+                                Image(systemName: occupant?.isGroup == true ? "folder" : (occupant == nil ? "plus" : "square.on.square"))
+                                Text(isSource ? "Current tile" : occupant?.name ?? "Empty")
+                                    .font(.caption.weight(.medium)).lineLimit(2)
+                            }.frame(maxWidth: .infinity).frame(height: 78)
+                                .background(target == slot ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(target == slot ? Color.accentColor : Color.clear, lineWidth: 2))
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain).disabled(isSource || (copy && occupant != nil))
+                            .accessibilityLabel("\(slot.title): \(occupant?.name ?? "Empty")")
+                            .accessibilityIdentifier("explorer-transfer-slot-\(slot.rawValue)")
+                    }
+                }.padding(3)
+            }.frame(height: 182)
+            Text(error ?? validation ?? (copy ? "Copy to this empty slot. The original stays where it is."
+                : displaced.map { "Swap with \($0.name). It will move to the source slot; nothing is deleted." }
+                    ?? "Move to this empty slot. The source slot will become empty."))
+                .font(.callout).foregroundStyle(error == nil ? Color.secondary : Color.red)
+                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            HStack {
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(copy ? "Copy tile" : displaced == nil ? "Move tile" : "Swap tiles") {
+                    if let target { error = onSave(destination, target, copy) }
+                }.keyboardShortcut(.defaultAction).disabled(validation != nil)
+                    .accessibilityIdentifier("explorer-transfer-save")
+            }
+        }.padding(24).frame(width: 570)
+            .onChange(of: destination) { _, _ in target = nil; error = nil }
+            .onChange(of: copy) { _, _ in target = nil; error = nil }
     }
 }
 

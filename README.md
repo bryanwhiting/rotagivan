@@ -377,6 +377,16 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+**Move or reuse whole groups:** open a tile's **••• → Move or copy…**, choose
+the destination layer/group, then a slot. **Move / swap** moves into an empty
+slot or swaps occupied tiles; **Copy** requires an empty slot and keeps the
+original. Nested groups, capacities, and tile-specific layers are preserved.
+The picker includes Explorer-wide and group-local layers, including from the
+HUD's inline editor. Recent-app grids and Window Manager layouts are automatic,
+not storage destinations. Transfers cannot target their own descendants or
+exceed the existing nesting/size limits. If settings change while the picker
+is open, reopen it; no stale edit will overwrite newer settings.
+
 **4 / 8 / 12 / 16 slots:** choose the capacity above the favorites grid. Each
 group and each alternate layer has its own capacity. Eight-slot layouts retain
 their existing positions; other capacities use evenly spaced radial sectors in

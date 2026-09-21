@@ -404,6 +404,109 @@ struct AppExplorerSettings: Codable, Equatable {
     }
 }
 
+/// A structural address, not a runtime projection: local layers and root layers
+/// remain distinct even when they use the same shortcut or name.
+enum ExplorerTilePathStep: Hashable {
+    case group(ExplorerSlot)
+    case layer(UUID)
+}
+
+struct ExplorerTileContainer: Identifiable {
+    let id: [ExplorerTilePathStep]
+    let title: String
+    let count: Int
+    let favorites: [AppExplorerFavorite]
+}
+
+extension AppExplorerSettings {
+    /// All editable grids, including alternate layers belonging to nested groups.
+    /// Recent-app grids and Window Manager layouts are generated, not destinations.
+    func tileContainers(rootTitle: String = "Favorites") -> [ExplorerTileContainer] {
+        guard hasValidFavorites else { return [] }
+        var result: [ExplorerTileContainer] = []
+        func visit(_ entries: [AppExplorerFavorite], layers: [ExplorerHoldLayer]?, count: Int,
+                   path: [ExplorerTilePathStep], title: String, editable: Bool = true) {
+            if editable {
+                result.append(ExplorerTileContainer(id: path, title: title, count: count, favorites: entries))
+                for tile in entries where tile.isGroup {
+                    visit(tile.children ?? [], layers: tile.holdLayers, count: tile.slotCount ?? 8,
+                          path: path + [.group(tile.direction)], title: "\(title) › \(tile.name) (\(tile.direction.title))",
+                          editable: !tile.isRecentGroup)
+                }
+            }
+            for layer in layers ?? [] {
+                visit(layer.favorites, layers: nil, count: layer.slotCount ?? count,
+                      path: path + [.layer(layer.id)], title: "\(title) › Layer: \(layer.name)")
+            }
+        }
+        visit(favorites, layers: holdLayers, count: slotCount ?? 8, path: [], title: rootTitle)
+        return result
+    }
+
+    fileprivate mutating func writeTile(_ tile: AppExplorerFavorite?, at slot: ExplorerSlot,
+                                        container: [ExplorerTilePathStep]) -> Bool {
+        func replace(_ entries: inout [AppExplorerFavorite], layers: inout [ExplorerHoldLayer]?,
+                     path: ArraySlice<ExplorerTilePathStep>) -> Bool {
+            guard let step = path.first else {
+                entries.removeAll { $0.direction == slot }
+                if var tile { tile.direction = slot; entries.append(tile) }
+                return true
+            }
+            switch step {
+            case .group(let direction):
+                guard let index = entries.firstIndex(where: { $0.direction == direction && $0.isGroup }),
+                      var children = entries[index].children else { return false }
+                var childLayers = entries[index].holdLayers
+                guard replace(&children, layers: &childLayers, path: path.dropFirst()) else { return false }
+                entries[index].children = children
+                entries[index].holdLayers = childLayers
+            case .layer(let id):
+                guard var updated = layers, let index = updated.firstIndex(where: { $0.id == id }) else { return false }
+                var noLayers: [ExplorerHoldLayer]?
+                guard replace(&updated[index].favorites, layers: &noLayers, path: path.dropFirst()) else { return false }
+                layers = updated
+            }
+            return true
+        }
+        return replace(&favorites, layers: &holdLayers, path: container[...])
+    }
+}
+
+/// Snapshot-bound transaction: a synced edit must never move the wrong tile.
+struct ExplorerTileTransfer: Identifiable {
+    let id = UUID()
+    let snapshot: AppExplorerSettings
+    let source: [ExplorerTilePathStep]
+    let slot: ExplorerSlot
+    var favorite: AppExplorerFavorite? {
+        snapshot.tileContainers().first { $0.id == source }?.favorites.first { $0.direction == slot }
+    }
+
+    /// Returns an actionable error, or nil after an atomic, lossless commit.
+    func apply(to destination: [ExplorerTilePathStep], slot target: ExplorerSlot,
+               copy: Bool, settings: inout AppExplorerSettings) -> String? {
+        guard settings == snapshot else { return "The Explorer changed while this window was open. Cancel and reopen Move or copy." }
+        guard let moving = favorite,
+              let container = snapshot.tileContainers().first(where: { $0.id == destination }),
+              ExplorerSlot.slots(container.count).contains(target) else { return "That tile or destination is no longer available." }
+        guard source != destination || slot != target else { return "Choose a different slot." }
+        let sourceTile = source + [.group(slot)]
+        let destinationTile = destination + [.group(target)]
+        guard !destination.starts(with: sourceTile), !source.starts(with: destinationTile) else {
+            return "A group cannot be moved or copied into itself, or swapped with an enclosing group."
+        }
+        let displaced = container.favorites.first { $0.direction == target }
+        guard !copy || displaced == nil else { return "Choose an empty slot for a copy. Move swaps occupied slots without deleting either tile." }
+        var next = settings
+        guard next.writeTile(moving, at: target, container: destination),
+              copy || next.writeTile(displaced, at: slot, container: source), next.hasValidFavorites else {
+            return "This would exceed the group-depth, tile, or custom-layer limits. Nothing was changed."
+        }
+        settings = next
+        return nil
+    }
+}
+
 /// Presses retain the scope in which they began. Projection is recomputed from
 /// saved settings on release, so child layers never overwrite parent/sibling tiles.
 struct ExplorerScopedHeldKeys {

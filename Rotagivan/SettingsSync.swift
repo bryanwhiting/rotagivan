@@ -53,6 +53,7 @@ private struct SyncAPIError: LocalizedError {
     func start() {
         guard !started else { return }; started = true
         store.$settings.dropFirst().sink { [weak self] _ in self?.changed() }.store(in: &subscriptions)
+        store.$configurationProfiles.dropFirst().sink { [weak self] _ in self?.changed() }.store(in: &subscriptions)
         ShortcutSettings.shared.objectWillChange.sink { [weak self] _ in self?.changed() }.store(in: &subscriptions)
         pollingTask = Task { [weak self] in
             guard let self else { return }
@@ -146,6 +147,7 @@ private struct SyncAPIError: LocalizedError {
         ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
             actions: keys.actions, additional: keys.additional, profileActions: keys.profileActions,
             holdToActivate: keys.holdToActivate)
+        store.replaceLibrary(config.profiles, activeID: config.activeConfigurationID, shortcuts: keys)
         AppConfiguration.markCurrent(.standard)
         NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
         if store.settings.enabled { hid.start() }

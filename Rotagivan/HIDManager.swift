@@ -32,6 +32,7 @@ final class NavigatorHIDManager: ObservableObject {
     private var started = false
     private var calibrationTimer: Timer?
     private var calibrationSettings: ProfileGestures?
+    private var calibrationDevice: GestureDevice = .navigator
     private var calibrationActiveProfile: UInt32?
     private var calibrationCapturing = false
     private var contactsDown = false
@@ -41,6 +42,7 @@ final class NavigatorHIDManager: ObservableObject {
     private var explorerConfiguration: AppExplorerSettings?
     private var explorerProfileID: UInt32?
     private var explorerSettings: ProfileGestures?
+    private var explorerDevices: ProfileDevices?
     private var appObserver: NSObjectProtocol?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
@@ -78,7 +80,8 @@ final class NavigatorHIDManager: ObservableObject {
         }
         appleInput.onStatus = { [weak self] status in self?.appleStatusChanged(status) }
         appleInput.onReport = { [weak self] identity, report, scale, time in
-            guard let self, self.started, self.appleTrackpadEnabled, self.store.settings.enabled else { return }
+            guard let self, self.started, self.appleTrackpadEnabled, self.store.settings.enabled,
+                  self.store.settings.resolvedDevices.appleEnabled else { return }
             // Accessibility is process-wide, not per touch. Avoid a trust query
             // on every high-frequency Apple frame sharing Navigator's run loop.
             if time >= self.nextAppleTrustCheck {
@@ -124,7 +127,8 @@ final class NavigatorHIDManager: ObservableObject {
                 self.suppressUntilLift = self.contactsDown
                 if !editing {
                     self.explorerProfileID = self.store.activeProfileID
-                    self.explorerSettings = self.store.activeGestures
+                    self.explorerSettings = self.explorerGestureSettings
+                    self.explorerDevices = self.store.settings.resolvedDevices
                     self.explorerConfiguration = self.store.settings.appExplorer
                 }
             }
@@ -144,7 +148,8 @@ final class NavigatorHIDManager: ObservableObject {
                 guard let self else { return false }
                 if self.explorer?.isEditing == true { return self.store.settings.enabled && !self.calibrationCapturing }
                 return self.store.settings.enabled && self.store.activeProfileID == self.explorerProfileID &&
-                    self.store.activeGestures == self.explorerSettings && !self.calibrationCapturing &&
+                    self.explorerGestureSettings == self.explorerSettings && !self.calibrationCapturing &&
+                    self.store.settings.resolvedDevices == self.explorerDevices &&
                     self.store.settings.appExplorer == self.explorerConfiguration
             }
         }
@@ -178,12 +183,17 @@ final class NavigatorHIDManager: ObservableObject {
         gestures.reset()
         appleGestures.reset()
         explorerProfileID = store.activeProfileID
-        explorerSettings = store.activeGestures
         explorerConfiguration = store.settings.appExplorer
         explorerSource = inputRouting.source
+        explorerSettings = explorerGestureSettings
+        explorerDevices = store.settings.resolvedDevices
         if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
         else { explorer?.show(waitingForLift: contactsDown) }
         updateExplorerPointer()
+    }
+
+    private var explorerGestureSettings: ProfileGestures {
+        store.activeGestures(for: explorerSource?.isApple == true ? .apple : .navigator)
     }
 
     private func cancelAppleHUD() {
@@ -198,12 +208,12 @@ final class NavigatorHIDManager: ObservableObject {
               ProcessInfo.processInfo.systemUptime >= appleClickVetoUntil else { return }
         cancelAppleHUD()
         let profile = store.activeProfileID
-        let configuration = store.activeGestures
+        let configuration = store.activeGestures(for: .apple)
         let open = { [weak self] in
             guard let self else { return }
             self.pendingAppleHUD = nil
             guard self.inputRouting.source == source, self.store.activeProfileID == profile,
-                  self.store.activeGestures == configuration,
+                  self.store.activeGestures(for: .apple) == configuration,
                   ProcessInfo.processInfo.systemUptime >= self.appleClickVetoUntil else { return }
             self.openAppExplorer(windowManager: windowManager)
         }
@@ -268,6 +278,7 @@ final class NavigatorHIDManager: ObservableObject {
             openAppExplorer()
             // A keyboard-opened HUD may be controlled by either trackpad.
             explorerSource = nil
+            explorerSettings = explorerGestureSettings
             updateExplorerPointer()
         } else {
             if explorer?.isEditing != true { explorer?.dismiss() }
@@ -275,22 +286,23 @@ final class NavigatorHIDManager: ObservableObject {
         }
     }
 
-    func beginCalibration(profileID: UInt32, mode: GestureCalibrationMode) {
+    func beginCalibration(profileID: UInt32, mode: GestureCalibrationMode, device: GestureDevice = .navigator) {
         guard canCalibrate, calibrationSession == nil,
               let profile = store.profiles.first(where: { $0.id == profileID }) else { return }
         startCalibrationSession(GestureCalibrationSession(profileID: profileID,
-            profileName: profile.name, mode: mode, gestures: store.settings.gestures(for: profileID)))
+            profileName: profile.name, mode: mode, gestures: device == .apple ? store.gestures(for: profileID, device: .apple) : store.settings.gestures(for: profileID)), device: device)
     }
 
     // Separate from connection setup so the input gate can be tested without a physical device.
-    func startCalibrationSession(_ session: GestureCalibrationSession, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+    func startCalibrationSession(_ session: GestureCalibrationSession, at time: TimeInterval = ProcessInfo.processInfo.systemUptime, device: GestureDevice = .navigator) {
         cancelAppleHUD()
         explorer?.dismiss()
         endCalibration()
         gestures.reset()
         appleGestures.reset()
         calibrationSource = nil
-        calibrationSettings = store.settings.gestures(for: session.profileID)
+        calibrationDevice = device
+        calibrationSettings = calibrationGestures(session.profileID)
         calibrationActiveProfile = store.activeProfileID
         calibrationSession = session
         calibrationCapturing = true
@@ -310,8 +322,8 @@ final class NavigatorHIDManager: ObservableObject {
         guard let session = calibrationSession else { return }
         if !store.settings.enabled || store.activeProfileID != calibrationActiveProfile ||
             !store.profiles.contains(where: { $0.id == session.profileID }) ||
-            store.settings.gestures(for: session.profileID) != calibrationSettings ||
-            (session.profileID != store.defaultProfileID && !(store.settings.customTapProfiles ?? []).contains(session.profileID)) {
+            calibrationGestures(session.profileID) != calibrationSettings ||
+            (calibrationDevice == .navigator && session.profileID != store.defaultProfileID && !(store.settings.customTapProfiles ?? []).contains(session.profileID)) {
             session.cancel(reason: "The layer or its tap settings changed. Start a new calibration.")
         }
         if session.cancellationReason == nil && !session.isComplete { session.tick(at: time) }
@@ -345,7 +357,7 @@ final class NavigatorHIDManager: ObservableObject {
         advanceCalibration(at: ProcessInfo.processInfo.systemUptime)
         guard let session = calibrationSession, session.isComplete, session.cancellationReason == nil,
               let median = session.medianDoubleTapInterval else { return }
-        var taps = store.settings.gestures(for: session.profileID)
+        var taps = calibrationGestures(session.profileID)
         if session.mode == .tripleTap, let second = session.medianSecondTapInterval {
             taps.gestures.tripleTapFirstInterval = min(600, max(50, (median * 1_000).rounded())) / 1_000
             taps.gestures.tripleTapSecondInterval = min(600, max(50, (second * 1_000).rounded())) / 1_000
@@ -364,13 +376,20 @@ final class NavigatorHIDManager: ObservableObject {
             taps.doubleTapSwipe = swipe
         }
         let profileID = session.profileID
+        let appleOverride = calibrationDevice == .apple && !store.settings.resolvedDevices.shareTapActions
         endCalibration()
-        store.updateGestures(taps, for: profileID)
+        if appleOverride { store.updateAppleGestures(taps, for: profileID) }
+        else { store.updateGestures(taps, for: profileID) }
+    }
+
+    private func calibrationGestures(_ id: UInt32) -> ProfileGestures {
+        calibrationDevice == .apple ? store.gestures(for: id, device: .apple) : store.settings.gestures(for: id)
     }
 
     func start() {
         started = true
         startAppleInput()
+        guard store.settings.resolvedDevices.navigatorEnabled else { state = .stopped; return }
         guard manager == nil else { return }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: "io.zsa.navigator").isEmpty else {
             state = .error("Quit ZSA Navigator, then press Reconnect.")
@@ -533,6 +552,7 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     func receive(_ report: TrackpadReport, from source: TrackpadInputSource, at receivedAt: TimeInterval) {
+        guard source.isApple ? store.settings.resolvedDevices.appleEnabled : store.settings.resolvedDevices.navigatorEnabled else { return }
         let touching = report.buttonDown || report.contacts.contains(where: { $0.touching })
         let previousSource = inputRouting.source
         let lock = explorer?.isVisible == true ? explorerSource : (calibrationCapturing ? calibrationSource : nil)
@@ -554,7 +574,10 @@ final class NavigatorHIDManager: ObservableObject {
         contactsDown = inputRouting.contactsDown
         distanceScale = source.isApple ? appleDistanceScale : navigatorDistanceScale
         if explorer?.isVisible == true {
-            if explorerSource == nil { explorerSource = source }
+            if explorerSource == nil {
+                explorerSource = source
+                explorerSettings = explorerGestureSettings
+            }
             updateExplorerPointer()
             guard explorer?.isVisible == true else { return }
             explorer?.process(report)
@@ -607,6 +630,10 @@ final class NavigatorHIDManager: ObservableObject {
 
     private func startAppleInput() {
         guard appleTrackpadEnabled, store.settings.enabled else { return }
+        guard store.settings.resolvedDevices.appleEnabled else {
+            appleTrackpadStatus = "Apple actions are off in this profile"
+            return
+        }
         guard AXIsProcessTrusted() else {
             appleTrackpadStatus = "Grant Accessibility permission, then Reconnect."
             return

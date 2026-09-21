@@ -15,6 +15,12 @@ struct RotagivanApp: App {
         let factory = try? AppConfiguration.factory()
         try? factory?.seedIfNeeded()
         let store = SettingsStore(factorySettings: factory?.settings)
+        store.captureShortcuts = { ShortcutConfiguration(.shared) }
+        store.restoreShortcuts = { keys in
+            ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
+                actions: keys.actions, additional: keys.additional, profileActions: keys.profileActions,
+                holdToActivate: keys.holdToActivate)
+        }
         _store = StateObject(wrappedValue: store)
         let hid = NavigatorHIDManager(store: store)
         _hid = StateObject(wrappedValue: hid)
@@ -135,6 +141,18 @@ struct NavigatorPanel: View {
             }))
             .toggleStyle(.switch).controlSize(.small)
 
+            Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { id in
+                NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
+                hid.stop()
+                store.selectConfiguration(id)
+                editingProfileID = store.defaultProfileID
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
+                    if store.settings.enabled { hid.start() }
+                }
+            })) {
+                ForEach(store.configurationProfiles) { Text($0.name).tag($0.id) }
+            }.pickerStyle(.menu)
             Picker("Edit layer", selection: $editingProfileID) {
                 ForEach(store.profiles, id: \.id) { profile in
                     Text(profile.name).tag(profile.id)

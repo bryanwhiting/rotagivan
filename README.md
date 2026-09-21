@@ -18,9 +18,41 @@ Selection feedback lasts 120 ms and the entrance settles in 160 ms. There are no
 looping effects, animation timers, or per-report telemetry: actions execute
 immediately, without waiting for animations.
 
+## Profiles, layers, and devices
+
+Settings now start with **Layer actions**, not pointer tuning. The top-right
+profile picker selects a complete setup; **Add Profile** copies it, including
+all layers, hotkeys, gesture timing, Navigator tuning, per-app overrides, and
+App Explorer groups, favorites, themes, hold layers and window layouts. Edit
+the name in the header. Existing installations become one **Default** profile,
+without changing saved motion or gesture values. Up to 20 profiles are supported.
+
+- **Layer actions:** aligned layer columns with their activation shortcuts and
+  tap/swipe bindings. Sharing is on by default. Turn off **Share tap and swipe
+  actions across devices**, select Apple trackpad, and enable **Customize Apple
+  actions** on any layer. Uncustomized layers follow shared actions; re-enabling
+  sharing preserves custom bindings so they can be used again later.
+- **App Explorer:** all layouts, groups and Explorer hold layers belong to the
+  selected profile. **App overrides** also belong to that profile and apply on
+  top of the chosen device's layer actions.
+- **Devices:** choose Navigator, Apple actions, both, or neither for the profile.
+  Apple input still requires the machine-local opt-in and permissions. This
+  selection never disables macOS's own trackpad pointer or scrolling.
+- **Pointer & scrolling:** Navigator-only tuning and dragging, per layer.
+- **General:** complete YAML export/import and sync include all profiles and
+  their shortcuts, including inactive profiles. Legacy single-configuration YAML
+  imports as one Default profile. Account, permission grants, input opt-in,
+  startup registration and the master enable switch remain machine-wide.
+
+Switching profiles releases drags, closes HUDs, cancels pending gestures and
+returns to that profile's default layer before reconnecting selected drivers.
+The menu-bar panel also includes a profile picker. Device support currently
+covers Navigator and Apple's built-in/Magic Trackpads; selecting a profile does
+not add a driver for unsupported hardware.
+
 ## Apple trackpad actions (experimental)
 
-In **General → Apple trackpad · actions only**, enable **Apple trackpad actions**
+In **Devices**, enable **Allow Apple input on this Mac** and **Use Apple trackpad actions**
 to use a built-in Mac trackpad or Magic Trackpad alongside—or instead of—Navigator.
 This switch is **off by default**, saved only on this Mac, and not included in
 cloud/YAML configuration syncing. Your existing layers and bindings are unchanged.

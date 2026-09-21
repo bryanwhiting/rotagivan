@@ -1,14 +1,7 @@
 import Foundation
 import ConfigurationYAML
 
-struct ShortcutConfiguration: Codable {
-    var normal: ProfileShortcut
-    var precision: ProfileShortcut
-    var actions: [ProfileShortcut]
-    var additional: [UInt32: ProfileShortcut]
-    var profileActions: [UInt32: [ProfileShortcut]]
-    var holdToActivate: Bool
-
+extension ShortcutConfiguration {
     @MainActor init(_ source: ShortcutSettings) {
         normal = source.normal; precision = source.precision
         actions = source.actions; additional = source.additional
@@ -36,10 +29,19 @@ struct AppConfiguration: Codable {
     var formatVersion = 1
     var settings: StoredSettings
     var shortcuts: ShortcutConfiguration
+    var profiles: [ConfigurationProfile]? = nil
+    var activeConfigurationID: String? = nil
 
     @MainActor init(store: SettingsStore) {
         settings = store.settings
         shortcuts = ShortcutConfiguration(.shared)
+        profiles = store.profileSnapshot(shortcuts: shortcuts)
+        activeConfigurationID = store.activeConfigurationID
+    }
+
+    init(settings: StoredSettings, shortcuts: ShortcutConfiguration) {
+        self.settings = settings
+        self.shortcuts = shortcuts
     }
 
     static func parse(_ yaml: String) throws -> Self {
@@ -66,6 +68,14 @@ struct AppConfiguration: Codable {
     }
 
     func validate() throws {
+        if let profiles {
+            guard !profiles.isEmpty, profiles.count <= 20, Set(profiles.map(\.id)).count == profiles.count,
+                  profiles.contains(where: { $0.id == activeConfigurationID }),
+                  profiles.allSatisfy({ !$0.id.isEmpty && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 80 }) else {
+                throw ConfigurationError("Profiles need unique IDs, names, and a valid active profile (maximum 20).")
+            }
+            for profile in profiles { try AppConfiguration(settings: profile.settings, shortcuts: profile.shortcuts).validate() }
+        } else if activeConfigurationID != nil { throw ConfigurationError("The active profile has no profile library.") }
         if let explorer = settings.appExplorer {
             guard explorer.hasValidFavorites else {
                 throw ConfigurationError("App Explorer needs named apps, web URLs, or groups with unique directions: at most eight slots per group, four group levels, and 256 entries total. URLs must be HTTP(S) without embedded credentials.")
@@ -96,6 +106,15 @@ struct AppConfiguration: Codable {
         guard references.allSatisfy(valid.contains), shortcuts.additional.keys.allSatisfy({ valid.contains($0) && $0 >= 100 }) else {
             throw ConfigurationError("A setting or shortcut refers to a layer that does not exist.")
         }
+        if let overrides = settings.devices?.appleLayerGestures {
+            guard overrides.keys.allSatisfy(valid.contains) else { throw ConfigurationError("Apple actions refer to a missing layer.") }
+            for (id, gestures) in overrides {
+                var copy = settings
+                copy.devices = nil
+                copy.profileGestures = (copy.profileGestures ?? [:]).merging([id: gestures]) { _, new in new }
+                try AppConfiguration(settings: copy, shortcuts: shortcuts).validate()
+            }
+        }
         guard shortcuts.actions.count == 3, shortcuts.profileActions.values.allSatisfy({ $0.count == 3 }) else {
             throw ConfigurationError("Each click/drag shortcut list must contain exactly three entries.")
         }
@@ -122,6 +141,9 @@ struct AppConfiguration: Codable {
         try validate()
         defaults.set(try JSONEncoder().encode(settings), forKey: "settings.v1")
         for (key, value) in try shortcuts.preferences() { defaults.set(value, forKey: key) }
+        if let profiles, let activeConfigurationID {
+            defaults.set(try JSONEncoder().encode(ConfigurationLibrary(activeID: activeConfigurationID, profiles: profiles)), forKey: "configurationProfiles.v1")
+        }
         Self.markCurrent(defaults)
     }
 
@@ -168,8 +190,10 @@ private indirect enum ConfigurationValue: Codable {
         case .object(let values):
             let allowed: String
             switch key {
-            case "": allowed = "formatVersion settings shortcuts"
-            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer"
+            case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
+            case "profiles": allowed = "id name settings shortcuts"
+            case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
+            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled"
             case "holdLayers": allowed = "id name holdShortcut favorites windowLayout"
             case "favorites", "children": allowed = "direction bundleID name url children groupMode action shortcut"
@@ -179,7 +203,7 @@ private indirect enum ConfigurationValue: Codable {
             case "shortcut": allowed = "keyCode modifiers keyLabel"
             case "shortcuts": allowed = "normal precision actions additional profileActions holdToActivate"
             case "normal", "precision", "motion":
-                allowed = path.hasPrefix("config.shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
+                allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
             case "scrollResponse":
                 allowed = "slowMultiplier fastMultiplier transitionSpeed"
                 guard Set(allowed.split(separator:" ").map(String.init)).isSubset(of:Set(values.keys)) else {
@@ -197,7 +221,7 @@ private indirect enum ConfigurationValue: Codable {
                     throw ConfigurationError("\(path): Fine speed cannot exceed Fast speed.")
                 }
             case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval"
-            case "profileGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
+            case "profileGestures", "appleLayerGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
             case "doubleTapSwipe", "singleTapSwipe", "twoFingerSingleTapSwipe", "twoFingerDoubleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
             case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
@@ -211,7 +235,7 @@ private indirect enum ConfigurationValue: Codable {
             }
             for (name, value) in values { try value.validate(key: name, path: path + "." + name) }
         case .array(let values):
-            if path.hasSuffix("." + key), ["profileNames", "profileGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
+            if path.hasSuffix("." + key), ["profileNames", "profileGestures", "appleLayerGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
                 guard values.count % 2 == 0 else { throw ConfigurationError("\(path) must contain alternating layer IDs and values.") }
                 var seen = Set<Double>()
                 for i in stride(from: 0, to: values.count, by: 2) {

@@ -1,5 +1,52 @@
 import Foundation
 
+extension Notification.Name {
+    static let configurationProfileChanged = Notification.Name("Rotagivan.configurationProfileChanged")
+}
+
+// Portable top-level profiles own layer settings, Explorer layouts and shortcuts.
+// StoredSettings remains the active profile projection for legacy preferences.
+struct ProfileShortcut: Codable, Equatable {
+    var keyCode: UInt32 = 64
+    var modifiers: UInt32 = 0
+    var enabled = false
+    var holdToActivate: Bool? = nil
+    var keyLabel: String? = nil
+}
+
+struct ShortcutConfiguration: Codable {
+    var normal = ProfileShortcut()
+    var precision = ProfileShortcut(enabled: true)
+    var actions = [ProfileShortcut(keyCode: 79), ProfileShortcut(keyCode: 80), ProfileShortcut(keyCode: 90)]
+    var additional: [UInt32: ProfileShortcut] = [:]
+    var profileActions: [UInt32: [ProfileShortcut]] = [:]
+    var holdToActivate = true
+}
+
+enum GestureDevice: String, Codable, CaseIterable {
+    case navigator, apple
+    var title: String { self == .navigator ? "ZSA Navigator" : "Apple trackpad" }
+}
+
+struct ProfileDevices: Codable, Equatable {
+    var navigatorEnabled = true
+    var appleEnabled = true
+    var shareTapActions = true
+    var appleLayerGestures: [UInt32: ProfileGestures]? = nil
+}
+
+struct ConfigurationProfile: Codable, Identifiable {
+    var id: String
+    var name: String
+    var settings: StoredSettings
+    var shortcuts: ShortcutConfiguration
+}
+
+struct ConfigurationLibrary: Codable {
+    var activeID: String
+    var profiles: [ConfigurationProfile]
+}
+
 enum AppExplorerMode: String, Codable, CaseIterable {
     case favorites, recent
     var title: String { self == .favorites ? "Favorites" : "Recent apps" }
@@ -503,6 +550,8 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    var devices: ProfileDevices? = nil
+    var resolvedDevices: ProfileDevices { devices ?? ProfileDevices() }
     var appOverrides: [AppGestureOverride]? = nil
     var resolvedAppOverrides: [AppGestureOverride] { appOverrides ?? AppGestureOverride.defaults }
     var enabled = true
@@ -593,6 +642,12 @@ final class SettingsStore: ObservableObject {
     let cursorTelemetry = CursorTelemetry()
     @Published var settings: StoredSettings { didSet { save() } }
     @Published private(set) var activeProfileID: UInt32 = 1
+    @Published private(set) var configurationProfiles: [ConfigurationProfile] = []
+    @Published private(set) var activeConfigurationID = "default"
+    var captureShortcuts: (() -> ShortcutConfiguration)?
+    var restoreShortcuts: ((ShortcutConfiguration) -> Void)?
+    private var replacingProfile = false
+    private static let libraryKey = "configurationProfiles.v1"
 
     private static let storageKey = "settings.v1"
     private let defaults: UserDefaults
@@ -672,6 +727,82 @@ final class SettingsStore: ObservableObject {
             settings.sliderBaselineRevision = 4
         }
         activeProfileID = settings.resolvedDefaultProfileID
+        if let data = defaults.data(forKey: Self.libraryKey),
+           let library = try? JSONDecoder().decode(ConfigurationLibrary.self, from: data),
+           library.profiles.contains(where: { $0.id == library.activeID }) {
+            configurationProfiles = library.profiles
+            activeConfigurationID = library.activeID
+        } else {
+            configurationProfiles = [ConfigurationProfile(id: "default", name: "Default", settings: settings, shortcuts: ShortcutConfiguration())]
+        }
+    }
+
+    var activeConfigurationName: String {
+        configurationProfiles.first { $0.id == activeConfigurationID }?.name ?? "Default"
+    }
+
+    func profileSnapshot(shortcuts: ShortcutConfiguration? = nil) -> [ConfigurationProfile] {
+        var result = configurationProfiles
+        if let index = result.firstIndex(where: { $0.id == activeConfigurationID }) {
+            result[index].settings = settings
+            if let shortcuts = shortcuts ?? captureShortcuts?() { result[index].shortcuts = shortcuts }
+        }
+        return result
+    }
+
+    func renameConfiguration(_ name: String) {
+        guard let index = configurationProfiles.firstIndex(where: { $0.id == activeConfigurationID }) else { return }
+        let trimmed = String(name.prefix(80))
+        guard !trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        configurationProfiles[index].name = trimmed
+        save()
+    }
+
+    @discardableResult func addConfiguration() -> String {
+        guard configurationProfiles.count < 20 else { return activeConfigurationID }
+        configurationProfiles = profileSnapshot()
+        let id = UUID().uuidString
+        configurationProfiles.append(ConfigurationProfile(id: id, name: "Profile \(configurationProfiles.count + 1)",
+            settings: settings, shortcuts: captureShortcuts?() ?? configurationProfiles.first { $0.id == activeConfigurationID }!.shortcuts))
+        selectConfiguration(id)
+        return id
+    }
+
+    func selectConfiguration(_ id: String) {
+        guard id != activeConfigurationID, configurationProfiles.contains(where: { $0.id == id }) else { return }
+        configurationProfiles = profileSnapshot()
+        guard let target = configurationProfiles.first(where: { $0.id == id }) else { return }
+        replacingProfile = true
+        let enabled = settings.enabled, launch = settings.launchAtLogin
+        activeConfigurationID = id
+        var selected = target.settings
+        selected.enabled = enabled
+        selected.launchAtLogin = launch
+        settings = selected
+        activeProfileID = selected.resolvedDefaultProfileID
+        restoreShortcuts?(target.shortcuts)
+        cursorTelemetry.reset()
+        replacingProfile = false
+        save()
+        NotificationCenter.default.post(name: .configurationProfileChanged, object: settings.resolvedDefaultProfileID)
+    }
+
+    func replaceLibrary(_ profiles: [ConfigurationProfile]?, activeID: String?, shortcuts: ShortcutConfiguration) {
+        configurationProfiles = profiles ?? [ConfigurationProfile(id: "default", name: "Default", settings: settings, shortcuts: shortcuts)]
+        activeConfigurationID = activeID ?? "default"
+        if let index = configurationProfiles.firstIndex(where: { $0.id == activeConfigurationID }) {
+            configurationProfiles[index].settings = settings
+            configurationProfiles[index].shortcuts = shortcuts
+        }
+        persistLibrary()
+        NotificationCenter.default.post(name: .configurationProfileChanged, object: settings.resolvedDefaultProfileID)
+    }
+
+    private func persistLibrary() {
+        guard !configurationProfiles.isEmpty else { return }
+        if let data = try? JSONEncoder().encode(ConfigurationLibrary(activeID: activeConfigurationID, profiles: profileSnapshot())) {
+            defaults.set(data, forKey: Self.libraryKey)
+        }
     }
 
     var activeProfile: MotionProfile {
@@ -680,8 +811,26 @@ final class SettingsStore: ObservableObject {
 
     @Published var foregroundBundleID: String?
     var activeGestures: ProfileGestures {
-        let base = settings.effectiveGestures(for: activeProfileID)
+        activeGestures(for: .navigator)
+    }
+
+    func activeGestures(for device: GestureDevice) -> ProfileGestures {
+        let base = gestures(for: activeProfileID, device: device)
         return settings.resolvedAppOverrides.first { $0.enabled && $0.bundleID == foregroundBundleID }?.applying(to: base) ?? base
+    }
+
+    func gestures(for id: UInt32, device: GestureDevice) -> ProfileGestures {
+        if device == .apple, !settings.resolvedDevices.shareTapActions,
+           let override = settings.devices?.appleLayerGestures?[id] { return override }
+        return settings.effectiveGestures(for: id)
+    }
+
+    func updateAppleGestures(_ value: ProfileGestures?, for id: UInt32) {
+        var devices = settings.resolvedDevices
+        var overrides = devices.appleLayerGestures ?? [:]
+        overrides[id] = value
+        devices.appleLayerGestures = overrides.isEmpty ? nil : overrides
+        settings.devices = devices
     }
 
     func updateGestures(_ value: ProfileGestures, for id: UInt32) {
@@ -757,9 +906,11 @@ final class SettingsStore: ObservableObject {
     }
 
     private func save() {
+        guard !replacingProfile else { return }
         if let data = try? JSONEncoder().encode(settings) {
             defaults.set(data, forKey: Self.storageKey)
         }
+        persistLibrary()
     }
 
     private func importZSASettingsIfPresent() {

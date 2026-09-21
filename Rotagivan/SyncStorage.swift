@@ -51,6 +51,12 @@ extension AppConfiguration {
         var portable = self
         portable.settings.enabled = true
         portable.settings.launchAtLogin = false
+        portable.profiles = portable.profiles?.map { profile in
+            var profile = profile
+            profile.settings.enabled = true
+            profile.settings.launchAtLogin = false
+            return profile
+        }
         func canonical(_ value: Any, key: String = "") -> Any {
             if let object = value as? [String: Any] {
                 return object.reduce(into: [String: Any]()) { result, entry in
@@ -58,7 +64,7 @@ extension AppConfiguration {
                 }
             }
             if let array = value as? [Any] {
-                if ["profileGestures", "sliderBaselines", "additional", "profileActions", "profileNames"].contains(key), array.count % 2 == 0 {
+                if ["profileGestures", "appleLayerGestures", "sliderBaselines", "additional", "profileActions", "profileNames"].contains(key), array.count % 2 == 0 {
                     var pairs: [(String, Any)] = []
                     for i in stride(from: 0, to: array.count, by: 2) { pairs.append((String(describing: array[i]), canonical(array[i + 1]))) }
                     return pairs.sorted { $0.0 < $1.0 }.flatMap { [$0.0, $0.1] }

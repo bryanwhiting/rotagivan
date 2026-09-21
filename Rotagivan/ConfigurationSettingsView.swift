@@ -48,7 +48,7 @@ struct ConfigurationSettingsView: View {
             }
         }
         .sheet(isPresented: $showingImport) { importer }
-        .confirmationDialog("Restore the bundled defaults? This replaces every layer and shortcut. You can undo it.", isPresented: $confirmDefaults) {
+        .confirmationDialog("Restore the bundled defaults? This replaces every profile, layer and shortcut. You can undo it.", isPresented: $confirmDefaults) {
             Button("Restore defaults", role: .destructive) { perform {
                 try apply(AppConfiguration.factory())
                 status = "Bundled defaults restored."
@@ -96,7 +96,7 @@ struct ConfigurationSettingsView: View {
         }
         .padding(24).frame(width: 620, height: 510)
         .onChange(of: text) { _, _ in candidate = nil; error = nil }
-        .confirmationDialog("Replace all layers and shortcuts with this YAML? Your current configuration will be saved for Undo.", isPresented: $confirmImport) {
+        .confirmationDialog("Replace all profiles, layers and shortcuts with this YAML? Your current configuration will be saved for Undo.", isPresented: $confirmImport) {
             Button("Replace configuration", role: .destructive) {
                 guard let candidate else { return }
                 perform {
@@ -158,6 +158,7 @@ struct ConfigurationSettingsView: View {
         ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
             actions: keys.actions, additional: keys.additional, profileActions: keys.profileActions,
             holdToActivate: keys.holdToActivate)
+        store.replaceLibrary(config.profiles, activeID: config.activeConfigurationID, shortcuts: keys)
         AppConfiguration.markCurrent(.standard)
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)

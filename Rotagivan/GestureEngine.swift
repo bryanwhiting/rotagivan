@@ -16,8 +16,9 @@ final class GestureEngine {
     // Temporary UI interaction, never persisted to profiles: normal pointer and
     // scroll response, immediate click taps, and no app/keyboard swipe actions.
     private var activeGestures: ProfileGestures {
-        guard isEditingInterface else { return store.activeGestures }
-        var settings = store.activeGestures.gestures
+        let resolved = store.activeGestures(for: inputMode == .nativeActions ? .apple : .navigator)
+        guard isEditingInterface else { return resolved }
+        var settings = resolved.gestures
         settings.tapToClick = true
         settings.tapMaxDuration = max(0.25, settings.tapMaxDuration)
         settings.tapMaxMovement = max(30, settings.tapMaxMovement)

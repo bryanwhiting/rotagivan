@@ -10,7 +10,7 @@ struct ConfigurationTests {
             }
         }
         if let list = value as? [Any] {
-            if ["profileNames", "profileGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
+            if ["profileNames", "profileGestures", "appleLayerGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
                 precondition(list.count % 2 == 0)
                 var map: [String: Any] = [:]
                 for i in stride(from: 0, to: list.count, by: 2) {
@@ -38,6 +38,21 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var nested = factory
+        nested.profiles = [ConfigurationProfile(id: "work", name: "Work", settings: factory.settings, shortcuts: factory.shortcuts),
+            ConfigurationProfile(id: "travel", name: "Travel", settings: factory.settings, shortcuts: factory.shortcuts)]
+        nested.activeConfigurationID = "work"
+        nested.profiles![1].settings.devices = ProfileDevices(navigatorEnabled: false, appleEnabled: true, shareTapActions: false,
+            appleLayerGestures: [1: ProfileGestures(gestures: GestureSettings(), oneFingerTap: .appExplorer, twoFingerTap: .windowManager)])
+        let nestedRoundtrip = try AppConfiguration.parse(nested.yaml())
+        precondition(tryEqual(nested, nestedRoundtrip), "All profiles and device overrides must survive YAML roundtrip")
+        var invalidProfile = nested
+        invalidProfile.profiles![1].settings.devices!.appleLayerGestures![999] = invalidProfile.profiles![1].settings.devices!.appleLayerGestures![1]
+        do { try invalidProfile.validate(); fatalError("Accepted Apple override for a missing layer") } catch {}
+        invalidProfile = nested
+        invalidProfile.activeConfigurationID = "missing"
+        do { try invalidProfile.validate(); fatalError("Accepted missing active profile") } catch {}
+        print("Multi-profile YAML passed: inactive settings, Explorer/shortcuts, device overrides and invalid-reference rejection.")
         let exported = try factory.yaml()
         let roundtrip = try AppConfiguration.parse(exported)
         precondition(tryEqual(factory, roundtrip))

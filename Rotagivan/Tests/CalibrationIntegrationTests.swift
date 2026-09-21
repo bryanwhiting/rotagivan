@@ -147,6 +147,40 @@ private final class CalibrationPoster: GestureEventPosting {
     }
 
     @MainActor static func main() {
+        check { f in
+            var taps = f.store.activeGestures
+            taps.oneFingerTap = .enter
+            f.store.updateGestures(taps, for: 1)
+            f.store.settings.devices = ProfileDevices(navigatorEnabled: false, appleEnabled: true, shareTapActions: false)
+            var apple = taps
+            apple.oneFingerTap = .appExplorer
+            f.store.updateAppleGestures(apple, for: 1)
+            f.send(1, x: 500); f.send(1.03)
+            precondition(!f.explorer.isVisible && f.poster.actions == 0, "Disabled Navigator must not dispatch actions")
+            f.sendApple(2, x: 500); f.sendApple(2.03)
+            precondition(f.explorer.isVisible && f.applePoster.actions == 0, "Apple engine must use its layer override, not the shared Enter action")
+            f.explorer.dismiss()
+            f.store.settings.devices?.appleEnabled = false
+            f.sendApple(3, x: 500); f.sendApple(3.03)
+            precondition(!f.explorer.isVisible, "Profile-level Apple disable suppresses custom actions")
+        }
+        check { f in
+            f.store.settings.devices = ProfileDevices(shareTapActions: false)
+            let original = f.store.settings.gestures(for: 1)
+            f.store.updateAppleGestures(original, for: 1)
+            let session = GestureCalibrationSession(profileID: 1, profileName: "Apple", mode: .doubleTap, gestures: original)
+            f.hid.startCalibrationSession(session, at: f.start, device: .apple)
+            for index in 0..<10 {
+                let t = 1.0 + Double(index) * 3
+                f.sendApple(t, x: 500); f.sendApple(t + 0.03)
+                f.sendApple(t + 0.18, x: 500); f.sendApple(t + 0.21)
+            }
+            precondition(session.isComplete)
+            f.hid.applyCalibration()
+            precondition(f.store.settings.gestures(for: 1) == original, "Apple calibration must not modify shared Navigator settings")
+            precondition(abs(f.store.gestures(for: 1, device: .apple).gestures.resolvedDoubleTapInterval - 0.18) < 0.0001)
+        }
+        print("Device profiles passed: per-device dispatch, disabled drivers, and isolated Apple calibration.")
         for action in [TapAction.appExplorer, .windowManager] {
             for clickAfterLift in [false, true] {
                 let f = CalibrationFixture(appleActionsEnabled: true, appleHUDDelay: 0.08)

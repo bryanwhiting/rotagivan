@@ -7,14 +7,6 @@ extension Notification.Name {
     static let shortcutRecordingStopped = Notification.Name("Rotagivan.shortcutRecordingStopped")
 }
 
-struct ProfileShortcut: Codable, Equatable {
-    var keyCode: UInt32 = 64
-    var modifiers: UInt32 = 0
-    var enabled = false
-    var holdToActivate: Bool? = nil
-    var keyLabel: String? = nil
-}
-
 @MainActor
 final class ShortcutSettings: ObservableObject {
     static let shared = ShortcutSettings()
@@ -175,6 +167,19 @@ final class HotKeyManager {
 
     func install() {
         guard handler == nil else { return }
+        NotificationCenter.default.publisher(for: .configurationProfileChanged).sink { [weak self] notification in
+            guard let self, let id = notification.object as? UInt32 else { return }
+            // Layer IDs are reused across top-level profiles. Even when the
+            // default ID is unchanged, a latched layer from the old profile
+            // must not leak into the newly selected configuration.
+            self.defaultProfileID = id
+            self.activation = ProfileActivationState(defaultID: id)
+            self.onProfileChanged?(id)
+            if !self.recording {
+                let keys = ShortcutSettings.shared
+                self.register(normal: keys.normal, precision: keys.precision, additional: keys.additional)
+            }
+        }.store(in: &recordingObservers)
         NotificationCenter.default.publisher(for: .shortcutRecordingStarted).sink { [weak self] _ in
             guard let self else { return }
             self.recording = true

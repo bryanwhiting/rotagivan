@@ -49,6 +49,15 @@ import Foundation
         var machine = config
         machine.settings.enabled.toggle(); machine.settings.launchAtLogin.toggle()
         check(try machine.syncFingerprint() == config.syncFingerprint())
+        var profiles = config
+        profiles.activeConfigurationID = "default"
+        profiles.profiles = [ConfigurationProfile(id: "default", name: "Default", settings: config.settings, shortcuts: config.shortcuts)]
+        var localProfileSwitches = profiles
+        localProfileSwitches.profiles![0].settings.enabled.toggle()
+        localProfileSwitches.profiles![0].settings.launchAtLogin.toggle()
+        check(try profiles.syncFingerprint() == localProfileSwitches.syncFingerprint())
+        localProfileSwitches.profiles![0].name = "Renamed"
+        check(try profiles.syncFingerprint() != localProfileSwitches.syncFingerprint())
         var order = config
         order.settings.profileNames = [1:"One",2:"Two",100:"Three"]
         order.settings.customTapProfiles = [1,2]

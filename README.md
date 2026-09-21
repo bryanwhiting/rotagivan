@@ -4,11 +4,22 @@ An editable, independent macOS driver and settings app for the ZSA Navigator Tra
 
 ## App Explorer appearance
 
-Choose **General → App Explorer → Classic / Vector HUD / Ember**, or use the
+Choose **App Explorer → Classic / Vector HUD / Ember / Starburst**, or use the
 palette menu while editing the Explorer directly. Vector HUD is the new default:
 dark instrument panels, cyan targeting brackets, a directional reticle, and a
 live destination preview in Window Manager. Ember uses a warm amber cockpit
 palette; Classic retains the native material appearance.
+
+**Starburst** is a violet radial HUD with eight pointed sectors. The outer
+choices retain their swipe directions while each group you enter leaves a
+concentric inner ring. Its highlighted segment records the direction taken at
+that level; the title/breadcrumb identifies the group and the center displays
+the current level number. Center tap goes back one level (or closes at the
+root). Nested groups, Recent-app groups, Window Manager, and Media Controls use
+the same design. It supports the full four-group depth plus a controls level.
+Short ring reveals respect Animate HUD feedback and Reduce Motion; no input
+timers, looping effects, or new gesture thresholds are introduced. Your existing
+theme remains selected until you choose Starburst.
 
 Appearance is shared across Explorer groups, hold layers, window controls, and
 media controls, and is included in YAML/cloud configuration syncing. It does not

@@ -64,6 +64,9 @@ xcrun swiftc "${common[@]}" Rotagivan/WebsiteFavicon.swift Rotagivan/Tests/Favic
 xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/Tests/WindowTilingTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/WindowTilingTests"
 "$test_dir/WindowTilingTests"
+xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/ExplorerAppearance.swift Rotagivan/Tests/StarburstTests.swift \
+  -framework AppKit -framework SwiftUI -o "$test_dir/StarburstTests"
+"$test_dir/StarburstTests"
 xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/Tests/ExplorerCursorCenteringTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/ExplorerCursorCenteringTests"
 "$test_dir/ExplorerCursorCenteringTests"

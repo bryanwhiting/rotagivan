@@ -98,6 +98,7 @@ import SwiftUI
         try render(ExplorerDestinationPicker(direction: .left, onSave: { _, _ in }, onCancel: {}, query: "https://example.com/docs", loadApplications: { [] }),
             size: CGSize(width: 540, height: 500), path: CommandLine.arguments[1] + "/url-picker.png")
         var settings = AppExplorerSettings()
+        settings.theme = .starburst // Exercise actual group routing with the radial HUD too.
         settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari"), at: .up)
         settings.setFavorite(AppExplorerFavorite(direction: .left, bundleID: "com.apple.finder", name: "Finder"), at: .left)
         settings.setFavorite(AppExplorerFavorite(direction: .right, name: "Project docs", url: "https://example.com/docs"), at: .right)
@@ -247,6 +248,7 @@ import SwiftUI
         precondition(controller.groupPath.isEmpty, "Drain trigger before entering a group")
         swipeLeft()
         precondition(controller.isVisible && controller.groupPath == [.left] && dismissals == 0)
+        precondition(controller.displayedLevelDirections == [.left])
         controller.process(report(nil))
         precondition(controller.groupPath == [.left], "Trailing lift cannot go back")
         controller.process(report(500))
@@ -263,8 +265,10 @@ import SwiftUI
         try groupBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/group-hud.png"))
         swipeLeft()
         precondition(controller.groupPath == [.left, .left] && controller.isVisible)
+        precondition(controller.displayedLevelDirections == [.left, .left], "Duplicate-direction groups still occupy distinct rings")
         centerTap()
         precondition(controller.groupPath == [.left] && dismissals == 0)
+        precondition(controller.displayedLevelDirections == [.left], "Back removes exactly one ring")
         controller.process(report(500))
         controller.goBack() // Clicking center while a contact remains down drains it.
         controller.process(report(400)); controller.process(report(nil))
@@ -393,8 +397,15 @@ import SwiftUI
         if let first = controller.displayedEntries.first {
             let count = openedApps.count
             swipeLeft()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-            precondition(!controller.isVisible && openedApps.count == count + 1)
+            // Activation is queued after panel teardown. A fixed 100 ms sleep
+            // races native layout under test/compiler load; wait for the
+            // actual callback, retaining the exact-once assertion below.
+            let activationDeadline = Date().addingTimeInterval(2)
+            while openedApps.count == count && Date() < activationDeadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+            precondition(!controller.isVisible && openedApps.count == count + 1,
+                "Recent selection: visible=\(controller.isVisible), opens=\(openedApps.count), expected=\(count + 1), target=\(first.name)")
             precondition(openedApps.last == first.url, "Left selects the most recently used eligible app")
         } else {
             centerTap()
@@ -632,6 +643,18 @@ import SwiftUI
             try render(view, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue).png")
             let reducedView = AppExplorerView(model: themedModel, onSelect: { _ in }, onCancel: {}, forceReduceMotion: true)
             try render(reducedView, size: CGSize(width: 470, height: 464), path: CommandLine.arguments[1] + "/theme-\(theme.rawValue)-reduced-motion.png")
+            if theme == .starburst {
+                let names = ["Workspace", "Design", "Research", "Projects", "Media Controls"]
+                let directions: [SwipeDirection] = [.down, .left, .topRight, .up, .right]
+                for depth in 1...5 {
+                    themedModel.groupNames = Array(names.prefix(depth))
+                    themedModel.groupDirections = Array(directions.prefix(depth))
+                    try render(view, size: CGSize(width: 470, height: 464),
+                        path: CommandLine.arguments[1] + "/starburst-level-\(depth + 1).png")
+                }
+                themedModel.groupNames = []
+                themedModel.groupDirections = []
+            }
             themedModel.showingWindowManager = true
             themedModel.canEdit = false
             themedModel.groupNames = ["Window Manager"]
@@ -645,7 +668,7 @@ import SwiftUI
         }
         try render(ExplorerThemePicker(theme: .constant(.vector)).padding(16).frame(width: 510).background(Color(nsColor: .windowBackgroundColor)),
             size: CGSize(width: 510, height: 150), path: CommandLine.arguments[1] + "/theme-picker.png")
-        print("Explorer theme snapshots passed: Classic/Vector/Ember, Reduce Motion, selected layout previews, and appearance picker.")
+        print("Explorer theme snapshots passed: Classic/Vector/Ember/Starburst, nested Starburst levels, Reduce Motion, selected layouts, and appearance picker.")
         precondition(!ExplorerHUDMotion.enabled(theme: .vector, preference: true, reduceMotion: true))
         precondition(!ExplorerHUDMotion.enabled(theme: .ember, preference: false, reduceMotion: false))
         precondition(!ExplorerHUDMotion.enabled(theme: .native, preference: true, reduceMotion: false))

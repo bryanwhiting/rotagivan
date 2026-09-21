@@ -18,10 +18,12 @@ extension ExplorerTheme {
         case .native: return .teal
         case .vector: return Color(red: 0.38, green: 0.94, blue: 0.91)
         case .ember: return Color(red: 1, green: 0.69, blue: 0.35)
+        case .starburst: return Color(red: 0.73, green: 0.65, blue: 1)
         }
     }
     var surface: Color {
-        self == .ember ? Color(red: 0.10, green: 0.075, blue: 0.065) : Color(red: 0.035, green: 0.075, blue: 0.105)
+        if self == .starburst { return Color(red: 0.055, green: 0.043, blue: 0.105) }
+        return self == .ember ? Color(red: 0.10, green: 0.075, blue: 0.065) : Color(red: 0.035, green: 0.075, blue: 0.105)
     }
 }
 
@@ -35,6 +37,12 @@ struct ExplorerHUDBackdrop: View {
             RoundedRectangle(cornerRadius: 26).fill(.ultraThinMaterial)
                 .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(.white.opacity(0.2)))
                 .overlay { if reduceTransparency { RoundedRectangle(cornerRadius: 26).fill(Color(nsColor: .windowBackgroundColor)) } }
+        } else if theme == .starburst {
+            RoundedRectangle(cornerRadius: 26)
+                .fill(LinearGradient(colors: [theme.surface, Color(red: 0.09, green: 0.065, blue: 0.17)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(theme.accent.opacity(0.28)))
+                .accessibilityHidden(true).allowsHitTesting(false)
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 22).fill(theme.surface)
@@ -99,12 +107,22 @@ struct ExplorerThemePicker: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ZStack {
                             ExplorerHUDBackdrop(theme: option)
+                            if option == .starburst {
+                                ZStack {
+                                    ForEach(SwipeDirection.allCases, id: \.self) { direction in
+                                        ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
+                                            .fill(option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
+                                    }
+                                    Circle().stroke(option.accent.opacity(0.8), lineWidth: 1).frame(width: 12, height: 12)
+                                }.frame(width: 58, height: 58)
+                            } else {
                             HStack(spacing: 5) {
                                 ForEach(0..<3) { index in
                                     RoundedRectangle(cornerRadius: 4)
                                         .fill(option.accent.opacity(index == 1 ? 0.75 : 0.16))
                                         .frame(width: 22, height: index == 1 ? 30 : 24)
                                 }
+                            }
                             }
                         }.frame(height: 60).clipShape(RoundedRectangle(cornerRadius: 9))
                         HStack(spacing: 4) {
@@ -122,6 +140,53 @@ struct ExplorerThemePicker: View {
                     .accessibilityAddTraits(theme == option ? .isSelected : [])
             }
         }
+    }
+}
+
+/// Fixed direction geometry: labels and hit targets never rotate when drilling
+/// into groups. Ancestors add inner rings; the current choices stay on the rim.
+enum ExplorerStarburstLayout {
+    static func angle(_ direction: SwipeDirection) -> Double {
+        switch direction {
+        case .up: return -90
+        case .topRight: return -45
+        case .right: return 0
+        case .bottomRight: return 45
+        case .down: return 90
+        case .bottomLeft: return 135
+        case .left: return 180
+        case .topLeft: return 225
+        }
+    }
+    static func point(_ direction: SwipeDirection, radius: Double, center: CGPoint) -> CGPoint {
+        let radians = angle(direction) * .pi / 180
+        return CGPoint(x: center.x + cos(radians) * radius, y: center.y + sin(radians) * radius)
+    }
+    static func ringRadius(_ level: Int) -> Double { 35 + Double(max(0, min(4, level))) * 9 }
+    static func innerRadius(depth: Int) -> Double { 48 + Double(max(0, min(5, depth))) * 9 }
+}
+
+struct ExplorerStarburstSector: Shape {
+    let direction: SwipeDirection
+    let innerRadius: Double
+    let outerRadius: Double
+    var tip: Double = 0
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let middle = ExplorerStarburstLayout.angle(direction)
+        let start = Angle.degrees(middle - 20.5), end = Angle.degrees(middle + 20.5)
+        func point(_ angle: Angle, _ radius: Double) -> CGPoint {
+            CGPoint(x: center.x + cos(angle.radians) * radius, y: center.y + sin(angle.radians) * radius)
+        }
+        var path = Path()
+        path.move(to: point(start, innerRadius))
+        path.addLine(to: point(start, outerRadius))
+        path.addLine(to: point(.degrees(middle), outerRadius + tip))
+        path.addLine(to: point(end, outerRadius))
+        path.addLine(to: point(end, innerRadius))
+        path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
+        path.closeSubpath()
+        return path
     }
 }
 

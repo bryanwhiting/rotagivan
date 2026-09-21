@@ -46,6 +46,7 @@ extension AppExplorerPresenting {
     var cursorPosition: () -> CGPoint? = { CGEvent(source: nil)?.location }
     var centerApplication: ((pid_t, CGPoint?, @escaping () -> Bool) -> Void)?
     private var tilingTarget: WindowTilingTarget?
+    private var controlDirection: SwipeDirection?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
@@ -70,6 +71,7 @@ extension AppExplorerPresenting {
     var isVisible: Bool { panel != nil }
     var isEditing: Bool { model.isEditing }
     var displayedEntries: [ExplorerEntry] { model.entries }
+    var displayedLevelDirections: [SwipeDirection] { model.groupDirections }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -124,6 +126,7 @@ extension AppExplorerPresenting {
         model.directWindowManager = windowManager
         model.message = nil
         tilingTarget = nil
+        controlDirection = nil
         model.canEdit = editingStore != nil
         contactIsDown = waitingForLift
         sourcePID = frontmostPID()
@@ -217,6 +220,9 @@ extension AppExplorerPresenting {
         model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
+        model.groupDirections = groupPath
+        if model.showingMediaControls || (model.showingWindowManager && !model.directWindowManager),
+           let controlDirection { model.groupDirections.append(controlDirection) }
         let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
         model.showingRecents = model.mode == .recent || recentGroup
         model.canEdit = editingStore != nil && !model.showingWindowManager && !model.showingMediaControls && layer == nil
@@ -302,6 +308,7 @@ extension AppExplorerPresenting {
             return
         }
         if entry?.isMediaControls == true {
+            controlDirection = direction
             model.showingMediaControls = true
             refreshGroup()
             return
@@ -318,6 +325,7 @@ extension AppExplorerPresenting {
             return
         }
         if entry?.isWindowManager == true {
+            controlDirection = direction
             model.showingWindowManager = true
             tilingTarget = sourcePID.flatMap(captureWindow)
             model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
@@ -383,6 +391,7 @@ extension AppExplorerPresenting {
         if model.showingMediaControls {
             guard contextIsValid?() != false else { dismiss(); return }
             model.showingMediaControls = false
+            controlDirection = nil
             refreshGroup()
             return
         }
@@ -390,6 +399,7 @@ extension AppExplorerPresenting {
             guard contextIsValid?() != false else { dismiss(); return }
             if model.directWindowManager { dismiss(); return }
             model.showingWindowManager = false
+            controlDirection = nil
             model.message = nil
             tilingTarget = nil
             refreshGroup()
@@ -479,6 +489,7 @@ extension AppExplorerPresenting {
         model.selected = nil
         groupPath = []
         model.groupNames = []
+        model.groupDirections = []
         model.showingWindowManager = false
         model.directWindowManager = false
         model.showingMediaControls = false
@@ -553,6 +564,7 @@ struct ExplorerEntry {
     @Published var selected: SwipeDirection?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
+    @Published var groupDirections: [SwipeDirection] = []
     @Published var canEdit = false
     @Published var isEditing = false
     @Published var showingRecents = false
@@ -606,6 +618,9 @@ struct AppExplorerView: View {
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
                     .buttonStyle(.plain).accessibilityLabel("Close App Explorer")
             }
+            if model.theme == .starburst {
+                starburst
+            } else {
             VStack(spacing: 8) {
                 ForEach(0..<3) { row in
                     HStack(spacing: 8) {
@@ -638,6 +653,7 @@ struct AppExplorerView: View {
                     }
                 }
             }
+            }
             Text(model.message ?? (model.showingMediaControls ? "Swipe to control · repeat to adjust · center tap to go back" : (model.showingWindowManager ? "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" : (model.entries.isEmpty ? (model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites.") : (model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit")))))
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
             if !model.layerHint.isEmpty { Text("Hold \(model.layerHint)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
@@ -661,6 +677,110 @@ struct AppExplorerView: View {
         .transaction { if !animates { $0.animation = nil } }
     }
 
+    private var starburst: some View {
+        let names = model.directWindowManager ? [] : model.groupNames
+        let depth = min(5, names.count)
+        let center = CGPoint(x: 209, y: 155)
+        return ZStack {
+            // Each completed level leaves a concentric breadcrumb. The lit
+            // sector records the direction taken at that level, not a guess
+            // based on a group's name (duplicate names are allowed).
+            ForEach(0..<depth, id: \.self) { level in
+                let radius = ExplorerStarburstLayout.ringRadius(level)
+                let direction = model.groupDirections.indices.contains(level) ? model.groupDirections[level] : nil
+                ForEach(SwipeDirection.allCases, id: \.self) { sector in
+                    ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6)
+                        .fill(direction == sector ? accent.opacity(0.95 - Double(level) * 0.1) : accent.opacity(0.12))
+                        .frame(width: 418, height: 310)
+                        .accessibilityHidden(true)
+                }
+                .transition(.opacity)
+            }
+            ForEach(SwipeDirection.allCases, id: \.self) { direction in
+                starburstChoice(direction, depth: depth, center: center)
+            }
+            Button(action: onBack) {
+                VStack(spacing: 3) {
+                    Image(systemName: canGoBack ? "arrow.uturn.backward" : "xmark")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(String(format: "%02d", depth + 1))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                }
+                .foregroundStyle(accent)
+                .frame(width: 54, height: 54)
+                .background(Circle().fill(model.theme.surface))
+                .overlay(Circle().strokeBorder(accent.opacity(0.45)))
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .position(center)
+            .help(canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")
+            .accessibilityLabel("\(canGoBack ? "Back to parent group" : "Close App Explorer"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+        }
+        .frame(width: 418, height: 310)
+        .animation(feedback, value: names)
+    }
+
+    private func starburstChoice(_ direction: SwipeDirection, depth: Int, center: CGPoint) -> some View {
+        let entry = model.entries.first { $0.direction == direction }
+        let available = isAvailable(entry)
+        let selected = model.selected == direction && available
+        let shape = ExplorerStarburstSector(direction: direction,
+            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: 11)
+        let point = ExplorerStarburstLayout.point(direction, radius: 116, center: center)
+        return Button { onSelect(direction) } label: {
+            ZStack {
+                shape.fill(LinearGradient(colors: [accent.opacity(selected ? 0.38 : 0.08),
+                    accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
+                shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
+                VStack(spacing: 3) {
+                    if let entry {
+                        entrySymbol(entry).scaleEffect(0.55).frame(width: 24, height: 24)
+                        Text(entry.name).font(.system(size: 9, weight: .medium))
+                            .lineLimit(2).multilineTextAlignment(.center)
+                    } else {
+                        Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
+                        Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(width: 78, height: 50)
+                .foregroundStyle(selected ? Color.white : Color.white.opacity(0.85))
+                .position(point)
+            }
+            .frame(width: 418, height: 310)
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain).disabled(!available)
+        .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .animation(feedback, value: selected)
+    }
+
+    private func isAvailable(_ entry: ExplorerEntry?) -> Bool {
+        guard let entry else { return false }
+        return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
+            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil
+    }
+
+    @ViewBuilder private func entrySymbol(_ entry: ExplorerEntry) -> some View {
+        if entry.isMediaControls || entry.mediaAction != nil {
+            Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.shortcut != nil {
+            Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if let direction = entry.tilingDirection {
+            WindowTileIcon(direction: direction, layout: model.windowLayout, accent: accent)
+        } else if entry.isWindowManager {
+            Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.isGroup {
+            Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.isWebURL {
+            WebsiteFavicon(url: entry.url, size: 42)
+        } else {
+            Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
+        }
+    }
+
     private func reticleAngle(_ direction: SwipeDirection?) -> Double {
         switch direction {
         case .up: return -135
@@ -677,26 +797,12 @@ struct AppExplorerView: View {
 
     private func tile(_ direction: SwipeDirection) -> some View {
         let entry = model.entries.first { $0.direction == direction }
-        let available = entry != nil && (entry?.url != nil || entry?.isGroup == true || entry?.isWindowManager == true || entry?.tilingDirection != nil || entry?.shortcut != nil || entry?.isMediaControls == true || entry?.mediaAction != nil)
+        let available = isAvailable(entry)
         let selected = model.selected == direction && available
         return Button { onSelect(direction) } label: {
             VStack(spacing: 5) {
                 if let entry {
-                    if entry.isMediaControls || entry.mediaAction != nil {
-                        Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
-                    } else if entry.shortcut != nil {
-                        Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
-                    } else if let direction = entry.tilingDirection {
-                        WindowTileIcon(direction: direction, layout: model.windowLayout, accent: accent)
-                    } else if entry.isWindowManager {
-                        Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
-                    } else if entry.isGroup {
-                        Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
-                    } else if entry.isWebURL {
-                        WebsiteFavicon(url: entry.url, size: 42)
-                    } else {
-                        Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
-                    }
+                    entrySymbol(entry)
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
                     if let shortcut = entry.shortcut { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }

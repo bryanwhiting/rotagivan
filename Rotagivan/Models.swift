@@ -56,12 +56,12 @@ enum AppExplorerMode: String, Codable, CaseIterable {
 enum AppExplorerAction: String, Codable { case windowManager, mediaControls }
 
 enum ExplorerTheme: String, Codable, CaseIterable {
-    case native, vector, ember
+    case native, vector, ember, starburst
     var title: String {
-        switch self { case .native: return "Classic"; case .vector: return "Vector HUD"; case .ember: return "Ember" }
+        switch self { case .native: return "Classic"; case .vector: return "Vector HUD"; case .ember: return "Ember"; case .starburst: return "Starburst" }
     }
     var subtitle: String {
-        switch self { case .native: return "Native · understated"; case .vector: return "Precision · electric"; case .ember: return "Warm · cinematic" }
+        switch self { case .native: return "Native · understated"; case .vector: return "Precision · electric"; case .ember: return "Warm · cinematic"; case .starburst: return "Radial · nested" }
     }
     var isHUD: Bool { self != .native }
 }

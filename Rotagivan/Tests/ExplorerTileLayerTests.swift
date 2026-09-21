@@ -54,7 +54,8 @@ import Foundation
         invalid.favorites[0].holdLayers = [thirds, wide]
         precondition(!invalid.hasValidFavorites, "Keys must be unique within one tile")
         invalid = settings; invalid.favorites[0].holdLayers![0].favorites = [baseApp]
-        precondition(!invalid.hasValidFavorites, "Window sizing layers cannot contain unused app slots")
+        invalid.favorites[0].holdLayers![0].windowTilesConfigured = true
+        precondition(invalid.hasValidFavorites, "Custom window layers may contain regular tiles")
         invalid = settings; invalid.favorites = [baseApp]; invalid.favorites[0].holdLayers = [thirds]
         precondition(!invalid.hasValidFavorites, "Terminal app tiles do not open layer scopes")
         invalid = settings; invalid.holdShortcut = y

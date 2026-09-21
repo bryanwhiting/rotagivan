@@ -21,12 +21,7 @@ struct ExplorerHoldLayerEditor: View {
                 Text("Tap to toggle").tag(ExplorerLayerActivation.toggle)
             }.pickerStyle(.segmented)
             if layer.holdShortcut != nil { Button("Clear hold key") { layer.holdShortcut = nil }.font(.caption) }
-            Picker("Window sizes", selection: $layer.windowLayout) {
-                ForEach(ExplorerWindowLayout.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            Text("Holding this key temporarily uses this layer’s apps or window sizes within its owning Explorer or tile. Release it to return. Cursor and tap layers are unchanged. For an app group, edit this layer’s slots in the grid after saving.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("For thirds, two thirds and fourths, edge placements use that fraction of the display; corners use it in both dimensions. Halves & quarters uses halves at edges and quarter-screen corners.")
+            Text("This key selects the layer’s tiles within its owning group. Hold temporarily or tap to toggle. Cursor and tap layers are unchanged. Edit the slots in the grid after saving; each window-position tile has its own size and placement.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !valid { Text("Use a name and a unique hold key (not Escape or the Explorer mode hotkey). Up to 16 layers and 256 total slots are supported.").font(.caption).foregroundStyle(.red) }
             HStack {

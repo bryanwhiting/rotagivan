@@ -38,6 +38,15 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var customWindows = factory
+        customWindows.settings.appExplorer = AppExplorerSettings(windowManager: ExplorerWindowSettings(favorites: [
+            AppExplorerFavorite(direction: .up, name: "Right two thirds", windowPlacement: ExplorerWindowPlacement(direction: .right, layout: .twoThirds))
+        ], slotCount: 12))
+        let windowRoundtrip = try AppConfiguration.parse(customWindows.yaml())
+        precondition(tryEqual(customWindows, windowRoundtrip), "Custom window placements must survive YAML")
+        let windowYAML = try customWindows.yaml()
+        rejected(windowYAML.replacingOccurrences(of: "twoThirds", with: "invalidPlacementSize"), "unknown window size")
+        print("Custom window-group YAML passed: per-slot placements and slot counts roundtrip; invalid sizes rejected")
         var sharedPointer = factory
         sharedPointer.settings.pointerMotion = factory.settings.resolvedPointerMotion
         sharedPointer.settings.pointerCoastBaseline = 0.83

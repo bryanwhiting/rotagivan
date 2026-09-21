@@ -38,7 +38,7 @@ import AppKit
         var invalid = manager
         invalid.bundleID = "com.apple.Safari"; precondition(!invalid.isValidDestination)
         invalid = manager; invalid.url = "https://example.com"; precondition(!invalid.isValidDestination)
-        invalid = manager; invalid.children = []; precondition(!invalid.isValidDestination)
+        invalid = manager; invalid.children = []; precondition(invalid.isValidDestination, "Window Manager is an editable group, including an empty group")
         invalid = manager; invalid.groupMode = .recent; precondition(!invalid.isValidDestination)
         let legacy = try JSONDecoder().decode(AppExplorerFavorite.self,
             from: Data(#"{"direction":"left","name":"Safari","bundleID":"com.apple.Safari"}"#.utf8))

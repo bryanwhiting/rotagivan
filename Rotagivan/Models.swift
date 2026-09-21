@@ -138,6 +138,33 @@ struct ExplorerWindowSettings: Codable, Equatable {
     var layout: ExplorerWindowLayout = .halves
     var layers: [ExplorerHoldLayer] = []
     var shortcuts: [ExplorerWindowShortcut] = []
+    var favorites: [AppExplorerFavorite]? = nil
+    var slotCount: Int? = nil
+}
+
+/// Placement is independent of the gesture slot that launches it.
+struct ExplorerWindowPlacement: Codable, Equatable {
+    var direction: SwipeDirection
+    var layout: ExplorerWindowLayout = .halves
+    var title: String {
+        if layout != .halves { return "\(direction.title) \(layout == .thirds ? "⅓" : layout == .fourths ? "¼" : "⅔")" }
+        switch direction {
+        case .left: return "Left half"
+        case .right: return "Right half"
+        case .up: return "Top half"
+        case .down: return "Bottom half"
+        case .topLeft: return "Top-left quarter"
+        case .topRight: return "Top-right quarter"
+        case .bottomLeft: return "Bottom-left quarter"
+        case .bottomRight: return "Bottom-right quarter"
+        }
+    }
+    static func tiles(layout: ExplorerWindowLayout) -> [AppExplorerFavorite] {
+        SwipeDirection.allCases.map {
+            let placement = Self(direction: $0, layout: layout)
+            return AppExplorerFavorite(direction: ExplorerSlot($0), name: placement.title, windowPlacement: placement)
+        }
+    }
 }
 
 enum ExplorerTheme: String, Codable, CaseIterable {
@@ -165,6 +192,9 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var windowLayout: ExplorerWindowLayout = .halves
     var slotCount: Int? = nil
     var activation: ExplorerLayerActivation? = nil
+    // Old Window Manager layers generated their slots from windowLayout.
+    // True distinguishes a deliberately empty custom grid from a legacy preset.
+    var windowTilesConfigured: Bool? = nil
 }
 
 // Explorer-local keys never register globally or alter cursor/tap layers.
@@ -196,6 +226,7 @@ struct AppExplorerFavorite: Codable, Equatable {
     var holdLayers: [ExplorerHoldLayer]? = nil
     var slotCount: Int? = nil
     var showsWindows: Bool? = nil
+    var windowPlacement: ExplorerWindowPlacement? = nil
     var supportsHoldLayers: Bool { isGroup || isWindowManager }
     var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
@@ -205,12 +236,15 @@ struct AppExplorerFavorite: Codable, Equatable {
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
         guard holdLayers == nil || supportsHoldLayers else { return false }
-        guard slotCount == nil || (isGroup && [4, 8, 12, 16].contains(slotCount!)) else { return false }
+        guard slotCount == nil || ((isGroup || isWindowManager) && [4, 8, 12, 16].contains(slotCount!)) else { return false }
+        if windowPlacement != nil {
+            return bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil && shortcut == nil && holdLayers == nil && slotCount == nil && showsWindows != true
+        }
         guard showsWindows != true || (bundleID != nil && action == nil && !isGroup && url == nil && shortcut == nil) else { return false }
         if let shortcut {
             return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil
         }
-        if action != nil { return bundleID == nil && url == nil && children == nil && groupMode == nil }
+        if action != nil { return bundleID == nil && url == nil && (children == nil || isWindowManager) && groupMode == nil }
         if isGroup { return bundleID == nil && url == nil }
         guard groupMode == nil else { return false }
         if url != nil { return bundleID == nil && resolvedWebURL != nil }
@@ -246,6 +280,65 @@ struct AppExplorerSettings: Codable, Equatable {
     var resolvedTheme: ExplorerTheme { theme ?? .vector }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
+    /// Present generated legacy window presets through the ordinary group editor.
+    /// The first edit saves explicit slots; an empty saved array stays empty.
+    func windowEditor(at path: [ExplorerSlot] = []) -> Self {
+        let tile = path.isEmpty ? nil : favorite(at: path)
+        let layout = windowManager?.layout ?? .halves
+        let layers = tile?.holdLayers ?? windowManager?.layers ?? holdLayers ?? []
+        let legacyExplorerLayers = tile?.holdLayers == nil && windowManager == nil
+        // Inside the window applet, another Window Manager tile is an ordinary
+        // nested group, not a recursive jump back to the shared applet root.
+        func editableTiles(_ entries: [AppExplorerFavorite]) -> [AppExplorerFavorite] {
+            entries.map { entry in
+                var result = entry
+                if entry.isWindowManager {
+                    result.action = nil
+                    result.children = entry.children ?? ExplorerWindowPlacement.tiles(layout: layout)
+                    result.slotCount = entry.slotCount ?? 8
+                }
+                if let children = result.children { result.children = editableTiles(children) }
+                result.holdLayers = result.holdLayers?.map { layer in
+                    var updated = layer
+                    let generated = entry.isWindowManager && layer.windowTilesConfigured != true && layer.favorites.isEmpty
+                    updated.favorites = editableTiles(generated ? ExplorerWindowPlacement.tiles(layout: layer.windowLayout) : layer.favorites)
+                    if entry.isWindowManager { updated.windowTilesConfigured = true }
+                    return updated
+                }
+                return result
+            }
+        }
+        return Self(favorites: editableTiles(tile?.children ?? windowManager?.favorites ?? ExplorerWindowPlacement.tiles(layout: layout)),
+            holdShortcut: holdShortcut, holdLayers: layers.map { layer in
+                var result = layer
+                if layer.windowTilesConfigured != true && (layer.favorites.isEmpty || legacyExplorerLayers) {
+                    result.favorites = ExplorerWindowPlacement.tiles(layout: layer.windowLayout)
+                    result.slotCount = 8
+                }
+                result.windowTilesConfigured = true
+                result.favorites = editableTiles(result.favorites)
+                return result
+            }, slotCount: tile?.slotCount ?? windowManager?.slotCount ?? 8)
+    }
+
+    @discardableResult mutating func saveWindowEditor(_ editor: Self, at path: [ExplorerSlot] = []) -> Bool {
+        var next = self
+        let layers = (editor.holdLayers ?? []).map { layer in
+            var result = layer; result.windowTilesConfigured = true; return result
+        }
+        if let direction = path.last {
+            guard var tile = favorite(at: path), tile.isWindowManager else { return false }
+            tile.children = editor.favorites; tile.holdLayers = layers; tile.slotCount = editor.slotCount ?? 8
+            guard next.setFavorite(tile, at: direction, in: Array(path.dropLast())) else { return false }
+        } else {
+            var window = windowManager ?? ExplorerWindowSettings()
+            window.favorites = editor.favorites; window.layers = layers; window.slotCount = editor.slotCount ?? 8
+            next.windowManager = window
+        }
+        guard next.hasValidFavorites else { return false }
+        self = next
+        return true
+    }
     func projected(layerID: UUID?) -> Self {
         guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
         var result = self
@@ -351,15 +444,14 @@ struct AppExplorerSettings: Codable, Equatable {
                 guard remaining >= 0, entry.isValidDestination else { return false }
                 if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1, count: entry.slotCount ?? 8) { return false }
                 if let layers = entry.holdLayers {
-                    guard !entry.isWindowManager || layers.allSatisfy({ $0.favorites.isEmpty }),
-                          validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth, count: entry.slotCount ?? 8) else { return false }
+                    guard validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth, count: entry.slotCount ?? 8) else { return false }
                 }
             }
             return true
         }
         if let windowManager {
-            guard windowManager.layers.allSatisfy({ $0.favorites.isEmpty }),
-                  validLayers(windowManager.layers, depth: 0, groupDepth: 0) else { return false }
+            guard valid(windowManager.favorites ?? [], depth: 0, count: windowManager.slotCount ?? 8),
+                  validLayers(windowManager.layers, depth: 0, groupDepth: 0, count: windowManager.slotCount ?? 8) else { return false }
             var keys = Set(windowManager.layers.compactMap { $0.holdShortcut }.map { "\($0.keyCode):\($0.modifiers)" })
             var commands = Set<AppExplorerAction>()
             for binding in windowManager.shortcuts {

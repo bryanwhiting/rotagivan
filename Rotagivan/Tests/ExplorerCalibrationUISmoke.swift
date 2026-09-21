@@ -439,7 +439,9 @@ import SwiftUI
             precondition(controller.isVisible && controller.displayedEntries.count == 8)
             precondition(controller.displayedEntries.allSatisfy { $0.tilingDirection != nil })
             controller.beginEditing()
-            precondition(!controller.isEditing, "Tiling mode must not activate the editor or lose the original window")
+            precondition(controller.isEditing, "Window groups use the ordinary inline editor")
+            controller.finishEditing()
+            precondition(!controller.isEditing && controller.isVisible, "Done returns to the original window group")
             if direction == .left {
                 let tilingPanel = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -475,7 +477,7 @@ import SwiftUI
         precondition(controller.groupPath.isEmpty && controller.isVisible)
         controller.dismiss()
         precondition(tiled.count == previousTileCount, "Back/cancel/missing targets never tile")
-        print("Window Manager native HUD passed: all directions, nested back navigation, capture failure, retry, and no editor/app activation.")
+        print("Window Manager native HUD passed: all directions, nested back navigation, capture failure, retry, and inline editing preserves the target window.")
         captureAvailable = true
         store.settings.appExplorer = AppExplorerSettings(defaultMode: .recent)
         controller.showWindowManager(waitingForLift: true)

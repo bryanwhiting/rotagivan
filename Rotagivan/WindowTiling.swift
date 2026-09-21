@@ -4,17 +4,7 @@ import SwiftUI
 
 enum WindowTile {
     static func title(_ direction: SwipeDirection, layout: ExplorerWindowLayout = .halves) -> String {
-        if layout != .halves { return "\(direction.title) \(layout == .thirds ? "⅓" : layout == .fourths ? "¼" : "⅔")" }
-        switch direction {
-        case .left: return "Left half"
-        case .right: return "Right half"
-        case .up: return "Top half"
-        case .down: return "Bottom half"
-        case .topLeft: return "Top-left quarter"
-        case .topRight: return "Top-right quarter"
-        case .bottomLeft: return "Bottom-left quarter"
-        case .bottomRight: return "Bottom-right quarter"
-        }
+        ExplorerWindowPlacement(direction: direction, layout: layout).title
     }
 
     // Top-left origin, matching Accessibility's global desktop coordinates.

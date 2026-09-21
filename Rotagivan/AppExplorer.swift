@@ -38,6 +38,9 @@ extension AppExplorerPresenting {
     private var alternateHeld = false
     private var heldKeys = ExplorerScopedHeldKeys()
     private var windowKeys = ExplorerScopedHeldKeys()
+    private var windowGroupPath: [ExplorerSlot] = []
+    private var baseWindowGroupPath: [ExplorerSlot] = []
+    private var windowOwnerPath: [ExplorerSlot]?
     private var windowList: [WindowTiling.AppWindow] = []
     private var windowPage = 0
     var listWindows: (pid_t) -> [WindowTiling.AppWindow] = { WindowTiling.windows(pid: $0) }
@@ -125,6 +128,7 @@ extension AppExplorerPresenting {
         groupPath = []
         heldKeys = ExplorerScopedHeldKeys()
         windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         windowList = []; windowPage = 0; model.showingAppWindows = false
         baseGroupPath = []
         model.showingMediaControls = false
@@ -199,14 +203,14 @@ extension AppExplorerPresenting {
     }
 
     private var layerScopePath: [ExplorerSlot] {
-        if (model.showingWindowManager && !model.directWindowManager) || model.showingMediaControls,
+        if model.showingWindowManager { return windowOwnerPath ?? [] }
+        if model.showingMediaControls,
            let controlDirection { return groupPath + [controlDirection] }
         return groupPath
     }
     private var windowConfiguration: AppExplorerSettings {
         let saved = configuration(), projected = heldKeys.resolved(saved)
-        let local = projected.favorite(at: layerScopePath)?.holdLayers
-        return AppExplorerSettings(holdLayers: local ?? saved.windowManager?.layers ?? saved.holdLayers ?? [])
+        return projected.windowEditor(at: windowOwnerPath ?? [])
     }
 
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
@@ -232,14 +236,21 @@ extension AppExplorerPresenting {
             }
             guard !fullScreen else { return true }
             let previous = windowKeys.activeID
+            let previousSettings = windowKeys.resolved(windowConfiguration)
             var handled = false
             switch event.type {
-            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: [], settings: windowConfiguration)
+            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: windowGroupPath, settings: windowConfiguration)
             case .keyUp: windowKeys.release(key: event.keyCode)
             case .flagsChanged: windowKeys.updateModifiers(flags)
             default: return false
             }
-            if previous != windowKeys.activeID { refreshGroup(); handled = true }
+            windowKeys.reconcile(windowConfiguration)
+            if previous != windowKeys.activeID || previousSettings != windowKeys.resolved(windowConfiguration) {
+                if previous == nil { baseWindowGroupPath = windowGroupPath }
+                if windowKeys.activeID == nil { windowGroupPath = baseWindowGroupPath }
+                else if windowKeys.activeScope?.isEmpty == true { windowGroupPath = [] }
+                refreshGroup(); handled = true
+            }
             return handled
         }
         let previous = heldKeys.activeID
@@ -311,60 +322,75 @@ extension AppExplorerPresenting {
             return
         }
         if model.showingWindowManager {
-            model.slotCount = 8
-            let windowLayer = windowKeys.activeLayer(at: [], in: windowConfiguration)
+            let windowBase = windowConfiguration
+            let window = windowKeys.resolved(windowBase)
+            while !windowGroupPath.isEmpty && window.favorites(at: windowGroupPath) == nil { windowGroupPath.removeLast() }
+            model.slotCount = window.count(at: windowGroupPath)
+            let windowLayer = windowKeys.activeLayer(at: windowGroupPath, in: windowBase)
             model.windowLayout = windowLayer?.windowLayout ?? original.windowManager?.layout ?? .halves
             model.layerName = windowLayer?.name
             let wasFullScreen = model.windowFullScreen
             model.windowFullScreen = tilingTarget?.isFullScreen() == true
             if wasFullScreen && !model.windowFullScreen { model.message = nil }
-            model.layerHint = model.windowFullScreen ? "" : (windowConfiguration.holdLayers ?? []).compactMap {
+            model.layerHint = model.windowFullScreen ? "" : window.layers(at: window.layerScope(at: windowGroupPath)).compactMap {
                 guard let key = $0.holdShortcut else { return nil }
                 return "\(key.displayName): \($0.name) (\($0.activation == .toggle ? "toggle" : "hold"))"
             }.joined(separator: " · ")
             model.groupNames.append("Window Manager")
+            model.groupNames += windowGroupPath.indices.compactMap { window.favorite(at: Array(windowGroupPath.prefix($0 + 1)))?.name }
+            model.groupDirections += windowGroupPath
+            model.groupSlotCounts += windowGroupPath.indices.map { window.count(at: Array(windowGroupPath.prefix($0))) }
+            model.canEdit = editingStore != nil && heldKeys.activeID == nil && windowKeys.activeID == nil && !model.windowFullScreen
             if model.windowFullScreen {
                 model.entries = [ExplorerEntry(direction: .up, bundleID: nil, name: "Exit full screen", icon: nil, url: nil, command: .exitFullScreen)]
                 model.message = "This window is full screen. Exit full screen to enable tiling."
                 return
             }
-            model.entries = SwipeDirection.allCases.map { direction in
-                ExplorerEntry(direction: ExplorerSlot(direction), bundleID: nil, name: WindowTile.title(direction, layout: model.windowLayout),
-                    icon: nil, url: nil, tilingDirection: direction)
-            }
+            if window.favorite(at: windowGroupPath)?.isRecentGroup == true { loadRecentEntries(); return }
+            model.entries = (window.favorites(at: windowGroupPath) ?? []).map { makeEntry($0, depth: windowGroupPath.count) }
             return
         }
         if model.mode == .favorites && !recentGroup {
-            model.entries = (settings.favorites(at: groupPath) ?? []).map { favorite in
-                if let action = favorite.action, action != .windowManager && action != .mediaControls {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action)
-                }
-                if favorite.action == .mediaControls {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
-                }
-                if let shortcut = favorite.shortcut {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                        icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
-                }
-                if favorite.isWindowManager {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                        icon: nil, url: nil, isWindowManager: favorite.isValidDestination)
-                }
-                if favorite.isGroup {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                        icon: nil, url: nil, isGroup: favorite.isValidDestination && groupPath.count < AppExplorerSettings.maximumGroupDepth,
-                        isRecentGroup: favorite.isRecentGroup)
-                }
-                if favorite.url != nil {
-                    return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                        icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
-                }
-                let url = favorite.bundleID.flatMap(applicationURL)
-                return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
-                    name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
-            }
+            model.entries = (settings.favorites(at: groupPath) ?? []).map { makeEntry($0, depth: groupPath.count) }
             return
         }
+        loadRecentEntries()
+    }
+
+    private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
+        if let placement = favorite.windowPlacement {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, tilingDirection: favorite.isValidDestination ? placement.direction : nil, tilingLayout: placement.layout)
+        }
+        if let action = favorite.action, action != .windowManager && action != .mediaControls {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action)
+        }
+        if favorite.action == .mediaControls {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
+        }
+        if let shortcut = favorite.shortcut {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
+        }
+        if favorite.isWindowManager {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, isWindowManager: favorite.isValidDestination)
+        }
+        if favorite.isGroup {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, isGroup: favorite.isValidDestination && depth < AppExplorerSettings.maximumGroupDepth,
+                isRecentGroup: favorite.isRecentGroup)
+        }
+        if favorite.url != nil {
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
+        }
+        let url = favorite.bundleID.flatMap(applicationURL)
+        return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
+            name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
+    }
+
+    private func loadRecentEntries() {
         let running = workspace.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated &&
             $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
@@ -438,17 +464,19 @@ extension AppExplorerPresenting {
         }
         if let tile = entry?.tilingDirection {
             if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
-            let error = tilingTarget.map { $0.apply(tile, model.windowLayout) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
+            let error = tilingTarget.map { $0.apply(tile, entry?.tilingLayout ?? model.windowLayout) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
             if let error {
                 model.message = error
                 model.selected = nil
-                input = AppExplorerSelection(waitingForLift: contactIsDown)
+                input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
                 deadline = Date().addingTimeInterval(15)
             } else { dismiss() }
             return
         }
         if entry?.isWindowManager == true {
             windowKeys = ExplorerScopedHeldKeys()
+            windowGroupPath = []; baseWindowGroupPath = []
+            windowOwnerPath = groupPath + [direction]
             controlDirection = direction
             model.showingWindowManager = true
             tilingTarget = sourcePID.flatMap(captureWindow)
@@ -457,7 +485,8 @@ extension AppExplorerPresenting {
             return
         }
         if entry?.isGroup == true {
-            groupPath.append(direction)
+            if model.showingWindowManager { windowGroupPath.append(direction) }
+            else { groupPath.append(direction) }
             refreshGroup()
             return
         }
@@ -537,22 +566,27 @@ extension AppExplorerPresenting {
     func goBack() {
         guard isVisible, !isEditing else { return }
         if model.showingAppWindows {
-            model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = nil
+            model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
             model.message = nil; refreshGroup(); return
         }
         if model.showingMediaControls {
             guard contextIsValid?() != false else { dismiss(); return }
             model.showingMediaControls = false
-            controlDirection = nil
+            controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
             heldKeys.leave(to: groupPath)
             refreshGroup()
             return
         }
         if model.showingWindowManager {
             guard contextIsValid?() != false else { dismiss(); return }
+            if !windowGroupPath.isEmpty {
+                windowGroupPath.removeLast(); windowKeys.leave(to: windowGroupPath)
+                refreshGroup(); return
+            }
             if model.directWindowManager { dismiss(); return }
             model.showingWindowManager = false
             windowKeys = ExplorerScopedHeldKeys()
+            windowOwnerPath = nil
             controlDirection = nil
             heldKeys.leave(to: groupPath)
             model.message = nil
@@ -575,7 +609,7 @@ extension AppExplorerPresenting {
     }
 
     func beginEditing() {
-        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingWindowManager, !model.showingMediaControls, heldKeys.activeID == nil,
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingMediaControls, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
         model.isEditing = true
@@ -597,8 +631,21 @@ extension AppExplorerPresenting {
         editor.level = .floating; editor.hidesOnDeactivate = false
         editor.allowsEditing = true
         editor.onCancel = { [weak self] in self?.dismiss() }
-        editor.contentView = NSHostingView(rootView: ExplorerInlineEditor(store: store, groupPath: groupPath,
-            onGroupPathChange: { [weak self] in self?.groupPath = $0 }, onDone: { [weak self] in self?.finishEditing() }))
+        let editingWindows = model.showingWindowManager
+        let owner = windowOwnerPath ?? []
+        var expected = store.settings.appExplorer ?? AppExplorerSettings()
+        let windowBinding = Binding<AppExplorerSettings>(get: {
+            (store.settings.appExplorer ?? AppExplorerSettings()).windowEditor(at: owner)
+        }, set: { updated in
+            var next = store.settings.appExplorer ?? AppExplorerSettings()
+            guard next == expected, next.saveWindowEditor(updated, at: owner) else { return }
+            store.settings.appExplorer = next; expected = next
+        })
+        editor.contentView = NSHostingView(rootView: ExplorerInlineEditor(store: store, groupPath: editingWindows ? windowGroupPath : groupPath,
+            onGroupPathChange: { [weak self] path in
+                if editingWindows { self?.windowGroupPath = path } else { self?.groupPath = path }
+            }, onDone: { [weak self] in self?.finishEditing() },
+            configurationOverride: editingWindows ? windowBinding : nil, windowManagerOnly: editingWindows))
         if let screen = previousScreen ?? NSScreen.main {
             let visible = screen.visibleFrame
             editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - 680)),
@@ -613,9 +660,20 @@ extension AppExplorerPresenting {
     func finishEditing() {
         guard isEditing else { return }
         let path = groupPath
+        let windowPath = windowGroupPath, owner = windowOwnerPath
+        let wasWindow = model.showingWindowManager, direct = model.directWindowManager
+        let originalPID = sourcePID, originalTarget = tilingTarget
         let waitingForLift = contactIsDown
         dismiss()
+        if wasWindow, let originalPID { _ = NSRunningApplication(processIdentifier: originalPID)?.activate(options: []) }
         show(waitingForLift: waitingForLift)
+        if wasWindow {
+            sourcePID = originalPID; tilingTarget = originalTarget
+            model.showingWindowManager = true; model.directWindowManager = direct
+            groupPath = path; windowGroupPath = windowPath; windowOwnerPath = owner
+            controlDirection = owner?.last
+            refreshGroup(); return
+        }
         if model.mode == .favorites, configuration().favorites(at: path) != nil {
             groupPath = path
             refreshGroup()
@@ -649,6 +707,7 @@ extension AppExplorerPresenting {
         model.groupSlotCounts = []
         model.showingAppWindows = false
         windowList = []; windowPage = 0; windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         model.showingWindowManager = false
         model.directWindowManager = false
         model.showingMediaControls = false
@@ -703,19 +762,21 @@ struct ExplorerEntry {
     var isRecentGroup: Bool
     var isWindowManager: Bool
     var tilingDirection: SwipeDirection?
+    var tilingLayout: ExplorerWindowLayout?
     var shortcut: RecordedShortcut?
     var isMediaControls: Bool
     var mediaAction: ExplorerMediaAction?
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
-    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil) {
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.isGroup = isGroup
         self.isRecentGroup = isRecentGroup
         self.isWindowManager = isWindowManager
         self.tilingDirection = tilingDirection
+        self.tilingLayout = tilingLayout
         self.shortcut = shortcut
         self.isMediaControls = isMediaControls
         self.mediaAction = mediaAction
@@ -770,7 +831,7 @@ struct AppExplorerView: View {
     // accessibility preference in the opposite direction.
     var forceReduceMotion = false
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
-    private var canGoBack: Bool { !model.directWindowManager && !model.groupNames.isEmpty }
+    private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
     private var animates: Bool {
         ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
             reduceMotion: reduceMotion || forceReduceMotion)
@@ -783,7 +844,7 @@ struct AppExplorerView: View {
            let entry = model.entries.first(where: { $0.direction == slot }) { return "\(entry.name) · lift to choose" }
         if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
         if model.showingMediaControls { return "Swipe to control · repeat to adjust · center tap to go back" }
-        if model.showingWindowManager { return "Swipe to tile · lift to apply · center tap to \(model.directWindowManager ? "close" : "go back")" }
+        if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
         if model.entries.isEmpty { return model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites." }
         return model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"
     }
@@ -794,7 +855,7 @@ struct AppExplorerView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.groupNames.last ?? "App Explorer")
                         .font(.system(size: 19, weight: .semibold, design: model.theme.isHUD ? .monospaced : .rounded)).lineLimit(1)
-                    Text(model.layerName.map { "\($0) · \(model.showingWindowManager ? model.windowLayout.title : "Held layer")" } ?? (model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased()))
+                    Text(model.layerName.map { "\($0) · \(model.showingWindowManager ? "Window layer" : "Held layer")" } ?? (model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased()))
                         .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(model.theme.isHUD ? accent : .secondary).lineLimit(1)
                 }
                 Spacer()
@@ -823,7 +884,8 @@ struct AppExplorerView: View {
                                 Button(action: onBack) {
                                     VStack(spacing: 7) {
                                         if model.theme.isHUD && model.showingWindowManager {
-                                            ExplorerLayoutPreview(direction: model.selected?.swipeDirection, layout: model.windowLayout, accent: accent)
+                                            let selected = model.entries.first { $0.direction == model.selected }
+                                            ExplorerLayoutPreview(direction: selected?.tilingDirection, layout: selected?.tilingLayout ?? model.windowLayout, accent: accent)
                                         } else {
                                             ZStack {
                                                 if model.theme.isHUD {
@@ -849,12 +911,6 @@ struct AppExplorerView: View {
             }
             Text(guidance)
                 .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
-            if model.showingWindowManager && !model.windowFullScreen {
-                HStack {
-                    Button("Fill desktop") { onWindowCommand(.maximize) }
-                    Button("Toggle full screen") { onWindowCommand(.toggleFullScreen) }
-                }.font(.caption)
-            }
             if model.showingAppWindows {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
@@ -884,7 +940,7 @@ struct AppExplorerView: View {
     }
 
     private var starburst: some View {
-        let names = model.directWindowManager ? [] : model.groupNames
+        let names = model.directWindowManager ? Array(model.groupNames.dropFirst()) : model.groupNames
         let depth = min(5, names.count)
         let center = CGPoint(x: 209, y: 155)
         return ZStack {
@@ -981,7 +1037,7 @@ struct AppExplorerView: View {
         } else if entry.shortcut != nil {
             Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if let direction = entry.tilingDirection {
-            WindowTileIcon(direction: direction, layout: model.windowLayout, accent: accent)
+            WindowTileIcon(direction: direction, layout: entry.tilingLayout ?? model.windowLayout, accent: accent)
         } else if entry.isWindowManager {
             Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if entry.isGroup {
@@ -1009,7 +1065,7 @@ struct AppExplorerView: View {
                     if let shortcut = entry.shortcut { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
-                    else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil && entry.command == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {
                     Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
                     Text("—").font(.caption).foregroundStyle(.tertiary)

@@ -102,6 +102,58 @@ import SwiftUI
         precondition(commands.last == .exitFullScreen && !controller.isVisible)
         fullScreen = false
 
+        var placements: [ExplorerWindowPlacement] = []
+        controller.captureWindow = { _ in
+            WindowTilingTarget(isFullScreen: { fullScreen }, command: { commands.append($0); return nil },
+                apply: { direction, layout in placements.append(ExplorerWindowPlacement(direction: direction, layout: layout)); return nil })
+        }
+        let rightWide = ExplorerWindowPlacement(direction: .right, layout: .twoThirds)
+        let topQuarter = ExplorerWindowPlacement(direction: .topLeft, layout: .halves)
+        let wideTile = AppExplorerFavorite(direction: .up, name: "Right two thirds", windowPlacement: rightWide)
+        let quarterTile = AppExplorerFavorite(direction: .left, name: "Top-left quarter", windowPlacement: topQuarter)
+        let nestedWindows = AppExplorerFavorite(direction: .down, name: "More positions", children: [quarterTile], holdLayers: [
+            ExplorerHoldLayer(name: "Wide", holdShortcut: y, favorites: [wideTile], windowTilesConfigured: true)
+        ], slotCount: 4)
+        store.settings.appExplorer = AppExplorerSettings(windowManager: ExplorerWindowSettings(favorites: [wideTile, nestedWindows,
+            AppExplorerFavorite(direction: .right, name: "Fill desktop", action: .maximize)
+        ], slotCount: 12))
+        controller.showWindowManager(waitingForLift: false)
+        precondition(controller.displayedEntries.first { $0.direction == .up }?.tilingDirection == .right)
+        precondition(controller.displayedEntries.first { $0.direction == .up }?.tilingLayout == .twoThirds)
+        try snapshot("window-custom-positions")
+        swipe(.up)
+        precondition(placements == [rightWide] && !controller.isVisible, "Swipe slot must not determine window position")
+        controller.showWindowManager(waitingForLift: false); swipe(.down)
+        precondition(controller.displayedEntries.first?.tilingDirection == .topLeft)
+        key(16); precondition(controller.displayedEntries.first?.tilingLayout == .twoThirds)
+        key(16, down: false); precondition(controller.displayedEntries.first?.tilingDirection == .topLeft)
+        controller.goBack(); precondition(controller.isVisible && controller.displayedEntries.count == 3)
+        swipe(.down); swipe(.left)
+        precondition(placements.last == topQuarter && !controller.isVisible)
+        controller.showWindowManager(waitingForLift: false); swipe(.right)
+        precondition(commands.last == .maximize && !controller.isVisible)
+        // Inline editing must keep the original captured window, not target Rota.
+        controller.editingStore = store
+        controller.showWindowManager(waitingForLift: false); swipe(.down)
+        controller.beginEditing(); precondition(controller.isEditing)
+        controller.finishEditing()
+        precondition(controller.isVisible && !controller.isEditing && controller.displayedEntries.first?.tilingDirection == .topLeft)
+        swipe(.left); precondition(placements.last == topQuarter && !controller.isVisible)
+        // Tile-owned groups retain different slots than the shared applet.
+        let localWindows = AppExplorerFavorite(direction: .left, name: "Custom windows", children: [quarterTile], action: .windowManager, slotCount: 4)
+        store.settings.appExplorer!.favorites = [localWindows]
+        controller.show(waitingForLift: false); swipe(.left)
+        precondition(controller.displayedEntries.count == 1 && controller.displayedEntries.first?.tilingDirection == .topLeft)
+        controller.goBack(); precondition(controller.displayedEntries.first?.isWindowManager == true)
+        controller.dismiss()
+        fullScreen = true
+        controller.showWindowManager(waitingForLift: false)
+        precondition(controller.displayedEntries.count == 1 && controller.displayedEntries.first?.command == .exitFullScreen)
+        controller.beginEditing(); precondition(!controller.isEditing)
+        swipe(.up); precondition(commands.last == .exitFullScreen)
+        fullScreen = false
+        print("Custom window groups passed: independent swipe/placement, mixed sizes, 12 slots, nested groups, scoped layers/back, command tiles, local groups, inline editing and fullscreen protection")
+
         var selectedWindows: [Int] = []
         controller.listWindows = { _ in (0..<20).map { index in
             WindowTiling.AppWindow(title: "Document \(index + 1)", minimized: index == 19, activate: { selectedWindows.append(index); return nil })

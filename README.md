@@ -387,8 +387,9 @@ the destination layer/group, then a slot. **Move / swap** moves into an empty
 slot or swaps occupied tiles; **Copy** requires an empty slot and keeps the
 original. Nested groups, capacities, and tile-specific layers are preserved.
 The picker includes Explorer-wide and group-local layers, including from the
-HUD's inline editor. Recent-app grids and Window Manager layouts are automatic,
-not storage destinations. Transfers cannot target their own descendants or
+HUD's inline editor. Recent-app grids are automatic, not storage destinations.
+Window Manager groups have their own editable tiles and layers; move or copy
+between them from the Window Manager group editor. Transfers cannot target their own descendants or
 exceed the existing nesting/size limits. If settings change while the picker
 is open, reopen it; no stale edit will overwrite newer settings.
 
@@ -407,13 +408,17 @@ then select that layer to edit its slots and capacity. Its recorded key can be
 leaving the group cancels its local layer. Physical tap/swipe bindings remain
 eight-directional—the expanded radial geometry is Explorer-only.
 
-**Window Manager applet:** the dedicated **Window Manager** settings page owns
-its default sizing, alternate size layers, and command hotkeys. Record keys
-for halves/quarters, thirds, two thirds, or fourths; choose hold or toggle for
-each layer. Applet keys are local to the open Window Manager, not global
-shortcuts. Existing tile-specific window layers continue to override these
-applet layers; existing Explorer-wide keys remain the fallback until you save
-an applet configuration.
+**Window Manager groups:** use the **Window Manager** settings page for the
+shared group, or a tile's **••• → Edit Window Manager group…** for its own setup.
+Each slot is editable: **Window position** assigns a target direction and size
+(halves/quarters, thirds, two thirds, or fourths); **Window commands** offers
+Fill desktop, full-screen toggles, minimize, close, and app windows. A swipe's
+direction is independent of the assigned window position. Apps, URLs, shortcuts,
+and nested groups also work. Drag to swap, move/copy groups, choose 4/8/12/16 slots,
+and use local hold/toggle layers just as in App Explorer. **Edit** in the HUD
+opens the same editor and returns to the originally captured window afterward.
+Existing presets keep their placements until edited; explicitly empty groups
+stay empty. Full-screen windows still offer only **Exit full screen**.
 
 **Fill desktop** resizes the target within the desktop's usable bounds;
 **Toggle full screen** changes macOS full-screen mode. These are different
@@ -439,13 +444,14 @@ close button, preserving any save confirmation; it does not force-quit the app.
 Window Manager's settings can bind these commands to local hotkeys too. Apps
 may refuse resizing or full-screen changes; the HUD reports those failures.
 
-**Tile-specific layers:** open a group or Window Manager tile's **••• → Tile
-layers…**, enable **Use tile-specific layers**, then **Add layer**. Each tile
+**Tile-specific layers:** open a group's **••• → Tile layers…**, enable
+**Use tile-specific layers**, then **Add layer**. For Window Manager, use
+**••• → Edit Window Manager group… → Add layer**. Each tile
 owns its keys: for example, hold **Y** for thirds inside one Window Manager and
 hold **Y** for two thirds inside another. Group layers replace only that group's
-apps, URLs, shortcuts and nested groups. Window Manager layers configure window
-sizes, with a preview in the editor. Select a layer and use **Edit…** to change
-its name, hold key or window sizes.
+apps, URLs, shortcuts and nested groups. Window Manager layers replace its tiles
+the same way. Assign each tile's size through **••• → Window position**. Select
+a layer and use **Edit…** to change its name, activation behavior or key.
 
 These keys take effect after entering their tile, not on the Explorer root.
 Release the key to return to that tile's default; going back out cancels its
@@ -458,15 +464,15 @@ or swapped and are included in YAML export and sync. Up to 16 layers per scope,
 128 layers overall, four group levels and 256 total slots are supported.
 
 **Explorer hold layers:** use **Add layer** above the favorites grid in General
-settings or the inline editor. Name the layer, record a hold key (new layers
-suggest **Y**), and choose **Halves & quarters**, **Thirds**, or **Two thirds** for
-window sizing. New layers copy the currently edited slots; choose the layer in
+settings or the inline editor. Name the layer, record a key (new layers
+suggest **Y**), and choose hold or tap-to-toggle activation.
+New layers copy the currently edited slots; choose the layer in
 the **Explorer-wide layer** picker to replace its apps, URLs, shortcuts, and groups.
-**Edit…** changes its name/key/window preset; **Remove** asks before deleting it.
+**Edit…** changes its name/key/activation; **Remove** asks before deleting it.
 
 While the HUD is open, hold the layer key to temporarily switch its contents.
-Release it to restore the prior Explorer page. In Window Manager, the same key
-temporarily changes the window sizes instead of showing apps. Edge placements
+Release it to restore the prior Explorer page. In Window Manager, layer keys
+switch to that layer's assigned tiles, including any window sizes. Edge placements
 use the chosen fraction in one dimension; corner placements use it in both.
 The most recently pressed layer wins if multiple keys are held. Changing layers
 mid-swipe drains the current touch; lift, then make a fresh swipe. Escape closes

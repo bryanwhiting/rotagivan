@@ -38,6 +38,15 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var reserved = factory
+        reserved.settings.appExplorer = AppExplorerSettings(favorites: [
+            ExplorerReservedGroup.actions.tile(at: .up),
+            ExplorerReservedGroup.recentApps.tile(at: .left),
+            ExplorerReservedGroup.windowManager.tile(at: .right)
+        ])
+        let reservedRoundtrip = try AppConfiguration.parse(reserved.yaml())
+        precondition(tryEqual(reserved, reservedRoundtrip), "Reserved group instances and editing shortcuts must survive YAML")
+        print("Reserved group YAML passed: Actions shortcuts, recent apps, and window groups preserve existing schema")
         var customWindows = factory
         customWindows.settings.appExplorer = AppExplorerSettings(windowManager: ExplorerWindowSettings(favorites: [
             AppExplorerFavorite(direction: .up, name: "Right two thirds", windowPlacement: ExplorerWindowPlacement(direction: .right, layout: .twoThirds))

@@ -1,5 +1,77 @@
 import SwiftUI
 
+struct HUDSettingsView: View {
+    @ObservedObject var store: SettingsStore
+    @State private var selectedGroup: ExplorerReservedGroup?
+
+    init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil) {
+        self.store = store
+        _selectedGroup = State(initialValue: initialGroup)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            GroupBox("Reserved Groups") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Built-in groups, always available from any tile’s ••• → Reserved Groups menu.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        ForEach(ExplorerReservedGroup.allCases) { group in
+                            Button { selectedGroup = group } label: {
+                                Label(group.title, systemImage: group.symbol).frame(maxWidth: .infinity)
+                            }.buttonStyle(.bordered).help(group.summary)
+                        }
+                    }
+                }.padding(8)
+            }
+            AppExplorerSettingsView(store: store)
+        }
+        .sheet(item: $selectedGroup) { group in
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Label(group.title, systemImage: group.symbol).font(.title2.weight(.semibold))
+                    Spacer()
+                    Button("Done") { selectedGroup = nil }.keyboardShortcut(.cancelAction)
+                }
+                Text("Reserved Groups · \(group.summary)").font(.callout).foregroundStyle(.secondary)
+                ScrollView {
+                    if group == .windowManager { WindowManagerSettingsView(store: store) }
+                    else { ReservedGroupPreview(group: group) }
+                }
+            }.padding(24).frame(width: 660, height: 640)
+        }
+    }
+}
+
+struct ReservedGroupPreview: View {
+    let group: ExplorerReservedGroup
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Assign this group to a tile using ••• → Reserved Groups → \(group.title).")
+            if group == .actions {
+                Text("Each added Actions group starts with these shortcuts. Edit or rearrange its tiles independently. Commands go to the app you were using before opening the HUD; support varies by app.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
+                    ForEach(group.tile(at: .up).children ?? [], id: \.direction) { tile in
+                        GridRow {
+                            Text(tile.direction.title).foregroundStyle(.secondary)
+                            Text(tile.name)
+                            if let key = tile.shortcut {
+                                Text("\(key.modifiers & (1 << 17) != 0 ? "⇧" : "")⌘\(key.keyLabel)")
+                                    .monospaced().foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("This group fills itself with running apps. The most recent app starts on the left, followed by the top-left, then clockwise. The current app is excluded. Tap the center to return to the parent group.")
+                Text("Its contents update on this Mac. Add it anywhere in your HUD, including inside another group; edit the assigned group to change its capacity or name.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct WindowManagerSettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var error: String?
@@ -142,7 +214,7 @@ struct AppExplorerSettingsView: View {
                 }
             }
             if !compact && selectedLayerID == nil && scopeTitle == nil {
-            Label("App Explorer", systemImage: "safari").font(.headline)
+            Label("HUD layout & appearance", systemImage: "safari").font(.headline)
             ExplorerThemePicker(theme: themeBinding)
             Toggle("Animate HUD feedback", isOn: animationBinding).font(.caption)
             Text("Appearance applies to apps, groups, window layouts, and media controls. Reduce Motion always disables animations.")
@@ -540,28 +612,17 @@ struct AppExplorerSettingsView: View {
             }
         } label: { Label("App launches", systemImage: "app") }
         Menu {
-            Button("Create recent apps group", systemImage: "clock.arrow.circlepath") {
-                var next = settings
-                let group = AppExplorerFavorite(direction: direction, name: "Recent apps", children: [], groupMode: .recent)
-                guard next.setFavorite(group, at: direction, in: groupPath), next.hasValidFavorites else {
-                    groupError = "The parent group must still exist and stay within the group limits."
-                    return
-                }
-                guard save(next) else { return }
-                groupError = nil
-                groupPath.append(direction)
-            }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
-        } label: { Label("Recent apps", systemImage: "clock.arrow.circlepath") }
+            ForEach(ExplorerReservedGroup.allCases) { group in
+                Button(group.title, systemImage: group.symbol) {
+                    let tile = group.tile(at: direction, insideWindowManager: windowManagerOnly)
+                    edit { $0.setFavorite(tile, at: direction, in: groupPath) }
+                }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth && (group != .windowManager || windowManagerOnly))
+            }
+        } label: { Label("Reserved Groups", systemImage: "square.stack.3d.up") }
         Button("Create tile group…", systemImage: "folder.badge.plus") { editingGroupPath = groupPath + [direction] }
             .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
         Divider()
         Menu {
-            Button("Open Window Manager group", systemImage: "rectangle.split.2x2") {
-                let tile = windowManagerOnly
-                    ? AppExplorerFavorite(direction: direction, name: "Window positions", children: ExplorerWindowPlacement.tiles(layout: .halves))
-                    : AppExplorerFavorite(direction: direction, name: "Window Manager", action: .windowManager)
-                edit { $0.setFavorite(tile, at: direction, in: groupPath) }
-            }
             Menu("Resize window") {
                 windowActionButton(.maximize, at: direction)
                 Divider()

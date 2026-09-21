@@ -380,16 +380,30 @@ briefly to distinguish it from scrolling; small/ambiguous swipes do nothing.
 After committing to scrolling, the same touch cannot turn into navigation.
 Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
-### App Explorer
+### HUD
+
+**HUD** is the single settings page for App Explorer, window management and
+appearance. **Reserved Groups** contains three always-available built-ins:
+**Window Manager**, **Recent Apps**, and **Actions**. Click one in the HUD page
+to configure the shared window layouts or preview the other built-ins. Assign
+one to any empty/terminal tile through **••• → Reserved Groups**.
+
+**Actions** starts with Copy (⌘C), Paste (⌘V), Cut (⌘X), Select All (⌘A),
+Undo (⌘Z), Redo (⇧⌘Z), Find (⌘F), and Save (⌘S). Adding it creates an ordinary
+editable group: rearrange, rename, or customize that instance without changing
+the reserved defaults. These are normal keyboard shortcuts sent to the app
+active before the HUD opened; support depends on that app. Assigned groups and
+shortcuts export/sync using the existing schema. Browsing the built-in library
+does not change existing settings or clipboard contents.
 
 **Tile actions:** the **•••** picker uses native macOS menus in both Settings
 and the HUD editor. Actions are organized into:
 
 - **Hotkeys:** assign or edit a keyboard shortcut.
 - **App launches:** choose an app, open a URL, or show the chosen app's windows.
-- **Recent apps:** create a dynamically populated recent-app group.
+- **Reserved Groups:** Window Manager, Recent Apps, and Actions.
 - **Create tile group…:** add a named group with its own tiles and layers.
-- **Window management:** open a Window Manager group; resize (including Fill
+- **Window management:** resize (including Fill
   desktop); toggle/exit full screen; show app windows; minimize; or close.
 - **Media controls:** open the volume and playback controls.
 
@@ -423,7 +437,7 @@ then select that layer to edit its slots and capacity. Its recorded key can be
 leaving the group cancels its local layer. Physical tap/swipe bindings remain
 eight-directional—the expanded radial geometry is Explorer-only.
 
-**Window Manager groups:** use the **Window Manager** settings page for the
+**Window Manager groups:** use **HUD → Reserved Groups → Window Manager** for the
 shared group, or a tile's **••• → Edit Window Manager group…** for its own setup.
 Each slot is editable: **Window management → Resize window** assigns a target direction and size
 (halves/quarters, thirds, two thirds, or fourths); **Window management** offers
@@ -529,7 +543,7 @@ action menu under **Single tap, then quick swipe** / **Double-tap, then swipe**.
 For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.
 No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
-In **General → App Explorer**, choose the default mode (initially **Favorites**)
+In **HUD**, choose the default mode (initially **Favorites**)
 and assign an application, web URL, or named group to each of the eight positions.
 Each empty/app/URL slot menu offers **App launches → Choose app…**,
 **App launches → Open URL…** (or **Edit URL…**),
@@ -539,7 +553,7 @@ button return to its parent. **Rename…** preserves all contents. Removing a
 group asks for confirmation and removes its descendants too. Groups may contain
 more groups (up to four levels and 256 total entries); names, contents, and
 positions export and sync along with the rest of the configuration.
-Choose **Recent apps → Create recent apps group** in a slot menu to add an automatically filled
+Choose **Reserved Groups → Recent Apps** in a slot menu to add an automatically filled
 group, or open an existing group's editor and set **Group contents → Recent apps**.
 You can rename it, nest it inside other groups, and tap the HUD center to go back.
 Its slots are ranked **left, top-left, top, top-right, right, bottom-right, bottom,
@@ -548,7 +562,7 @@ apps, excluding the current app and Rotagivan. The editor previews the rank in
 each direction. Switching an existing group to Recent apps preserves its assigned
 favorites; switch back to **Assigned favorites** to restore them. The group type
 syncs, but recent-app history stays local to each Mac.
-Choose **Window Manager** from a slot's **•••** menu (in General settings or the
+Choose **Reserved Groups → Window Manager** from a slot's **•••** menu (in HUD settings or the
 inline Explorer editor) to add a tiling destination, including inside groups.
 Select it, then make a fresh swipe and lift to tile the window in the app you
 were using: **left/right** place it in that half, **diagonals** in that quarter,

@@ -37,7 +37,7 @@ import SwiftUI
             fatalError("Tile actions must be backed by a native macOS menu")
         }
         let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-        for title in ["Hotkeys", "App launches", "Recent apps", "Create tile group…", "Window management", "Media controls"] {
+        for title in ["Hotkeys", "App launches", "Reserved Groups", "Create tile group…", "Window management", "Media controls"] {
             precondition(titles.contains(title), "Missing action category: \(title)")
         }
         func submenu(_ title: String, in menu: NSMenu) -> NSMenu {
@@ -46,6 +46,8 @@ import SwiftUI
             return result
         }
         let windows = submenu("Window management", in: menu)
+        let reserved = submenu("Reserved Groups", in: menu)
+        precondition(reserved.items.map(\.title) == ExplorerReservedGroup.allCases.map(\.title))
         let resize = submenu("Resize window", in: windows)
         precondition(resize.items.contains { $0.title == "Fill desktop" })
         for layout in ExplorerWindowLayout.allCases {
@@ -66,6 +68,14 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         precondition(store.settings.appExplorer?.favorites.count == 1)
         precondition(store.settings.appExplorer?.favorites.first?.action == .minimize)
-        print("Native action menus passed: categories, all 32 resize placements, full-screen/window commands, URL/hotkey choices, and assignment without executing the action.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { slot.menu?.cancelTracking() }
+        slot.performClick(nil)
+        let refreshed = submenu("Reserved Groups", in: slot.menu!)
+        refreshed.performActionForItem(at: refreshed.items.firstIndex { $0.title == "Actions" }!)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let actions = store.settings.appExplorer!.favorites.first!
+        precondition(actions.name == "Actions" && actions.children?.count == 8)
+        precondition(actions.children?.first { $0.name == "Copy" }?.shortcut?.keyCode == 8)
+        print("Native action menus passed: reserved group assignment, all 32 resize placements, full-screen/window commands, URL/hotkey choices, and assignment without executing the action.")
     }
 }

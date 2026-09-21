@@ -8,16 +8,18 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "Layers"
     @State private var actionDevice: GestureDevice = .navigator
+    private let initialHUDGroup: ExplorerReservedGroup?
 
     private let sections = [("Devices", "computermouse"), ("Layers", "square.3.layers.3d"),
-        ("App Explorer", "safari"), ("Window Manager", "rectangle.split.2x2"), ("App overrides", "app.badge"),
+        ("HUD", "safari"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "Layers", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: initialSection)
+        _selection = State(initialValue: ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
+        initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
     }
 
@@ -74,8 +76,7 @@ struct ContentView: View {
                         switch selection {
                         case "General": general
                         case "Devices": devices
-                        case "App Explorer": AppExplorerSettingsView(store: store)
-                        case "Window Manager": WindowManagerSettingsView(store: store)
+                        case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
                         case "App overrides": AppOverridesView(store: store)
                         case "Pointer & scrolling": pointerSettings
                         default: profiles

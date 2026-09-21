@@ -53,6 +53,56 @@ enum AppExplorerMode: String, Codable, CaseIterable {
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
+/// Reserved catalog entries are always available. Assigned instances use the
+/// existing group/shortcut schema, so exports and older saved groups stay intact.
+enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
+    case windowManager, recentApps, actions
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .windowManager: return "Window Manager"
+        case .recentApps: return "Recent Apps"
+        case .actions: return "Actions"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .windowManager: return "rectangle.split.2x2"
+        case .recentApps: return "clock.arrow.circlepath"
+        case .actions: return "command"
+        }
+    }
+    var summary: String {
+        switch self {
+        case .windowManager: return "Window positions, full screen, minimize and close."
+        case .recentApps: return "Running apps, ordered by most recently used."
+        case .actions: return "Copy, Paste, Cut, Undo, Redo, Select All, Find and Save."
+        }
+    }
+    func tile(at slot: ExplorerSlot, insideWindowManager: Bool = false) -> AppExplorerFavorite {
+        switch self {
+        case .windowManager:
+            return insideWindowManager
+                ? AppExplorerFavorite(direction: slot, name: title, children: ExplorerWindowPlacement.tiles(layout: .halves))
+                : AppExplorerFavorite(direction: slot, name: title, action: .windowManager)
+        case .recentApps:
+            return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recent)
+        case .actions:
+            let keys: [(ExplorerSlot, String, UInt16, String, Bool)] = [
+                (.up, "Copy", 8, "C", false), (.topRight, "Paste", 9, "V", false),
+                (.right, "Cut", 7, "X", false), (.bottomRight, "Select All", 0, "A", false),
+                (.down, "Undo", 6, "Z", false), (.bottomLeft, "Redo", 6, "Z", true),
+                (.left, "Find", 3, "F", false), (.topLeft, "Save", 1, "S", false)
+            ]
+            let children = keys.map { direction, name, code, label, shift in
+                AppExplorerFavorite(direction: direction, name: name, shortcut: RecordedShortcut(
+                    keyCode: code, modifiers: (1 << 20) | (shift ? (1 << 17) : 0), keyLabel: label))
+            }
+            return AppExplorerFavorite(direction: slot, name: title, children: children, slotCount: 8)
+        }
+    }
+}
+
 enum AppExplorerAction: String, Codable, CaseIterable {
     case windowManager, mediaControls, appWindows, maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
     var title: String {

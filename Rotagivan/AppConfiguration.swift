@@ -193,7 +193,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices"
+            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts"
             case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation"
@@ -203,7 +203,7 @@ private indirect enum ConfigurationValue: Codable {
             case "bindings": allowed = "trigger action shortcut"
             case "shortcut": allowed = "keyCode modifiers keyLabel"
             case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions holdToActivate"
-            case "normal", "precision", "motion":
+            case "normal", "precision", "motion", "pointerMotion":
                 allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
             case "scrollResponse":
                 allowed = "slowMultiplier fastMultiplier transitionSpeed"
@@ -261,7 +261,7 @@ private indirect enum ConfigurationValue: Codable {
                 "cursorDeceleration": 0...ProfileMaximum.cursorFalloff, "fineCursorFalloff": 0...ProfileMaximum.cursorFalloff,
                 "cursorFalloff": 0...ProfileMaximum.cursorFalloff, "cursorSpeedTransition": 0...ProfileMaximum.cursorSpeedTransition,
                 "scrollMultiplier": 0...ProfileMaximum.scrollSpeed, "scrollSpeed": 0...ProfileMaximum.scrollSpeed,
-                "scrollAcceleration": 1...ProfileMaximum.scrollAcceleration, "kineticDecay": 0...1, "coastCoefficient": 0...1,
+                "scrollAcceleration": 1...ProfileMaximum.scrollAcceleration, "kineticDecay": 0...1, "coastCoefficient": 0...1, "pointerCoastBaseline": 0...1,
                 "tapMaxDuration": 0...1, "tapImpactSpeed": 0...1, "tapMaxMovement": 0...160, "tapMovementRadius": 0...160,
                 "dragRegripWindow": 0...2, "regripWindow": 0...2, "secondFingerGracePeriod": 0...2,
                 "doubleTapInterval": 0.05...0.6, "doubleTapDelay": 0.05...0.6, "keyCode": 0...127,

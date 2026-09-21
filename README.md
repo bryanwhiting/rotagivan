@@ -49,7 +49,12 @@ without changing saved motion or gesture values. Up to 20 profiles are supported
 - **Devices:** choose Navigator, Apple actions, both, or neither for the profile.
   Apple input still requires the machine-local opt-in and permissions. This
   selection never disables macOS's own trackpad pointer or scrolling.
-- **Pointer & scrolling:** Navigator-only tuning and dragging, per layer.
+- **Pointer & scrolling:** one Navigator response per top-level profile, shared
+  by every action layer. Changing an action layer or its default does not change
+  cursor speed, scrolling, smoothing, or coasting. Use **Add Profile** for a
+  different mouse setup. Existing configurations use their default layer's
+  tuning until edited; old per-layer tuning remains in saved data for compatibility.
+  Dragging actions now live under **Layer actions**. Apple motion remains native.
 - **General:** complete YAML export/import and sync include all profiles and
   their shortcuts, including inactive profiles. Legacy single-configuration YAML
   imports as one Default profile. Account, permission grants, input opt-in,

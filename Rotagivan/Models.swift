@@ -884,6 +884,18 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    // One Navigator response per top-level profile. Legacy layer motion stays
+    // encoded for lossless old-config import, but is no longer selected by hotkeys.
+    var pointerMotion: MotionProfile? = nil
+    var pointerCoastBaseline: Double? = nil
+    var resolvedPointerMotion: MotionProfile {
+        if let pointerMotion { return pointerMotion }
+        let id = resolvedDefaultProfileID
+        return id == 1 ? normal : id == 2 ? precision : additionalProfiles?.first { $0.id == id }?.motion ?? normal
+    }
+    var resolvedPointerCoastBaseline: Double {
+        pointerCoastBaseline ?? sliderBaseline(for: resolvedDefaultProfileID).coastCoefficient
+    }
     var devices: ProfileDevices? = nil
     var resolvedDevices: ProfileDevices { devices ?? ProfileDevices() }
     var appOverrides: [AppGestureOverride]? = nil
@@ -911,6 +923,10 @@ struct StoredSettings: Codable {
     mutating func makeDefault(_ id: UInt32) {
         guard id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) else { return }
         guard id != resolvedDefaultProfileID else { return }
+        // Changing the default action layer must not pick a different legacy
+        // mouse response, including immediately after importing an old config.
+        pointerMotion = resolvedPointerMotion
+        pointerCoastBaseline = resolvedPointerCoastBaseline
         let currentTaps = effectiveGestures(for: id)
         var stored = profileGestures ?? [:]
         stored[id] = currentTaps
@@ -1140,7 +1156,14 @@ final class SettingsStore: ObservableObject {
     }
 
     var activeProfile: MotionProfile {
-        motion(for: activeProfileID)
+        settings.resolvedPointerMotion
+    }
+
+    func updatePointerMotion(_ motion: MotionProfile) {
+        var updated = settings
+        updated.pointerCoastBaseline = updated.resolvedPointerCoastBaseline
+        updated.pointerMotion = motion
+        settings = updated
     }
 
     @Published var foregroundBundleID: String?

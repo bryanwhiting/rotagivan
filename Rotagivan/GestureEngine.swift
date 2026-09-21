@@ -80,13 +80,11 @@ final class GestureEngine {
     private var scrollVelocity = CGVector.zero
     private var scrollSpeedFilter = CursorVelocityFilter()
     private var scrollResponseSnapshot: ScrollResponse?
-    private var scrollProfileID: UInt32 = 0
     private var cursorVelocity = CGVector.zero
     private var cursorTiming = CursorTiming()
     private var cursorFilter = CursorVelocityFilter()
     private var cursorGainFilter = CursorGainFilter()
     private var cursorInterval = 1.0 / 125
-    private var lastCursorProfileID: UInt32 = 0
     private var momentumTimer: Timer?
     private var cursorDecelerationTimer: Timer?
     private var pendingDragEnd: Timer?
@@ -444,11 +442,6 @@ final class GestureEngine {
             cursorFilter = CursorVelocityFilter()
             cursorGainFilter = CursorGainFilter()
         }
-        if lastCursorProfileID != store.activeProfileID {
-            cursorFilter = CursorVelocityFilter()
-            cursorGainFilter = CursorGainFilter()
-            lastCursorProfileID = store.activeProfileID
-        }
         let curve = profile.resolvedCursorResponse
         let dt = cursorInterval
         let fingerSpeed = cursorFilter.update(dx: rawDX, dy: rawDY, dt: dt, smoothing: curve.smoothing)
@@ -476,9 +469,8 @@ final class GestureEngine {
         // Both response modes must use capture timing. Processing-time gaps
         // shrink/expand when the UI is busy and distort acceleration/inertia.
         let dt = cursorInterval
-        if scrollProfileID != store.activeProfileID || scrollResponseSnapshot != profile.scrollResponse {
+        if scrollResponseSnapshot != profile.scrollResponse {
             scrollSpeedFilter = CursorVelocityFilter()
-            scrollProfileID = store.activeProfileID
             scrollResponseSnapshot = profile.scrollResponse
         }
         let fingerSpeed = profile.scrollResponse == nil ? hypot(rawDX,rawDY)/dt :

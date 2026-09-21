@@ -153,24 +153,23 @@ struct NavigatorPanel: View {
             })) {
                 ForEach(store.configurationProfiles) { Text($0.name).tag($0.id) }
             }.pickerStyle(.menu)
-            Picker("Edit layer", selection: $editingProfileID) {
-                ForEach(store.profiles, id: \.id) { profile in
-                    Text(profile.name).tag(profile.id)
-                }
-            }.pickerStyle(.menu)
-
-            ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
-                .controlSize(.small)
-
+            Text("Pointer & scrolling · all layers").font(.caption).foregroundStyle(.secondary)
             speedSlider("Fine Speed", value: curveEndpoint(fast: false), scale: .cursorGain, fractionDigits: 1)
             speedSlider("Fast Speed", value: curveEndpoint(fast: true), scale: .cursorGain, fractionDigits: 1)
             DisclosureGroup("Scrolling") {
-                ScrollCurveEditor(profile:Binding(get:{store.motion(for:editingProfileID)},set:{store.updateMotion($0,for:editingProfileID)}),showGraph:false)
+                ScrollCurveEditor(profile:Binding(get:{store.activeProfile},set:{store.updatePointerMotion($0)}),showGraph:false)
                     .padding(.top,8)
             }
             Text("\(store.activeProfileName) layer active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
+            Picker("Edit action layer", selection: $editingProfileID) {
+                ForEach(store.profiles, id: \.id) { profile in
+                    Text(profile.name).tag(profile.id)
+                }
+            }.pickerStyle(.menu)
+            ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
+                .controlSize(.small)
             DisclosureGroup("Click & drag shortcuts") {
                 VStack(alignment: .leading, spacing: 10) {
                     if editingProfileID == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(editingProfileID) {
@@ -206,26 +205,16 @@ struct NavigatorPanel: View {
         }
     }
 
-    private func profileValue(_ key: WritableKeyPath<MotionProfile, Double>) -> Binding<Double> {
-        Binding(get: {
-            store.motion(for: editingProfileID)[keyPath: key]
-        }, set: {
-            var motion = store.motion(for: editingProfileID)
-            motion[keyPath: key] = $0
-            store.updateMotion(motion, for: editingProfileID)
-        })
-    }
-
     private func curveEndpoint(fast: Bool) -> Binding<Double> {
         Binding(get: {
-            let curve = store.motion(for: editingProfileID).resolvedCursorResponse
+            let curve = store.activeProfile.resolvedCursorResponse
             return fast ? curve.fastGain : curve.fineGain
         }, set: { gain in
-            var motion = store.motion(for: editingProfileID)
+            var motion = store.activeProfile
             var curve = motion.resolvedCursorResponse
             curve.setEndpoint(fast: fast, gain: gain)
             motion.cursorResponse = curve
-            store.updateMotion(motion, for: editingProfileID)
+            store.updatePointerMotion(motion)
         })
     }
 

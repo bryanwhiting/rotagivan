@@ -22,7 +22,7 @@ struct ContentView: View {
     }
 
     private enum ProfileSection {
-        case motion, scrolling, tapping, dragging
+        case tapping, dragging
     }
 
     var body: some View {
@@ -77,6 +77,7 @@ struct ContentView: View {
                         case "App Explorer": AppExplorerSettingsView(store: store)
                         case "Window Manager": WindowManagerSettingsView(store: store)
                         case "App overrides": AppOverridesView(store: store)
+                        case "Pointer & scrolling": pointerSettings
                         default: profiles
                         }
                     }
@@ -121,8 +122,8 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(selection == "Layers" ? "Layer actions" : "Pointer & scrolling").font(.system(size: 24, weight: .semibold))
-                    Text(selection == "Layers" ? "Choose what a gesture does. Each column is a layer." : "Navigator tuning, by layer. macOS keeps its native motion and scrolling.")
+                    Text("Layer actions").font(.system(size: 24, weight: .semibold))
+                    Text("Choose what a gesture does. Layers share this profile’s pointer and scrolling response.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -148,7 +149,7 @@ struct ContentView: View {
             ScrollViewReader { proxy in
             ScrollView(.horizontal) {
             Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 0) {
-                ForEach(selection == "Layers" ? [0, 3] : [0, 1, 2, 4], id: \.self) { section in
+                ForEach(editingAppleActions ? [0, 3] : [0, 3, 4], id: \.self) { section in
                     GridRow(alignment: .top) {
                         ForEach(store.profiles, id: \.id) { profile in
                             profileCell(profile.name, id: profile.id, section: section)
@@ -190,31 +191,10 @@ struct ContentView: View {
                 .background(store.activeProfileID == id ? Color.teal.opacity(0.09) : Color.primary.opacity(0.035))
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                 .id(id)
-        case 1:
-            columnSection("Motion", icon: "cursorarrow.motionlines", profileID: id, copySection: .motion) {
-                MotionCurveEditor(curve: Binding(get: { store.motion(for: id).resolvedCursorResponse }, set: { curve in
-                    var motion = store.motion(for: id)
-                    motion.cursorResponse = curve.sanitized
-                    store.updateMotion(motion, for: id)
-                }), telemetry: store.cursorTelemetry, profileID: id, isActive: store.activeProfileID == id)
-            }
-        case 2:
-            columnSection("Scrolling", icon: "arrow.up.and.down", profileID: id, copySection: .scrolling) {
-                ScrollCurveEditor(profile:motionBinding(id))
-                Divider()
-                Toggle("Invert horizontal", isOn: motionBinding(id).invertScrollX)
-                Toggle("Invert vertical", isOn: motionBinding(id).invertScrollY)
-                Toggle("After-scroll coasting", isOn: motionBinding(id).kineticScroll)
-                columnSlider("Coast coefficient", value: motionBinding(id).kineticDecay, scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.coastCoefficient, keyPath: \.coastCoefficient))
-                    .disabled(!store.motion(for: id).kineticScroll)
-                Text("After lift-off, speed decays exponentially. 0 stops immediately; 100 keeps gliding until you touch again or turn it off.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         case 3:
             columnSection("Tap & swipe actions", icon: "hand.tap", profileID: id, copySection: .tapping) { gestures(id) }
         default:
-            columnSection("Dragging", icon: "hand.draw", profileID: id, copySection: .dragging) { dragging(id) }
+            columnSection("Dragging · Navigator", icon: "hand.draw", profileID: id, copySection: .dragging) { dragging(id) }
         }
     }
 
@@ -300,30 +280,52 @@ struct ContentView: View {
         }.frame(width: 270)
     }
 
-    private func motionBinding(_ id: UInt32) -> Binding<MotionProfile> {
-        Binding(get: { store.motion(for: id) }, set: { store.updateMotion($0, for: id) })
+    private var pointerBinding: Binding<MotionProfile> {
+        Binding(get: { store.activeProfile }, set: { store.updatePointerMotion($0) })
     }
 
-    private func scrollAccelerationBinding(_ id: UInt32) -> Binding<Double> {
-        Binding(get: { store.motion(for: id).resolvedScrollAcceleration }, set: { value in
-            var motion = store.motion(for: id)
-            motion.scrollAcceleration = min(ProfileMaximum.scrollAcceleration, max(1, value))
-            store.updateMotion(motion, for: id)
-        })
+    private var pointerSettings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Pointer & scrolling").font(.system(size: 24, weight: .semibold))
+            Text("One response for every layer in \(store.activeConfigurationName). Use a different profile for different mouse tuning. Apple trackpads keep native macOS motion and scrolling.")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 16) {
+                pointerCard("Pointer", icon: "cursorarrow.motionlines") {
+                    MotionCurveEditor(curve: Binding(get: { store.activeProfile.resolvedCursorResponse }, set: { curve in
+                        var motion = store.activeProfile
+                        motion.cursorResponse = curve.sanitized
+                        store.updatePointerMotion(motion)
+                    }), telemetry: store.cursorTelemetry, profileID: store.activeProfileID, isActive: true)
+                }
+                pointerCard("Scrolling", icon: "arrow.up.and.down") {
+                    ScrollCurveEditor(profile: pointerBinding)
+                    Divider()
+                    Toggle("Invert horizontal", isOn: pointerBinding.invertScrollX)
+                    Toggle("Invert vertical", isOn: pointerBinding.invertScrollY)
+                    Toggle("After-scroll coasting", isOn: pointerBinding.kineticScroll)
+                    columnSlider("Coast coefficient", value: pointerBinding.kineticDecay,
+                        scale: .centered(minimum: 0, maximum: ProfileMaximum.coastCoefficient,
+                                         baseline: store.settings.resolvedPointerCoastBaseline))
+                        .disabled(!store.activeProfile.kineticScroll)
+                    Text("After lift-off, speed decays exponentially. 0 stops immediately; 100 keeps gliding until you touch again or turn it off.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }.font(.system(size: 12))
+    }
+
+    private func pointerCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: icon).font(.headline)
+            Divider()
+            content()
+        }.padding(16).frame(width: 338, alignment: .topLeading)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
     }
 
     private func copy(_ section: ProfileSection, from sourceID: UInt32, to targetID: UInt32) {
         switch section {
-        case .motion:
-            let source = store.motion(for: sourceID)
-            var target = store.motion(for: targetID)
-            target.copyCursorSettings(from: source)
-            store.updateMotion(target, for: targetID)
-        case .scrolling:
-            let source = store.motion(for: sourceID)
-            var target = store.motion(for: targetID)
-            target.copyScrollSettings(from:source)
-            store.updateMotion(target, for: targetID)
         case .tapping:
             if editingAppleActions {
                 store.updateAppleGestures(store.gestures(for: sourceID, device: .apple), for: targetID)

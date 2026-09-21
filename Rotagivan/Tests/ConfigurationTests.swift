@@ -38,6 +38,14 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var sharedPointer = factory
+        sharedPointer.settings.pointerMotion = factory.settings.resolvedPointerMotion
+        sharedPointer.settings.pointerCoastBaseline = 0.83
+        let pointerRoundtrip = try AppConfiguration.parse(sharedPointer.yaml())
+        precondition(tryEqual(sharedPointer, pointerRoundtrip), "Shared pointer tuning must survive YAML export/import")
+        let pointerYAML = try sharedPointer.yaml()
+        rejected(pointerYAML.replacingOccurrences(of: "pointerCoastBaseline: 0.83", with: "pointerCoastBaseline: 4.0"), "out-of-range shared pointer baseline")
+        print("Profile-wide pointer YAML passed: legacy compatibility, shared tuning roundtrip and baseline bounds")
         var nested = factory
         nested.profiles = [ConfigurationProfile(id: "work", name: "Work", settings: factory.settings, shortcuts: factory.shortcuts),
             ConfigurationProfile(id: "travel", name: "Travel", settings: factory.settings, shortcuts: factory.shortcuts)]

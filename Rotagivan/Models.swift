@@ -104,6 +104,10 @@ struct AppExplorerFavorite: Codable, Equatable {
     var groupMode: AppExplorerMode? = nil
     var action: AppExplorerAction? = nil
     var shortcut: RecordedShortcut? = nil
+    // Nil inherits the enclosing Explorer's keys; [] explicitly has no layers.
+    // Stored on the tile so layers follow renames, moves, swaps and copies.
+    var holdLayers: [ExplorerHoldLayer]? = nil
+    var supportsHoldLayers: Bool { isGroup || isWindowManager }
     var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
@@ -111,6 +115,7 @@ struct AppExplorerFavorite: Codable, Equatable {
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        guard holdLayers == nil || supportsHoldLayers else { return false }
         if let shortcut {
             return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil
         }
@@ -171,31 +176,64 @@ struct AppExplorerSettings: Codable, Equatable {
         guard let direction = path.last else { return nil }
         return favorites(at: Array(path.dropLast()))?.first { $0.direction == direction }
     }
+    func layers(at path: [SwipeDirection]) -> [ExplorerHoldLayer] {
+        path.isEmpty ? (holdLayers ?? []) : (favorite(at: path)?.holdLayers ?? [])
+    }
+    func layerScope(at path: [SwipeDirection]) -> [SwipeDirection] {
+        for length in stride(from: path.count, through: 1, by: -1) {
+            let prefix = Array(path.prefix(length))
+            if favorite(at: prefix)?.holdLayers != nil { return prefix }
+        }
+        return []
+    }
+    /// Runtime projection retains definitions so another key at the same
+    /// scope can temporarily replace this layer, then return on key release.
+    func applying(_ layer: ExplorerHoldLayer, at path: [SwipeDirection]) -> Self {
+        var next = self
+        if path.isEmpty {
+            next.favorites = layer.favorites
+            next.defaultMode = .favorites
+        } else if var tile = favorite(at: path), tile.isGroup, let direction = path.last {
+            tile.children = layer.favorites
+            tile.groupMode = .favorites
+            next.setFavorite(tile, at: direction, in: Array(path.dropLast()))
+        }
+        return next
+    }
     var hasValidFavorites: Bool {
         var remaining = Self.maximumFavorites
-        func valid(_ entries: [AppExplorerFavorite], depth: Int) -> Bool {
-            guard depth <= Self.maximumGroupDepth, entries.count <= 8,
+        var remainingLayers = 128
+        func validLayers(_ layers: [ExplorerHoldLayer], depth: Int, groupDepth: Int) -> Bool {
+            guard depth <= 12, layers.count <= 16, Set(layers.map(\.id)).count == layers.count else { return false }
+            var keys = Set<String>()
+            for layer in layers {
+                remainingLayers -= 1
+                guard remainingLayers >= 0, !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      layer.name.count <= 128 else { return false }
+                if let key = layer.holdShortcut {
+                    guard key.isValidExplorerShortcut, key.keyCode != 53,
+                          !(key.keyCode == holdShortcut?.keyCode && key.modifiers == holdShortcut?.modifiers),
+                          keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
+                }
+                guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1) else { return false }
+            }
+            return true
+        }
+        func valid(_ entries: [AppExplorerFavorite], depth: Int, nesting: Int = 0) -> Bool {
+            guard depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= 8,
                   Set(entries.map(\.direction)).count == entries.count else { return false }
             for entry in entries {
                 remaining -= 1
                 guard remaining >= 0, entry.isValidDestination else { return false }
-                if let children = entry.children, !valid(children, depth: depth + 1) { return false }
+                if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1) { return false }
+                if let layers = entry.holdLayers {
+                    guard !entry.isWindowManager || layers.allSatisfy({ $0.favorites.isEmpty }),
+                          validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth) else { return false }
+                }
             }
             return true
         }
-        let layers = holdLayers ?? []
-        guard layers.count <= 16, Set(layers.map(\.id)).count == layers.count else { return false }
-        var keys = Set<String>()
-        for layer in layers {
-            guard !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, layer.name.count <= 128 else { return false }
-            if let key = layer.holdShortcut {
-                guard key.isValidExplorerShortcut, key.keyCode != 53,
-                      !(key.keyCode == holdShortcut?.keyCode && key.modifiers == holdShortcut?.modifiers),
-                      keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
-            }
-            guard valid(layer.favorites, depth: 0) else { return false }
-        }
-        return valid(favorites, depth: 0)
+        return validLayers(holdLayers ?? [], depth: 0, groupDepth: 0) && valid(favorites, depth: 0)
     }
     @discardableResult
     mutating func swapFavorites(from source: SwipeDirection, to destination: SwipeDirection,
@@ -227,6 +265,57 @@ struct AppExplorerSettings: Codable, Equatable {
             return true
         }
         return replace(&favorites, path: path[...])
+    }
+}
+
+/// Presses retain the scope in which they began. Projection is recomputed from
+/// saved settings on release, so child layers never overwrite parent/sibling tiles.
+struct ExplorerScopedHeldKeys {
+    private struct Press {
+        let key: UInt16
+        let modifiers: UInt64
+        let id: UUID
+        let scope: [SwipeDirection]
+    }
+    private var held: [Press] = []
+    var activeID: UUID? { held.last?.id }
+    var activeScope: [SwipeDirection]? { held.last?.scope }
+    func resolved(_ original: AppExplorerSettings) -> AppExplorerSettings {
+        held.reduce(original) { settings, press in
+            guard let layer = settings.layers(at: press.scope).first(where: { $0.id == press.id }) else { return settings }
+            return settings.applying(layer, at: press.scope)
+        }
+    }
+    func activeLayer(at path: [SwipeDirection], in original: AppExplorerSettings) -> ExplorerHoldLayer? {
+        var settings = original
+        var active: ExplorerHoldLayer?
+        for press in held {
+            guard let layer = settings.layers(at: press.scope).first(where: { $0.id == press.id }) else { continue }
+            if path.starts(with: press.scope) { active = layer }
+            settings = settings.applying(layer, at: press.scope)
+        }
+        return active
+    }
+    mutating func press(key: UInt16, modifiers: UInt64, path: [SwipeDirection], settings: AppExplorerSettings) -> Bool {
+        if held.contains(where: { $0.key == key }) { return true }
+        let current = resolved(settings)
+        let scope = current.layerScope(at: path)
+        guard let layer = current.layers(at: scope).first(where: {
+            $0.holdShortcut?.keyCode == key && $0.holdShortcut?.modifiers == modifiers
+        }) else { return false }
+        held.append(Press(key: key, modifiers: modifiers, id: layer.id, scope: scope))
+        return true
+    }
+    mutating func release(key: UInt16) { held.removeAll { $0.key == key } }
+    mutating func updateModifiers(_ flags: UInt64) { held.removeAll { $0.modifiers & flags != $0.modifiers } }
+    mutating func leave(to path: [SwipeDirection]) { held.removeAll { !path.starts(with: $0.scope) } }
+    mutating func reconcile(_ original: AppExplorerSettings) {
+        var current = original
+        held = held.filter { press in
+            guard let layer = current.layers(at: press.scope).first(where: { $0.id == press.id }) else { return false }
+            current = current.applying(layer, at: press.scope)
+            return true
+        }
     }
 }
 

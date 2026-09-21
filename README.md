@@ -377,11 +377,29 @@ Both fingers must move together; sensor jumps and uncertain contacts cancel.
 
 ### App Explorer
 
+**Tile-specific layers:** open a group or Window Manager tile's **••• → Tile
+layers…**, enable **Use tile-specific layers**, then **Add layer**. Each tile
+owns its keys: for example, hold **Y** for thirds inside one Window Manager and
+hold **Y** for two thirds inside another. Group layers replace only that group's
+apps, URLs, shortcuts and nested groups. Window Manager layers configure window
+sizes, with a preview in the editor. Select a layer and use **Edit…** to change
+its name, hold key or window sizes.
+
+These keys take effect after entering their tile, not on the Explorer root.
+Release the key to return to that tile's default; going back out cancels its
+held layer. Keys are matched against the nearest tile-specific set, so keys
+from enclosing sets do not unexpectedly activate alongside it. An enabled,
+empty set explicitly disables inherited keys. Otherwise existing tiles inherit
+their enclosing Explorer layers for backward compatibility. Turning custom
+layers off asks before removing them. Tile layers follow their tile when moved
+or swapped and are included in YAML export and sync. Up to 16 layers per scope,
+128 layers overall, four group levels and 256 total slots are supported.
+
 **Explorer hold layers:** use **Add layer** above the favorites grid in General
 settings or the inline editor. Name the layer, record a hold key (new layers
 suggest **Y**), and choose **Halves & quarters**, **Thirds**, or **Two thirds** for
 window sizing. New layers copy the currently edited slots; choose the layer in
-the **Explorer layer** picker to replace its apps, URLs, shortcuts, and groups.
+the **Explorer-wide layer** picker to replace its apps, URLs, shortcuts, and groups.
 **Edit…** changes its name/key/window preset; **Remove** asks before deleting it.
 
 While the HUD is open, hold the layer key to temporarily switch its contents.
@@ -393,7 +411,7 @@ mid-swipe drains the current touch; lift, then make a fresh swipe. Escape closes
 the HUD. Release layer keys before using **Edit**. These keys are Explorer-local,
 not global shortcuts and not the cursor/tap layers. Use a key that isn't already
 intercepted by another global shortcut. Layer definitions and slots export/sync;
-the held state does not. Up to 16 Explorer layers and 256 total slots are supported.
+the held state does not. Existing Explorer-wide layers are preserved.
 
 **Media Controls:** choose **Media Controls** from a slot's **•••** menu, then
 select it in Explorer. Swipe **up/down** for volume up/down, **top-right** for

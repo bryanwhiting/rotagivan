@@ -9,6 +9,10 @@ struct AppExplorerSettingsView: View {
     @State private var editingLayer: ExplorerHoldLayer?
     @State private var creatingLayer = false
     @State private var removingLayer = false
+    @State private var editingTileLayers: [SwipeDirection]?
+    @State private var tileLayerSnapshot: AppExplorerFavorite?
+    @State private var tileLayerOwnerID: UUID?
+    @State private var inheritTileLayers = false
     @State private var editingApplicationPath: [SwipeDirection]?
     @State private var groupPath: [SwipeDirection]
     @State private var editingGroupPath: [SwipeDirection]?
@@ -19,40 +23,61 @@ struct AppExplorerSettingsView: View {
     @State private var slotDrag: ExplorerSlotDrag?
     @State private var dropTarget: SwipeDirection?
     private let grid: [[SwipeDirection?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
-    private var baseSettings: AppExplorerSettings { store.settings.appExplorer ?? AppExplorerSettings() }
+    private var baseSettings: AppExplorerSettings { configurationOverride?.wrappedValue ?? store.settings.appExplorer ?? AppExplorerSettings() }
+    private let configurationOverride: Binding<AppExplorerSettings>?
+    private let scopeTitle: String?
+    private let windowManagerOnly: Bool
     private var settings: AppExplorerSettings { baseSettings.projected(layerID: selectedLayerID) }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
     private var themeBinding: Binding<ExplorerTheme> {
         Binding(get: { baseSettings.resolvedTheme }, set: { theme in
-            var next = baseSettings; next.theme = theme; store.settings.appExplorer = next
+            var next = baseSettings; next.theme = theme; saveBase(next)
         })
     }
     private var animationBinding: Binding<Bool> {
         Binding(get: { baseSettings.resolvedAnimationsEnabled }, set: { enabled in
-            var next = baseSettings; next.animationsEnabled = enabled; store.settings.appExplorer = next
+            var next = baseSettings; next.animationsEnabled = enabled; saveBase(next)
         })
     }
     private var centerCursorBinding: Binding<Bool> {
         Binding(get: { baseSettings.resolvedCenterCursorOnAppSwitch }, set: { enabled in
-            var next = baseSettings; next.centerCursorOnAppSwitch = enabled; store.settings.appExplorer = next
+            var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
         })
     }
     var compact = false
     var onGroupPathChange: (([SwipeDirection]) -> Void)? = nil
 
     init(store: SettingsStore, groupPath: [SwipeDirection] = [], compact: Bool = false, initialLayerID: UUID? = nil,
+         configurationOverride: Binding<AppExplorerSettings>? = nil, scopeTitle: String? = nil, windowManagerOnly: Bool = false,
          onGroupPathChange: (([SwipeDirection]) -> Void)? = nil) {
         self.store = store
         _groupPath = State(initialValue: groupPath)
         _selectedLayerID = State(initialValue: initialLayerID)
         self.compact = compact
+        self.configurationOverride = configurationOverride
+        self.scopeTitle = scopeTitle
+        self.windowManagerOnly = windowManagerOnly
         self.onGroupPathChange = onGroupPathChange
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !compact && selectedLayerID == nil {
+            if let scopeTitle {
+                Label("Layers for \(scopeTitle)", systemImage: "square.3.layers.3d").font(.headline)
+                Text("These keys work only inside this tile. Other tiles keep their own settings. Release a key to return to this tile’s default.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("Use tile-specific layers", isOn: Binding(get: { baseSettings.holdLayers != nil }, set: { custom in
+                    if !custom && !(baseSettings.holdLayers ?? []).isEmpty { inheritTileLayers = true; return }
+                    var next = baseSettings; next.holdLayers = custom ? [] : nil
+                    saveBase(next); selectedLayerID = nil
+                }))
+                if baseSettings.holdLayers == nil {
+                    Text("Inherit enclosing Explorer layers. Enable to use a separate set of keys here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !compact && selectedLayerID == nil && scopeTitle == nil {
             Label("App Explorer", systemImage: "safari").font(.headline)
             ExplorerThemePicker(theme: themeBinding)
             Toggle("Animate HUD feedback", isOn: animationBinding).font(.caption)
@@ -80,7 +105,7 @@ struct AppExplorerSettingsView: View {
             if let error = shortcuts.error { Text(error).font(.caption).foregroundStyle(.orange) }
             }
             HStack {
-                if compact {
+                if compact && scopeTitle == nil {
                     Menu {
                         Picker("Theme", selection: themeBinding) {
                             ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -90,7 +115,7 @@ struct AppExplorerSettingsView: View {
                     } label: { Image(systemName: "paintpalette") }
                         .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
                 }
-                Picker("Explorer layer", selection: $selectedLayerID) {
+                Picker(scopeTitle == nil ? "Explorer-wide layer" : "Tile layer", selection: $selectedLayerID) {
                     Text("Default").tag(nil as UUID?)
                     ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
                 }
@@ -99,12 +124,29 @@ struct AppExplorerSettingsView: View {
                     let y = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
                     let used = (baseSettings.holdLayers ?? []).contains { $0.holdShortcut?.keyCode == y.keyCode && $0.holdShortcut?.modifiers == 0 }
                     editingLayer = ExplorerHoldLayer(name: "New layer", holdShortcut: used ? nil : y, favorites: settings.favorites, windowLayout: .thirds)
-                }.disabled((baseSettings.holdLayers ?? []).count >= 16)
+                }.disabled((baseSettings.holdLayers ?? []).count >= 16 || (scopeTitle != nil && baseSettings.holdLayers == nil))
                 if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                     Button("Edit…") { creatingLayer = false; editingLayer = layer }
                     Button("Remove", role: .destructive) { removingLayer = true }
                 }
             }.font(.subheadline)
+            if scopeTitle == nil {
+                Text("For keys that apply to just one group or Window Manager, use that tile’s ••• → Tile layers…")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if windowManagerOnly {
+                let layout = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID })?.windowLayout ?? .halves
+                HStack {
+                    ForEach([SwipeDirection.left, .topRight, .right], id: \.self) { direction in
+                        VStack {
+                            WindowTileIcon(direction: direction, layout: layout)
+                            Text(WindowTile.title(direction, layout: layout)).font(.caption)
+                        }.frame(maxWidth: .infinity)
+                    }
+                }.padding(.vertical, 12)
+                Text("Default uses halves and quarters. Add a layer and choose Thirds or Two thirds in its Window sizes setting.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
             HStack(spacing: 5) {
                 Button("Favorites") { groupPath = [] }.buttonStyle(.link)
                 ForEach(groupPath.indices, id: \.self) { index in
@@ -130,7 +172,6 @@ struct AppExplorerSettingsView: View {
                     Text("Recent apps").tag(AppExplorerMode.recent)
                 }.pickerStyle(.segmented)
             }
-            if let groupError { Text(groupError).font(.caption).foregroundStyle(.red) }
             VStack(spacing: 6) {
                 ForEach(0..<3) { row in
                     HStack(spacing: 6) {
@@ -160,6 +201,27 @@ struct AppExplorerSettingsView: View {
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
                 : "Drag an icon or name to another slot to swap; drop into an empty slot to move. Use ••• to choose apps, URLs, shortcuts, or groups. Changes save automatically. Tap the center in the HUD to go back.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let groupError { Text(groupError).font(.caption).foregroundStyle(.red).padding(6).background(.regularMaterial) }
+        }
+        .confirmationDialog("Remove this tile’s custom layers and inherit enclosing Explorer keys?", isPresented: $inheritTileLayers, titleVisibility: .visible) {
+            Button("Remove custom layers", role: .destructive) {
+                var next = baseSettings; next.holdLayers = nil
+                if saveBase(next) { selectedLayerID = nil }
+            }
+        }
+        .sheet(isPresented: Binding(get: { editingTileLayers != nil }, set: { if !$0 { editingTileLayers = nil } })) {
+            if let path = editingTileLayers, let tile = tileLayerSnapshot {
+                VStack(alignment: .trailing) {
+                    ScrollView {
+                        AnyView(AppExplorerSettingsView(store: store, configurationOverride: tileLayerBinding(path),
+                            scopeTitle: tile.name, windowManagerOnly: tile.isWindowManager)).padding(24)
+                    }
+                    Button("Done") { editingTileLayers = nil }.keyboardShortcut(.cancelAction).padding()
+                }.frame(width: 660, height: tile.isWindowManager ? 350 : 620)
+            }
         }
         .sheet(item: $editingLayer) { layer in
             ExplorerHoldLayerEditor(layer: layer, settings: baseSettings, onSave: { updated in
@@ -174,7 +236,7 @@ struct AppExplorerSettingsView: View {
                 }
                 next.holdLayers = layers
                 guard next.hasValidFavorites else { groupError = "Use unique hold keys and stay within the 16-layer / 256-slot limits."; return }
-                store.settings.appExplorer = next
+                guard saveBase(next) else { return }
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
             }, onCancel: { editingLayer = nil })
         }
@@ -182,7 +244,7 @@ struct AppExplorerSettingsView: View {
             Button("Remove layer", role: .destructive) {
                 var next = baseSettings
                 next.holdLayers?.removeAll { $0.id == selectedLayerID }
-                store.settings.appExplorer = next
+                saveBase(next)
                 selectedLayerID = nil; groupPath = []
             }
         }
@@ -277,6 +339,14 @@ struct AppExplorerSettingsView: View {
                 Text(direction.title).font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Menu {
+                    if let favorite, favorite.supportsHoldLayers {
+                        Button("Tile layers…") {
+                            tileLayerSnapshot = favorite
+                            tileLayerOwnerID = selectedLayerID
+                            editingTileLayers = groupPath + [direction]
+                        }
+                        Divider()
+                    }
                     if favorite?.isGroup == true {
                         Button("Edit group…") { groupPath.append(direction) }
                         Button("Rename group…") { editingGroupPath = groupPath + [direction] }
@@ -404,6 +474,37 @@ struct AppExplorerSettingsView: View {
             .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    @discardableResult private func saveBase(_ settings: AppExplorerSettings) -> Bool {
+        if let configurationOverride {
+            configurationOverride.wrappedValue = settings
+            guard configurationOverride.wrappedValue == settings else {
+                groupError = "Not saved: the tile moved or the full Explorer configuration exceeds its nesting or slot limits."
+                return false
+            }
+        } else { store.settings.appExplorer = settings }
+        return true
+    }
+
+    private func tileLayerBinding(_ path: [SwipeDirection]) -> Binding<AppExplorerSettings> {
+        Binding(get: {
+            let tile = settings.favorite(at: path)
+            return AppExplorerSettings(favorites: tile?.children ?? [], holdShortcut: baseSettings.holdShortcut,
+                holdLayers: tile?.holdLayers)
+        }, set: { updated in
+            guard tileLayerOwnerID == selectedLayerID, let expected = tileLayerSnapshot,
+                  var tile = settings.favorite(at: path), tile == expected, let direction = path.last else {
+                groupError = "This tile changed or moved while editing. Reopen its Tile layers editor."
+                editingTileLayers = nil
+                return
+            }
+            tile.holdLayers = updated.holdLayers
+            if tile.isGroup { tile.children = updated.favorites }
+            var next = settings
+            guard next.setFavorite(tile, at: direction, in: Array(path.dropLast())), save(next) else { return }
+            tileLayerSnapshot = tile
+        })
+    }
+
     private func edit(_ update: (inout AppExplorerSettings) -> Void) {
         var next = settings; update(&next)
         guard next.hasValidFavorites else { groupError = "Use at most eight slots per group, four group levels, and 256 total favorites."; return }
@@ -418,7 +519,7 @@ struct AppExplorerSettingsView: View {
             next.holdLayers?[index].favorites = settings.favorites
         }
         guard next.hasValidFavorites else { groupError = "Use unique hold keys and stay within the 16-layer / 256-slot limits."; return false }
-        store.settings.appExplorer = next
+        guard saveBase(next) else { return false }
         groupError = nil
         return true
     }

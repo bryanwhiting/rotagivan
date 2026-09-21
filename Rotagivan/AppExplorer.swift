@@ -36,7 +36,7 @@ extension AppExplorerPresenting {
     var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
     private var deadline = Date.distantPast
     private var alternateHeld = false
-    private var heldKeys = ExplorerHeldKeys()
+    private var heldKeys = ExplorerScopedHeldKeys()
     private var baseGroupPath: [SwipeDirection] = []
     var performMedia: (ExplorerMediaAction) -> Void = { ExplorerMediaAction.perform($0) }
     private(set) var groupPath: [SwipeDirection] = []
@@ -119,7 +119,7 @@ extension AppExplorerPresenting {
         cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
-        heldKeys = ExplorerHeldKeys()
+        heldKeys = ExplorerScopedHeldKeys()
         baseGroupPath = []
         model.showingMediaControls = false
         model.showingWindowManager = windowManager
@@ -187,21 +187,32 @@ extension AppExplorerPresenting {
         }
     }
 
+    private var layerScopePath: [SwipeDirection] {
+        if (model.showingWindowManager && !model.directWindowManager) || model.showingMediaControls,
+           let controlDirection { return groupPath + [controlDirection] }
+        return groupPath
+    }
+
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
         guard isVisible, !isEditing, contextIsValid?() != false else { return false }
         let previous = heldKeys.activeID
+        let previousSettings = heldKeys.resolved(configuration())
         let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
         var handled = false
         switch event.type {
-        case .keyDown: handled = heldKeys.press(key: event.keyCode, modifiers: flags, layers: configuration().holdLayers ?? [])
+        case .keyDown:
+            // A held key must not activate a different tile after navigating back.
+            if event.isARepeat { return true }
+            handled = heldKeys.press(key: event.keyCode, modifiers: flags, path: layerScopePath, settings: configuration())
         case .keyUp: heldKeys.release(key: event.keyCode); handled = previous != heldKeys.activeID
         case .flagsChanged: heldKeys.updateModifiers(flags)
         default: return false
         }
-        if previous != heldKeys.activeID {
+        heldKeys.reconcile(configuration())
+        if previous != heldKeys.activeID || previousSettings != heldKeys.resolved(configuration()) {
             if previous == nil { baseGroupPath = groupPath }
             if heldKeys.activeID == nil { groupPath = baseGroupPath }
-            else if !model.showingWindowManager && !model.showingMediaControls { groupPath = [] }
+            else if heldKeys.activeScope?.isEmpty == true && !model.showingWindowManager && !model.showingMediaControls { groupPath = [] }
             model.message = nil
             refreshGroup() // Drain any in-progress swipe before changing its targets.
         }
@@ -212,11 +223,12 @@ extension AppExplorerPresenting {
         let original = configuration()
         model.theme = original.resolvedTheme
         model.animationsEnabled = original.resolvedAnimationsEnabled
-        let layer = original.holdLayers?.first { $0.id == heldKeys.activeID }
-        let settings = original.projected(layerID: layer?.id)
+        let layer = heldKeys.activeLayer(at: layerScopePath, in: original)
+        let settings = heldKeys.resolved(original)
         model.layerName = layer?.name
         model.windowLayout = layer?.windowLayout ?? .halves
-        model.layerHint = (original.holdLayers ?? []).compactMap { layer in layer.holdShortcut.map { "\($0.displayName): \(layer.name)" } }.joined(separator: " · ")
+        model.layerHint = settings.layers(at: settings.layerScope(at: layerScopePath))
+            .compactMap { layer in layer.holdShortcut.map { "\($0.displayName): \(layer.name)" } }.joined(separator: " · ")
         model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
@@ -392,6 +404,7 @@ extension AppExplorerPresenting {
             guard contextIsValid?() != false else { dismiss(); return }
             model.showingMediaControls = false
             controlDirection = nil
+            heldKeys.leave(to: groupPath)
             refreshGroup()
             return
         }
@@ -400,6 +413,7 @@ extension AppExplorerPresenting {
             if model.directWindowManager { dismiss(); return }
             model.showingWindowManager = false
             controlDirection = nil
+            heldKeys.leave(to: groupPath)
             model.message = nil
             tilingTarget = nil
             refreshGroup()
@@ -407,6 +421,7 @@ extension AppExplorerPresenting {
         }
         guard contextIsValid?() != false, !groupPath.isEmpty else { dismiss(); return }
         groupPath.removeLast()
+        heldKeys.leave(to: groupPath)
         refreshGroup()
     }
 
@@ -493,7 +508,7 @@ extension AppExplorerPresenting {
         model.showingWindowManager = false
         model.directWindowManager = false
         model.showingMediaControls = false
-        heldKeys = ExplorerHeldKeys()
+        heldKeys = ExplorerScopedHeldKeys()
         baseGroupPath = []
         model.message = nil
         tilingTarget = nil

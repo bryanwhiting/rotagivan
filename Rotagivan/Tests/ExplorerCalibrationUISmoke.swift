@@ -623,6 +623,49 @@ import SwiftUI
         controller.dismiss()
         precondition(mediaActions.count == 3)
         print("Explorer layers/media native UI passed: Y/U holds, repeat/release priority, mid-swipe drain, alternate apps, thirds/two-thirds/default tiling, repeated volume, play/pause and back.")
+        let localThirds = ExplorerHoldLayer(name: "Local thirds", holdShortcut: y, windowLayout: .thirds)
+        let localWide = ExplorerHoldLayer(name: "Local wide", holdShortcut: y, windowLayout: .twoThirds)
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .left, name: "Narrow windows", action: .windowManager, holdLayers: [localThirds]),
+            AppExplorerFavorite(direction: .right, name: "Wide windows", action: .windowManager, holdLayers: [localWide]),
+            AppExplorerFavorite(direction: .up, name: "Work", children: [
+                AppExplorerFavorite(direction: .left, name: "Default docs", url: "https://example.com/default")
+            ], holdLayers: [heldLayer])
+        ])
+        let localSettings = AppExplorerSettings(holdLayers: [localThirds])
+        try render(AppExplorerSettingsView(store: store, initialLayerID: localThirds.id,
+            configurationOverride: .constant(localSettings), scopeTitle: "Narrow windows", windowManagerOnly: true)
+            .padding(24).background(Color(nsColor: .windowBackgroundColor)),
+            size: CGSize(width: 660, height: 350), path: CommandLine.arguments[1] + "/tile-window-layers.png")
+        func scopedKey(_ down: Bool, repeatKey: Bool = false) -> Bool {
+            controller.processLayerKey(NSEvent.keyEvent(with: down ? .keyDown : .keyUp, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+                characters: "y", charactersIgnoringModifiers: "y", isARepeat: repeatKey, keyCode: 16)!)
+        }
+        controller.show(waitingForLift: false)
+        precondition(!scopedKey(true), "Tile keys must not activate at Explorer root")
+        swipeLeft()
+        precondition(scopedKey(true) && controller.displayedEntries.first?.name.contains("⅓") == true)
+        precondition(scopedKey(false) && controller.displayedEntries.first?.name.contains("⅓") == false)
+        _ = scopedKey(true)
+        centerTap()
+        precondition(controller.displayedEntries.contains { $0.name == "Wide windows" })
+        controller.process(report(500)); controller.process(report(600)); controller.process(report(nil))
+        precondition(controller.displayedEntries.first?.name.contains("⅔") == false)
+        _ = scopedKey(true, repeatKey: true)
+        precondition(controller.displayedEntries.first?.name.contains("⅔") == false, "Repeat from an exited tile must not activate another tile")
+        _ = scopedKey(false)
+        precondition(scopedKey(true) && controller.displayedEntries.first?.name.contains("⅔") == true)
+        swipeLeft()
+        precondition(layouts.last == .twoThirds && !controller.isVisible)
+        controller.show(waitingForLift: false); swipeUp()
+        precondition(controller.displayedEntries.first?.name == "Default docs")
+        precondition(scopedKey(true) && controller.displayedEntries.first?.name == "Layer docs")
+        precondition(scopedKey(false) && controller.displayedEntries.first?.name == "Default docs")
+        centerTap()
+        precondition(!scopedKey(true), "Leaving a scoped group restores root key behavior")
+        controller.dismiss()
+        print("Tile layers native HUD passed: reused Y, independent window layouts, release/back cleanup, repeat safety and local app replacement.")
         for theme in ExplorerTheme.allCases {
             let themedModel = ExplorerModel()
             themedModel.theme = theme

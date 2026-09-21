@@ -131,6 +131,19 @@ struct ConfigurationTests {
         precondition(layerRestored.settings.appExplorer == layeredExplorer.settings.appExplorer)
         rejected(layerYAML.replacingOccurrences(of: "windowLayout: thirds", with: "windowLayout: invalid"), "unknown window layout")
         print("Explorer hold layers and media controls YAML roundtrip passed.")
+        var tileLayerConfig = layeredExplorer
+        let localY = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
+        tileLayerConfig.settings.appExplorer!.favorites = [
+            AppExplorerFavorite(direction: .left, name: "Local manager", action: .windowManager,
+                holdLayers: [ExplorerHoldLayer(name: "Local thirds", holdShortcut: localY, windowLayout: .thirds)]),
+            AppExplorerFavorite(direction: .right, name: "Local apps", children: [],
+                holdLayers: [ExplorerHoldLayer(name: "Alternate apps", holdShortcut: localY,
+                    favorites: [AppExplorerFavorite(direction: .up, bundleID: "com.apple.finder", name: "Finder")])])
+        ]
+        let tileLayerYAML = try tileLayerConfig.yaml()
+        let tileLayerRoundtrip = try AppConfiguration.parse(tileLayerYAML)
+        precondition(tileLayerRoundtrip.settings.appExplorer == tileLayerConfig.settings.appExplorer)
+        print("Tile-owned Explorer layers YAML roundtrip passed with reused keys in independent scopes.")
         precondition(AppExplorerSettings().resolvedTheme == .vector)
         precondition(AppExplorerSettings().resolvedAnimationsEnabled)
         precondition(!AppExplorerSettings().resolvedCenterCursorOnAppSwitch)

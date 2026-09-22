@@ -7,11 +7,11 @@ An editable, independent macOS driver and settings app for the ZSA Navigator Tra
 Choose **HUD → Classic / Starburst / Starburst Air**, or use the palette menu
 while editing the HUD directly. Classic retains its native material appearance;
 Starburst keeps the violet radial panel. **Starburst Air** is the new default:
-floating charcoal sectors, thin mint-white perimeter arcs, and small text
-backplates, with the desktop visible around and between them. There is no full
-rectangular background or window shadow. Nested breadcrumb rings and sector
-hit targets remain stable. Reduce Transparency makes the individual elements
-opaque without filling the space around them.
+floating charcoal sectors and thin mint-white perimeter arcs over a rounded,
+frosted-glass backdrop. Native macOS material, a fine reflective rim, and a soft
+shadow separate the HUD from busy desktops without a heavy panel. The settings
+preview uses the same glass. Nested breadcrumb rings and sector hit targets
+remain stable. Reduce Transparency replaces the glass with an opaque surface.
 
 Vector HUD and Ember are retired. Saved/imported selections of either migrate
 to Starburst Air; Classic and Starburst selections are preserved. Layouts,

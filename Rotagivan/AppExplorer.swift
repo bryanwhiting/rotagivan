@@ -945,7 +945,7 @@ struct AppExplorerView: View {
         }
         .padding(26)
         .frame(width: 470, height: 520)
-        .background(ExplorerHUDBackdrop(theme: model.theme))
+        .background(ExplorerHUDBackdrop(theme: model.theme, forceReduceTransparency: forceReduceTransparency))
         .tint(accent)
         .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
         .scaleEffect(animates && !appeared ? 0.985 : 1)

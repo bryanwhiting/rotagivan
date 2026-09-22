@@ -49,8 +49,10 @@ import SwiftUI
             try bitmap.representation(using: .png, properties: [:])!.write(to:
                 URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("\(theme.rawValue)-depth-\(depth).png"))
             if theme.isFloating {
-                precondition(bitmap.colorAt(x: 5, y: bitmap.pixelsHigh / 2)!.alphaComponent < 0.01,
-                    "Air must leave the sides fully transparent, with no rectangular panel")
+                precondition(bitmap.colorAt(x: 0, y: 0)!.alphaComponent < 0.01,
+                    "Air must keep transparent corners outside its rounded glass")
+                precondition(bitmap.colorAt(x: bitmap.pixelsWide / 12, y: bitmap.pixelsHigh / 2)!.alphaComponent > 0.1,
+                    "Air must provide glass behind the gaps between HUD elements")
             }
             for direction in directions {
                 // AppKit has a bottom-left origin; the fixed HUD wheel is
@@ -83,7 +85,11 @@ import SwiftUI
         settle()
         let reduced = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
         host.cacheDisplay(in: host.bounds, to: reduced)
-        precondition(reduced.colorAt(x: 5, y: reduced.pixelsHigh / 2)!.alphaComponent < 0.01)
-        print("Starburst/Starburst Air native UI passed: sector and center hit tests at six depths, transparent edges (including Reduce Transparency), and light/dark screenshots. No apps launched or system pointer events posted.")
+        precondition(reduced.colorAt(x: 0, y: 0)!.alphaComponent < 0.01)
+        precondition(reduced.colorAt(x: reduced.pixelsWide / 12, y: reduced.pixelsHigh / 2)!.alphaComponent > 0.99,
+            "Reduce Transparency must make the whole glass backing opaque, not only its tiles")
+        try reduced.representation(using: .png, properties: [:])!.write(to:
+            URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("air-reduced-transparency.png"))
+        print("Starburst/Starburst Air native UI passed: sector and center hit tests at six depths, glass coverage with transparent corners, opaque accessibility fallback, and light/dark screenshots. No apps launched or system pointer events posted.")
     }
 }

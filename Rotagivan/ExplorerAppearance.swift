@@ -74,7 +74,9 @@ extension ExplorerTheme {
 /// report loop only publishes sector changes; no animation owns an input timer.
 struct ExplorerHUDBackdrop: View {
     let theme: ExplorerTheme
+    var forceReduceTransparency = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var opaque: Bool { reduceTransparency || forceReduceTransparency }
     var body: some View {
         if theme == .native {
             RoundedRectangle(cornerRadius: 26).fill(.ultraThinMaterial)
@@ -87,8 +89,24 @@ struct ExplorerHUDBackdrop: View {
                 .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(theme.accent.opacity(0.28)))
                 .accessibilityHidden(true).allowsHitTesting(false)
         } else {
-            // Air leaves the desktop visible between every HUD element.
-            Color.clear.allowsHitTesting(false).accessibilityHidden(true)
+            // A single native material surface separates Air from busy desktops.
+            // Keep the glass static: no blur filters, drawing loop, or input work.
+            let glass = RoundedRectangle(cornerRadius: 44, style: .continuous)
+            ZStack {
+                if opaque {
+                    glass.fill(theme.surface)
+                } else {
+                    glass.fill(.ultraThinMaterial)
+                    glass.fill(theme.surface.opacity(0.16))
+                    glass.fill(LinearGradient(colors: [.white.opacity(0.12), .clear, theme.accent.opacity(0.035)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+                glass.strokeBorder(LinearGradient(colors: [.white.opacity(0.42), .white.opacity(0.07), .white.opacity(0.20)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+            .padding(10)
+            .allowsHitTesting(false).accessibilityHidden(true)
         }
     }
 }

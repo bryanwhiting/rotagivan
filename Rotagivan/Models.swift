@@ -266,7 +266,7 @@ enum ExplorerTheme: String, Codable, CaseIterable {
         switch self { case .native: return "Classic"; case .starburst: return "Starburst"; case .starburstAir: return "Starburst Air" }
     }
     var subtitle: String {
-        switch self { case .native: return "Native · understated"; case .starburst: return "Radial · nested"; case .starburstAir: return "Floating · minimal" }
+        switch self { case .native: return "Native · understated"; case .starburst: return "Radial · nested"; case .starburstAir: return "Glass · minimal" }
     }
     var isHUD: Bool { self != .native }
     var isRadial: Bool { self == .starburst || self == .starburstAir }

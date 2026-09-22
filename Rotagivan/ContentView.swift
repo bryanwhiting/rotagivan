@@ -512,12 +512,10 @@ struct ContentView: View {
             if editingAppleActions ? store.settings.devices?.appleLayerGestures?[id] != nil : (id == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(id)) {
             Toggle("Enable tap actions", isOn: gesture(id, \.tapToClick))
             if editableGestures(id).gestures.tapToClick {
-                tapRecorder("One-finger tap", action: gestureBinding(id).oneFingerTap, shortcut: gestureBinding(id).oneFingerShortcut)
-                tapRecorder("One-finger double tap", action: doubleTapActionBinding(id, twoFingers: false), shortcut: doubleTapShortcutBinding(id, twoFingers: false))
-                tapRecorder("One-finger triple tap", action: tripleTapActionBinding(id, twoFingers: false), shortcut: gestureBinding(id).oneFingerTripleShortcut)
-                tapRecorder("Two-finger tap", action: gestureBinding(id).twoFingerTap, shortcut: gestureBinding(id).twoFingerShortcut)
-                tapRecorder("Two-finger double tap", action: doubleTapActionBinding(id, twoFingers: true), shortcut: doubleTapShortcutBinding(id, twoFingers: true))
-                tapRecorder("Two-finger triple tap", action: tripleTapActionBinding(id, twoFingers: true), shortcut: gestureBinding(id).twoFingerTripleShortcut)
+                LayerActionAssignmentsEditor(
+                    gestures: gestureBinding(id),
+                    distanceScale: hid.distanceScale
+                )
                 Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Calibrate tap timing for every layer in General → Tap calibration.")
@@ -537,26 +535,6 @@ struct ContentView: View {
                     Text("Tap wobble within this radius won't move the cursor. Move beyond it or hold past Tap impact speed to start tracking. Lower the radius for quicker fine movement. Tap-and-hold dragging still works.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Divider()
-                DoubleTapSwipeEditor(settings: Binding(get: {
-                    editableGestures(id).singleTapSwipe ?? .singleTapDefaults
-                }, set: { value in
-                    var taps = editableGestures(id)
-                    taps.singleTapSwipe = value
-                    updateEditableGestures(taps, for: id)
-                }), singleTap: true, showTimingControls: false, distanceScale: hid.distanceScale)
-                Divider()
-                DoubleTapSwipeEditor(settings: Binding(get: {
-                    editableGestures(id).doubleTapSwipe ?? DoubleTapSwipeSettings()
-                }, set: { value in
-                    var taps = editableGestures(id)
-                    taps.doubleTapSwipe = value
-                    updateEditableGestures(taps, for: id)
-                }), showTimingControls: false, distanceScale: hid.distanceScale)
-                Divider()
-                twoFingerSwipeEditor(id, singleTap: true)
-                Divider()
-                twoFingerSwipeEditor(id, singleTap: false)
             }
             if !editingAppleActions {
             Divider()
@@ -576,20 +554,6 @@ struct ContentView: View {
         .font(.system(size: 12))
     }
 
-    private func twoFingerSwipeEditor(_ id: UInt32, singleTap: Bool) -> some View {
-        let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?> = singleTap ? \.twoFingerSingleTapSwipe : \.twoFingerDoubleTapSwipe
-        return DoubleTapSwipeEditor(settings: Binding(get: {
-            editableGestures(id)[keyPath: key] ?? (singleTap ? .singleTapDefaults : DoubleTapSwipeSettings())
-        }, set: { value in
-            var taps = editableGestures(id)
-            taps[keyPath: key] = value
-            updateEditableGestures(taps, for: id)
-        }), singleTap: singleTap, twoFingers: true, distanceScale: hid.distanceScale)
-    }
-
-    private func tapRecorder(_ title: String, action: Binding<TapAction>, shortcut: Binding<RecordedShortcut?>) -> some View {
-        TapActionEditor(title: title, action: action, shortcut: shortcut)
-    }
 
     private func tapImpactSpeedSlider(_ id: UInt32) -> some View {
         let milliseconds = Binding<Double>(get: {
@@ -734,38 +698,6 @@ struct ContentView: View {
         gestureBinding(id).gestures[dynamicMember: keyPath]
     }
 
-    private func tripleTapActionBinding(_ id: UInt32, twoFingers: Bool) -> Binding<TapAction> {
-        Binding(get: {
-            let taps = editableGestures(id)
-            return (twoFingers ? taps.twoFingerTripleTap : taps.oneFingerTripleTap) ?? .none
-        }, set: { action in
-            var taps = editableGestures(id)
-            if twoFingers { taps.twoFingerTripleTap = action } else { taps.oneFingerTripleTap = action }
-            updateEditableGestures(taps, for: id)
-        })
-    }
-
-    private func doubleTapActionBinding(_ id: UInt32, twoFingers: Bool) -> Binding<TapAction> {
-        Binding(get: {
-            let gestures = editableGestures(id)
-            return twoFingers ? (gestures.twoFingerDoubleTap ?? .none) : (gestures.oneFingerDoubleTap ?? .none)
-        }, set: { action in
-            var gestures = editableGestures(id)
-            if twoFingers { gestures.twoFingerDoubleTap = action } else { gestures.oneFingerDoubleTap = action }
-            updateEditableGestures(gestures, for: id)
-        })
-    }
-
-    private func doubleTapShortcutBinding(_ id: UInt32, twoFingers: Bool) -> Binding<RecordedShortcut?> {
-        Binding(get: {
-            let gestures = editableGestures(id)
-            return twoFingers ? gestures.twoFingerDoubleShortcut : gestures.oneFingerDoubleShortcut
-        }, set: { shortcut in
-            var gestures = editableGestures(id)
-            if twoFingers { gestures.twoFingerDoubleShortcut = shortcut } else { gestures.oneFingerDoubleShortcut = shortcut }
-            updateEditableGestures(gestures, for: id)
-        })
-    }
 
     private var enabledBinding: Binding<Bool> {
         Binding(get: { store.settings.enabled }, set: { enabled in

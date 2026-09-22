@@ -25,6 +25,34 @@ import CoreGraphics
         var empty = StoredSettings(); empty.appOverrides = []
         precondition(empty.resolvedAppOverrides.isEmpty)
 
+        precondition(AppGestureTrigger.layerActionTriggers.count == 38)
+        precondition(Set(AppGestureTrigger.layerActionTriggers).count == 38)
+        precondition(AppGestureTrigger.combining(tap: .oneFingerTripleTap, direction: .left) == nil)
+        precondition(AppGestureTrigger.combining(tap: .twoFingerDoubleTap, direction: .topRight) == .twoDoubleTopRight)
+        precondition(AppGestureTrigger.twoSingleBottomLeft.baseTapTrigger == .twoFingerTap)
+        var layer = base
+        layer.singleTapSwipe = DoubleTapSwipeSettings(
+            enabled: false, swipeWindow: 0.47, swipeDistance: 123, fastSwipeDuration: 0.16
+        )
+        let chord = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
+        precondition(layer.setLayerAction(.shortcut, shortcut: chord, for: .singleRight))
+        precondition(layer.singleTapSwipe?.enabled == true)
+        precondition(layer.singleTapSwipe?.right == chord)
+        precondition(layer.singleTapSwipe?.swipeWindow == 0.47 && layer.singleTapSwipe?.swipeDistance == 123,
+            "Adding an assignment must preserve calibrated recognition settings")
+        precondition(layer.setLayerAction(.appExplorer, shortcut: nil, for: .singleLeft))
+        precondition(layer.singleTapSwipe?.action(for: .left) == .appExplorer)
+        precondition(layer.setLayerAction(.none, shortcut: nil, for: .singleRight))
+        precondition(layer.singleTapSwipe?.enabled == true, "Family remains active while another direction is assigned")
+        precondition(layer.setLayerAction(.none, shortcut: nil, for: .singleLeft))
+        precondition(layer.singleTapSwipe?.enabled == false)
+        precondition(layer.singleTapSwipe?.swipeWindow == 0.47 && layer.singleTapSwipe?.swipeDistance == 123,
+            "Removing the last assignment disables recognition without deleting calibration")
+        precondition(layer.setLayerAction(.windowManager, shortcut: chord, for: .oneFingerDoubleTap))
+        precondition(layer.oneFingerDoubleTap == .windowManager && layer.oneFingerDoubleShortcut == nil)
+        precondition(!layer.setLayerAction(.rightClick, shortcut: nil, for: .twoDoubleDown),
+            "Swipe rows only accept actions supported by their persisted schema")
+
         let settings = chrome.twoFingerSwipe!
         let t = Date(timeIntervalSince1970:1000)
         func report(_ dx:Double=0, _ dy:Double=0, count:Int=2) -> TrackpadReport {

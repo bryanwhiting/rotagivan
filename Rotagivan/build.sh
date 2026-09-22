@@ -69,6 +69,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/DoubleTapSwipe.swift" \
   "$script_dir/SwipeDirectionClassification.swift" \
   "$script_dir/DoubleTapSwipeEditor.swift" \
+  "$script_dir/LayerActionAssignmentsEditor.swift" \
   "$script_dir/GestureCalibration.swift" \
   "$script_dir/GestureCalibrationView.swift" \
   "$script_dir/HIDManager.swift" \

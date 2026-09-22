@@ -13,6 +13,37 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
     case twoDoubleTopLeft = "twoDouble.topLeft", twoDoubleTopRight = "twoDouble.topRight", twoDoubleBottomLeft = "twoDouble.bottomLeft", twoDoubleBottomRight = "twoDouble.bottomRight"
     var id: String { rawValue }
     var direction: SwipeDirection? { SwipeDirection(rawValue: String(rawValue.split(separator: ".").last!)) }
+    static let baseTapTriggers: [Self] = [
+        .oneFingerTap, .oneFingerDoubleTap, .oneFingerTripleTap,
+        .twoFingerTap, .twoFingerDoubleTap, .twoFingerTripleTap
+    ]
+    static let swipeCapableTapTriggers: [Self] = [
+        .oneFingerTap, .oneFingerDoubleTap, .twoFingerTap, .twoFingerDoubleTap
+    ]
+    static let layerActionTriggers: [Self] = baseTapTriggers + swipeCapableTapTriggers.flatMap { tap in
+        SwipeDirection.allCases.compactMap { combining(tap: tap, direction: $0) }
+    }
+    static func combining(tap: Self, direction: SwipeDirection) -> Self? {
+        let prefix: String
+        switch tap {
+        case .oneFingerTap: prefix = "single"
+        case .oneFingerDoubleTap: prefix = "double"
+        case .twoFingerTap: prefix = "twoSingle"
+        case .twoFingerDoubleTap: prefix = "twoDouble"
+        default: return nil
+        }
+        return Self(rawValue: "\(prefix).\(direction.rawValue)")
+    }
+    var baseTapTrigger: Self? {
+        guard direction != nil else { return Self.baseTapTriggers.contains(self) ? self : nil }
+        switch rawValue.split(separator: ".").first {
+        case "single": return .oneFingerTap
+        case "double": return .oneFingerDoubleTap
+        case "twoSingle": return .twoFingerTap
+        case "twoDouble": return .twoFingerDoubleTap
+        default: return nil
+        }
+    }
     var title: String {
         switch self {
         case .oneFingerTap: return "One-finger tap"
@@ -32,6 +63,49 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
             }
             return "\(prefix) \(direction!.title.lowercased())"
         }
+    }
+}
+
+extension ProfileGestures {
+    /// Writes the same persisted fields used by the legacy tap and swipe editors.
+    /// Keeping this translation in one place lets the assignment-list UI remain
+    /// a pure view over existing configurations and migrations.
+    @discardableResult mutating func setLayerAction(_ action: TapAction, shortcut: RecordedShortcut?,
+                                                     for trigger: AppGestureTrigger) -> Bool {
+        gestures.tapToClick = true
+        let storedShortcut = action == .shortcut ? shortcut : nil
+        switch trigger {
+        case .oneFingerTap:
+            oneFingerTap = action; oneFingerShortcut = storedShortcut
+        case .oneFingerDoubleTap:
+            oneFingerDoubleTap = action; oneFingerDoubleShortcut = storedShortcut
+        case .oneFingerTripleTap:
+            oneFingerTripleTap = action; oneFingerTripleShortcut = storedShortcut
+        case .twoFingerTap:
+            twoFingerTap = action; twoFingerShortcut = storedShortcut
+        case .twoFingerDoubleTap:
+            twoFingerDoubleTap = action; twoFingerDoubleShortcut = storedShortcut
+        case .twoFingerTripleTap:
+            twoFingerTripleTap = action; twoFingerTripleShortcut = storedShortcut
+        default:
+            guard let direction = trigger.direction else { return false }
+            let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?>
+            let singleTap: Bool
+            switch trigger.rawValue.split(separator: ".").first {
+            case "single": key = \.singleTapSwipe; singleTap = true
+            case "double": key = \.doubleTapSwipe; singleTap = false
+            case "twoSingle": key = \.twoFingerSingleTapSwipe; singleTap = true
+            case "twoDouble": key = \.twoFingerDoubleTapSwipe; singleTap = false
+            default: return false
+            }
+            guard action == .none || action == .shortcut || action == .appExplorer else { return false }
+            var swipe = self[keyPath: key] ?? (singleTap ? .singleTapDefaults : DoubleTapSwipeSettings())
+            swipe.setAction(action, for: direction)
+            if action == .shortcut { swipe[direction] = shortcut }
+            swipe.enabled = SwipeDirection.allCases.contains { swipe.action(for: $0) != .none }
+            self[keyPath: key] = swipe
+        }
+        return true
     }
 }
 

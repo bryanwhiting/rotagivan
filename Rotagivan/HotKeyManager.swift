@@ -134,6 +134,15 @@ final class HotKeyManager {
     var onAction: ((UInt32, Bool) -> Void)?
     var onExplorerHold: ((Bool) -> Void)?
     var onHUDLayer: ((UUID) -> Void)?
+    var onNamedHotkey: ((String) -> Void)?
+    private var namedHotkeys: [NamedHotkey] = []
+    private var namedHotkeyIDs: [UInt32: String] = [:]
+    private var namedHotkeyPressed = Set<UInt32>()
+    func configureNamedHotkeys(_ entries: [NamedHotkey]) {
+        guard entries != namedHotkeys else { return }
+        namedHotkeys = entries
+        if handler != nil { registerActions() }
+    }
     private var hudLayers: [ExplorerHoldLayer] = []
     private var hudLaunchIDs: [UInt32: UUID] = [:]
     private var hudPressed = Set<UInt32>()
@@ -243,6 +252,10 @@ final class HotKeyManager {
                     if down, !owner.recording, owner.hudPressed.insert(id.id).inserted,
                        let layer = owner.hudLaunchIDs[id.id] { owner.onHUDLayer?(layer) }
                     else if !down { owner.hudPressed.remove(id.id) }
+                } else if id.signature == HotKeyManager.fourCC("RMAC") {
+                    if down, !owner.recording, owner.namedHotkeyPressed.insert(id.id).inserted,
+                       let action = owner.namedHotkeyIDs[id.id] { owner.onNamedHotkey?(action) }
+                    else if !down { owner.namedHotkeyPressed.remove(id.id) }
                 } else { owner.handle(id: id.id, down: down) }
             }
             return noErr
@@ -320,6 +333,8 @@ final class HotKeyManager {
         ShortcutSettings.shared.error = profileError
         hudLaunchIDs.removeAll()
         hudPressed.removeAll()
+        namedHotkeyIDs.removeAll()
+        namedHotkeyPressed.removeAll()
         let actions = Self.resolvedActions(for: activation.active, defaults: defaultActions, saved: savedActions,
             customTapProfiles: customTapProfiles, defaultID: defaultProfileID, dragShortcut: profileDragShortcut)
         var used = profileCombinations
@@ -371,6 +386,22 @@ final class HotKeyManager {
             let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: 6), GetApplicationEventTarget(), 0, &ref)
             if result != noErr { ShortcutSettings.shared.error = "App Explorer shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
+        }
+        for (index, entry) in namedHotkeys.enumerated() {
+            guard let shortcut = entry.activationShortcut, shortcut.isValidGlobalHotkey else { continue }
+            let modifiers = UInt32((shortcut.modifiers & (1 << 18) != 0 ? 4096 : 0) |
+                (shortcut.modifiers & (1 << 19) != 0 ? 2048 : 0) |
+                (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
+                (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
+            guard used.insert("\(shortcut.keyCode):\(modifiers)").inserted else {
+                ShortcutSettings.shared.error = "\(entry.name) conflicts with another global hotkey."; continue
+            }
+            let id = UInt32(index)
+            var ref: EventHotKeyRef?
+            let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers,
+                EventHotKeyID(signature: Self.fourCC("RMAC"), id: id), GetApplicationEventTarget(), 0, &ref)
+            if result == noErr { namedHotkeyIDs[id] = entry.id; actionRefs.append(ref) }
+            else { ShortcutSettings.shared.error = "\(entry.name) hotkey is unavailable." }
         }
     }
 

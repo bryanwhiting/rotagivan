@@ -9,6 +9,7 @@ struct RotagivanApp: App {
     @StateObject private var hid: NavigatorHIDManager
     @StateObject private var sync: SettingsSync
     private let hotKeys = HotKeyManager()
+    private let hotkeyPoster = EventPoster()
 
     init() {
         AppleTrackpadInput.preserveLegacySettings()
@@ -36,6 +37,7 @@ struct RotagivanApp: App {
                     hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [])
                     hotKeys.configureExplorer(nil)
                     hotKeys.configureHUDLayers(settings.enabled ? settings.appExplorer?.holdLayers ?? [] : [])
+                    hotKeys.configureNamedHotkeys(settings.enabled ? settings.resolvedHotkeyDictionary : [])
                 }
         }
         .windowResizability(.contentSize)
@@ -58,7 +60,12 @@ struct RotagivanApp: App {
         hotKeys.onExplorerHold = { down in hid.explorerHold(down) }
         hotKeys.configureExplorer(nil)
         hotKeys.onHUDLayer = { id in hid.openHUDLayer(id, fromKeyboard: true) }
+        hotKeys.onNamedHotkey = { id in
+            guard let action = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == id }) else { return }
+            hotkeyPoster.performMacro(action)
+        }
         hotKeys.configureHUDLayers(store.settings.enabled ? store.settings.appExplorer?.holdLayers ?? [] : [])
+        hotKeys.configureNamedHotkeys(store.settings.enabled ? store.settings.resolvedHotkeyDictionary : [])
         hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [])
         hotKeys.install()
         if store.settings.enabled { hid.start() }

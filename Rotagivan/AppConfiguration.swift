@@ -199,7 +199,7 @@ private indirect enum ConfigurationValue: Codable {
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
             case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
-            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence"
+            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
             case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
@@ -210,7 +210,7 @@ private indirect enum ConfigurationValue: Codable {
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
-            case "shortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
+            case "shortcut", "activationShortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
             case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions dragShortcut holdToActivate"
             case "normal", "precision", "motion", "pointerMotion":
                 allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"

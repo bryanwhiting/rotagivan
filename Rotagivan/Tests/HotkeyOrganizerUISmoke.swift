@@ -12,7 +12,7 @@ import SwiftUI
         let store = SettingsStore(defaults: defaults)
         store.settings = StoredSettings()
         let shortcut = RecordedShortcut(keyCode: 8, modifiers: (1 << 20) | (1 << 17), keyLabel: "C")
-        store.settings.hotkeyDictionary = [NamedHotkey(name: "Capture selection", shortcut: shortcut)]
+        store.settings.hotkeyDictionary = [NamedHotkey(name: "Capture selection", shortcut: shortcut, activationShortcut: shortcut)]
         var taps = store.settings.gestures(for: 1)
         taps.gestures.tapToClick = true; taps.oneFingerTap = .shortcut; taps.oneFingerShortcut = shortcut
         store.updateGestures(taps, for: 1)
@@ -43,10 +43,12 @@ import SwiftUI
             RunLoop.main.run(until: Date().addingTimeInterval(0.25))
         }
         try snapshot("hotkey-dictionary")
-        click(555, 228)
+        click(494, 228)
         try snapshot("hotkey-conflicts")
-        click(805, 228)
+        click(666, 228)
         try snapshot("hotkey-assignments")
+        click(838, 228)
+        try snapshot("hotkey-keyboard")
         panel.orderOut(nil); panel.close()
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { store.settings.appExplorer! }
@@ -106,9 +108,10 @@ import SwiftUI
         var appMacro = macro
         appMacro.steps = nil
         appMacro.sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(shortcut), .key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]
-        try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 608, height: 570))
+        appMacro.activationShortcut = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
+        try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], requiresGlobalHotkey: true, onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
         try renderEditor(ExplorerHoldLayerEditor(layer: editorLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 498, height: 570))
         print("Macro and HUD layer native UI passed: editor renders, app-restricted direct launch, unknown-target rejection and sequence labels. No real events posted.")
-        print("Hotkey UI rendered dictionary, audit and assignments; HUD labels follow dictionary renames/removal without rebinding. No actual shortcuts sent.")
+        print("Hotkey UI rendered saved actions, tap assignments, audit, exact-hotkey search and keyboard map; no actual shortcuts sent.")
     }
 }

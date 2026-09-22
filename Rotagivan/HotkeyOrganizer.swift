@@ -13,7 +13,10 @@ struct HotkeyAudit {
         // nil: output action; empty string: globally registered input; otherwise HUD-local input.
         var inputScope: String? = nil
         var application: String? = nil
-        var searchText: String { "\(scope) \(trigger) \(action) \(precedence)" }
+        var kind = "Assignment"
+        var searchText: String {
+            "\(kind) \(scope) \(trigger) \(action) \(shortcut?.readableCombination ?? "") \(precedence)"
+        }
     }
     enum Kind: String, CaseIterable { case conflict = "Conflicts", override = "App overrides", reuse = "Reused outputs", caution = "Potential overlaps" }
     struct Finding: Identifiable {
@@ -48,7 +51,8 @@ struct HotkeyAudit {
             assignments.append(Assignment(id: "global.\(trigger.rawValue)", scope: "Global layer actions",
                 trigger: trigger.title, action: actionName(global.binding), shortcut: output(global.binding),
                 enabled: deviceEnabled && global.enabled,
-                precedence: apps.isEmpty ? "Default outside app-specific rules" : "Replaced in: " + apps.map(\.name).joined(separator: ", ")))
+                precedence: apps.isEmpty ? "Default outside app-specific rules" : "Replaced in: " + apps.map(\.name).joined(separator: ", "),
+                kind: "Tap or gesture"))
         }
         for app in settings.resolvedAppOverrides {
             let effective = app.applying(to: base)
@@ -61,7 +65,7 @@ struct HotkeyAudit {
                 let explanation = !app.enabled ? "App rule disabled" : !base.gestures.tapToClick && !navigation ? "Tap actions disabled in this layer" : "Replaces the global action while \(app.name) is frontmost"
                 assignments.append(Assignment(id: "app.\(app.bundleID).\(binding.trigger.rawValue)", scope: app.name,
                     trigger: binding.trigger.title, action: actionName(binding), shortcut: output(binding),
-                    enabled: applies && resolved.enabled, precedence: explanation))
+                    enabled: applies && resolved.enabled, precedence: explanation, kind: "Tap or gesture"))
                 if applies {
                     findings.append(Finding(id: "override.\(app.bundleID).\(binding.trigger.rawValue)", kind: .override,
                         title: "\(app.name) overrides \(binding.trigger.title.lowercased())",
@@ -87,6 +91,12 @@ struct HotkeyAudit {
             let functionKeys: [UInt32] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90]
             let label = key.keyLabel ?? functionKeys.firstIndex(of: key.keyCode).map { "F\($0 + 1)" } ?? "Key \(key.keyCode)"
             return RecordedShortcut(keyCode: UInt16(clamping: key.keyCode), modifiers: flags, keyLabel: label)
+        }
+        for entry in dictionary {
+            guard let shortcut = entry.activationShortcut else { continue }
+            assignments.append(Assignment(id: "dictionary.hotkey.\(entry.id)", scope: "Global keyboard hotkeys",
+                trigger: shortcut.readableCombination, action: "Run \(entry.name): \(entry.summary)", shortcut: shortcut,
+                enabled: settings.enabled, precedence: "Registered globally by Rotagivan", inputScope: "", kind: "Hotkey"))
         }
         let activations: [(UInt32, ProfileShortcut)] = [(1, shortcuts.normal), (2, shortcuts.precision)] + shortcuts.additional.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         for (id, key) in activations where id != settings.resolvedDefaultProfileID {

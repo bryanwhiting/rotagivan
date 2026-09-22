@@ -41,7 +41,8 @@ struct ConfigurationTests {
         var macroConfig = factory
         let firstStep = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         let macro = NamedHotkey(name: "Copy then paste", shortcut: firstStep,
-            steps: [firstStep, RecordedShortcut(keyCode: 9, modifiers: 1 << 20, keyLabel: "V")], stepDelayMilliseconds: 150)
+            steps: [firstStep, RecordedShortcut(keyCode: 9, modifiers: 1 << 20, keyLabel: "V")], stepDelayMilliseconds: 150,
+            activationShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"))
         let hudLayer = ExplorerHoldLayer(name: "Editor", holdShortcut: nil, favorites: [AppExplorerFavorite(direction: .up, name: macro.name, shortcut: .macro(macro))],
             launchShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"), appBundleID: "test.editor", appName: "Editor")
         macroConfig.settings.hotkeyDictionary = [macro]
@@ -67,7 +68,7 @@ struct ConfigurationTests {
         var badAppMacro = appMacroConfig
         badAppMacro.settings.hotkeyDictionary?[0].sequence?[0].bundleID = "file:///tmp/script"
         do { try badAppMacro.validate(); fatalError("Accepted executable path as app step") } catch { print("Rejected non-app macro target") }
-        print("Open-app macro YAML passed: typed sequence, portable bundle ID, validation and roundtrip")
+        print("Open-app macro YAML passed: typed sequence, global trigger, portable bundle ID, validation and roundtrip")
         var namedConfig = factory
         let namedKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         namedConfig.settings.hotkeyDictionary = [NamedHotkey(name: "Copy selection", shortcut: namedKey)]

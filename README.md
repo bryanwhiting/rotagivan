@@ -13,6 +13,10 @@ the profile's identity, devices, layers, HUD, shortcuts and pointer settings.
 
 ### Keybindings, macros and direct HUD layers
 
+The organizer now treats keyboard and trackpad inputs as one searchable assignment inventory. Press a combination in **Press hotkey to find...**, choose a tap/gesture trigger, or type a name, app, key, or action. The **Keyboard** view highlights every assigned physical key and lists all modifier combinations and actions on selection.
+
+Saved actions can register an optional global hotkey, including an app-only launcher, or remain reusable from trackpad gestures and HUD tiles.
+
 The **Keybindings and Macros** page replaces Hotkeys. A macro is a named sequence of 1–32
 keystroke or **Open app** steps, with a configurable 0–2000 ms delay between
 steps. Add, record, reorder, or remove steps in its editor. For example:
@@ -880,12 +884,8 @@ calibration overrides timing, not actions, and is included in YAML and sync.
 
 Open **Keybindings and Macros** in the settings sidebar:
 
-- **Keybindings and Macros** names ordered keystroke sequences without registering additional
-  hotkeys. Choose them from **••• → Keybindings and Macros** in an action editor, including HUD
-  tiles. Tiles show the macro name and sequence; editing a referenced macro
-  updates its assignments. Legacy plain-key assignments keep their original
-  keys. Macros are scoped to the top-level profile and included in YAML exports,
-  profile copies, and sync. No sample bindings are preloaded.
+- **Saved actions** name app launchers, keystrokes and ordered macros. Use **Add action > Add application hotkey...** for a Raycast-style app launcher, or record **Run from anywhere** while editing any saved action. Choose the same action from an action editor in a tap/swipe or HUD tile. Editing it updates every assignment. Global triggers, app bundle IDs and sequences are scoped to the top-level profile and included in YAML, profile copies and sync. No sample bindings are preloaded.
+- Search accepts typed text, an exactly recorded keyboard combination, or a selected tap/gesture. Tap and gesture assignments appear beside saved actions and in **All assignments**. **Keyboard** renders the physical layout, highlights assigned keys and shows every use of a selected key.
 - **Conflicts & overrides** audits the selected layer/device, its app-specific
   rules, global activation/click/drag/HUD hotkeys, and nested HUD groups. It
   distinguishes competing registered keys from harmless reuse of an outgoing

@@ -942,6 +942,11 @@ struct RecordedShortcut: Codable, Equatable {
             !keyLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && keyLabel.count <= 128 &&
             !keyLabel.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
     }
+    /// Carbon can register bare function/special keys. Letter and number keys
+    /// need a modifier so normal typing is never captured globally.
+    var isValidGlobalHotkey: Bool {
+        isPhysicalShortcut && keyCode != 53 && (keyCode >= 64 || modifiers & 0x1e0000 != 0)
+    }
 }
 
 struct MacroStep: Codable, Equatable {
@@ -974,6 +979,9 @@ struct NamedHotkey: Codable, Equatable, Identifiable {
     var steps: [RecordedShortcut]? = nil
     var stepDelayMilliseconds: Int? = nil
     var sequence: [MacroStep]? = nil
+    /// Optional registered input that runs this saved action from anywhere.
+    /// Kept separate from `shortcut`, which is the legacy first output step.
+    var activationShortcut: RecordedShortcut? = nil
     var resolvedSteps: [RecordedShortcut] { steps ?? [shortcut] }
     var resolvedSequence: [MacroStep] { sequence ?? resolvedSteps.map(MacroStep.key) }
     var resolvedDelay: Int { stepDelayMilliseconds ?? 100 }
@@ -982,7 +990,8 @@ struct NamedHotkey: Codable, Equatable, Identifiable {
         !id.isEmpty && id.count <= 128 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isPhysicalShortcut &&
         !resolvedSequence.isEmpty && resolvedSequence.count <= 32 && resolvedSequence.allSatisfy(\.isValid) &&
-        (sequence == nil || steps == nil) && (0...2000).contains(resolvedDelay)
+        (sequence == nil || steps == nil) && (activationShortcut?.isValidGlobalHotkey ?? true) &&
+        (0...2000).contains(resolvedDelay)
     }
 }
 
@@ -996,7 +1005,9 @@ extension Array where Element == NamedHotkey {
         return label(for: shortcut).map { "\($0) (\(shortcut.readableCombination))" } ?? shortcut.readableCombination
     }
     var isValidDictionary: Bool {
-        count <= 500 && allSatisfy(\.isValid) && Set(map(\.id)).count == count &&
+        let triggers = compactMap(\.activationShortcut)
+        return count <= 500 && allSatisfy(\.isValid) && Set(map(\.id)).count == count &&
+        Set(triggers.map(\.identity)).count == triggers.count &&
         Set(filter { $0.steps == nil && $0.sequence == nil }.map { $0.shortcut.identity }).count == filter { $0.steps == nil && $0.sequence == nil }.count
     }
 }

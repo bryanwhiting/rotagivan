@@ -3,12 +3,17 @@ import Foundation
 @main struct HotkeyOrganizerTests {
     static func main() throws {
         let key = RecordedShortcut(keyCode: 8, modifiers: (1 << 20) | (1 << 17), keyLabel: "C")
-        let named = NamedHotkey(name: "Capture selection", shortcut: key)
+        let trigger = RecordedShortcut(keyCode: 64, modifiers: (1 << 20) | (1 << 19), keyLabel: "F17")
+        let named = NamedHotkey(name: "Capture selection", shortcut: key, activationShortcut: trigger)
         precondition([named].title(for: key) == "Capture selection (Cmd+Shift+C)")
         var alias = key; alias.keyLabel = "Different layout"
         precondition([named].label(for: alias) == named.name, "Names must match physical key/modifiers, not display labels")
         precondition(![named, NamedHotkey(name: "Duplicate", shortcut: alias)].isValidDictionary)
         precondition(![NamedHotkey(name: " ", shortcut: key)].isValidDictionary)
+        let otherOutput = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
+        precondition(![named, NamedHotkey(name: "Duplicate trigger", shortcut: otherOutput, activationShortcut: trigger)].isValidDictionary)
+        precondition(!NamedHotkey(name: "Bare letter", shortcut: key,
+            activationShortcut: RecordedShortcut(keyCode: 8, modifiers: 0, keyLabel: "C")).isValid)
         precondition([NamedHotkey(name: "Résumé ✨", shortcut: key)].isValidDictionary)
         var settings = StoredSettings()
         settings.appOverrides = []
@@ -26,6 +31,8 @@ import Foundation
         func audit(_ layer: UInt32 = 1, _ device: GestureDevice = .navigator) -> HotkeyAudit {
             HotkeyAudit(settings: settings, shortcuts: keys, layerID: layer, device: device)
         }
+        precondition(audit().assignments.contains { $0.id == "dictionary.hotkey.\(named.id)" && $0.inputScope == "" })
+        precondition(audit().assignments.first { $0.id == "global.oneFingerTap" }?.kind == "Tap or gesture")
         precondition(audit().findings.contains { $0.kind == .reuse })
         precondition(!audit().findings.contains { $0.kind == .conflict }, "Repeated outgoing shortcuts are not registration conflicts")
         precondition(audit().assignments.contains { $0.scope.contains("Group") && $0.action == "Capture selection (Cmd+Shift+C)" })
@@ -69,6 +76,6 @@ import Foundation
         let decoded = try JSONDecoder().decode(StoredSettings.self, from: JSONEncoder().encode(settings))
         precondition(decoded.hotkeyDictionary == [named])
         precondition(StoredSettings().resolvedHotkeyDictionary.isEmpty, "No example shortcuts are seeded")
-        print("Hotkey organizer passed: dictionary identity/labels, inheritance/device scope, conflicts vs reuse, app precedence, disabled rules, nested HUDs, local scope and persistence")
+        print("Hotkey organizer passed: global action triggers, tap inventory, dictionary identity/labels, inheritance/device scope, conflicts vs reuse, app precedence, nested HUDs and persistence")
     }
 }

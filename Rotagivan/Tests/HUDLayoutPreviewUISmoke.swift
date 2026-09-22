@@ -5,6 +5,9 @@ import SwiftUI
     @Published var settings = AppExplorerSettings()
     @Published var selection: ExplorerSlot = .up
     @Published var groupPath: [ExplorerSlot] = []
+    @Published var editing: ExplorerSlot?
+    @Published var editingEnabled = false
+    var editorAppeared: ExplorerSlot?
     var drag: ExplorerSlotDrag?
     var drops = 0
 }
@@ -20,7 +23,16 @@ private struct PreviewFixture: View {
                 guard let drag = state.drag, let target else { return }
                 var next = state.settings
                 if drag.apply(to: target, in: state.groupPath, settings: &next) { state.settings = next; state.selection = target; state.drops += 1 }
-            })
+            }, editingTile: $state.editing, editor: state.editingEnabled ? { slot in
+                AnyView(ExplorerDestinationPicker(direction: slot, onSave: { favorite, _ in
+                    state.settings.setFavorite(favorite, at: slot, in: state.groupPath)
+                    state.editing = nil
+                }, onCancel: { state.editing = nil }, loadApplications: {
+                    [ExplorerApplication(bundleID: "test.editor", name: "Test Editor",
+                        url: URL(fileURLWithPath: "/Applications/Test Editor.app"))]
+                })
+                    .onAppear { state.editorAppeared = slot })
+            } : nil)
     }
 }
 
@@ -35,7 +47,7 @@ private struct PreviewFixture: View {
         ], theme: .starburstAir)
         let host = NSHostingView(rootView: PreviewFixture(state: state))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
-        panel.isReleasedWhenClosed = false; panel.contentView = host
+        panel.isReleasedWhenClosed = false; panel.contentView = host; panel.center()
         panel.makeKeyAndOrderFront(nil); NSApp.activate()
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         func snapshot(_ name: String) throws {
@@ -79,7 +91,38 @@ private struct PreviewFixture: View {
                 try snapshot("hud-preview-\(theme.rawValue)-\(count)")
             }
         }
+        state.editingEnabled = true
+        state.settings.slotCount = 8
+        for theme in ExplorerTheme.allCases {
+            state.settings.theme = theme
+            state.editorAppeared = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            send(.leftMouseDown, x: 119, y: 272); send(.leftMouseUp, x: 119, y: 272)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            precondition(state.editing == .left && state.editorAppeared == .left,
+                         "Clicking a tile must present its app picker in a native popover for \(theme)")
+            guard let popover = NSApp.windows.first(where: { $0 !== panel && $0.isVisible && $0.contentView != nil }),
+                  let content = popover.contentView,
+                  let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+                preconditionFailure("The app picker must be a visible native popover, not an inspector below the preview")
+            }
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath:
+                CommandLine.arguments[1] + "/hud-tile-popover-\(theme.rawValue).png"))
+            let leftFrame = popover.frame
+            state.editing = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            state.editorAppeared = nil
+            send(.leftMouseDown, x: 351, y: 272); send(.leftMouseUp, x: 351, y: 272)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            precondition(state.editing == .right && state.editorAppeared == .right)
+            let rightFrame = NSApp.windows.first { $0 !== panel && $0.isVisible && $0.contentView != nil }!.frame
+            precondition(rightFrame.midX > leftFrame.midX + 80,
+                         "Popover must follow the selected tile, not attach to the whole HUD")
+            state.editing = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
         panel.orderOut(nil); panel.close()
-        print("HUD preview UI passed: inert selection, native drag-to-swap, shared rendering for all three themes and 4/8/12/16 slots. No actions executed.")
+        print("HUD preview UI passed: inert selection, native drag-to-swap, tile-anchored app-picker popovers in every theme, shared rendering for 4/8/12/16 slots. No actions executed.")
     }
 }

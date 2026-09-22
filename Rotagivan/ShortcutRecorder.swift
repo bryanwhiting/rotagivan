@@ -74,7 +74,23 @@ struct TapActionEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).foregroundStyle(.secondary)
+            HStack {
+                Text(title).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                if !keyboardOnly && !physicalKeysOnly {
+                    Menu {
+                        Button("Favorites") { action = .appExplorer; shortcut = nil }
+                        ForEach(hudLayers) { layer in
+                            Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) {
+                                shortcut = .hudLayer(layer); action = .shortcut
+                            }
+                        }
+                    } label: { Label("HUD layer", systemImage: "square.3.layers.3d") }
+                        .fixedSize()
+                        .help("Make this gesture open a HUD layer directly. No keyboard shortcut is needed.")
+                        .accessibilityIdentifier("gesture-hud-layer-menu")
+                }
+            }
             HStack(spacing: 6) {
                 ShortcutRecorder(title: action == .shortcut ? (shortcut.map { dictionary.title(for: $0) } ?? "Record shortcut…") : action.title) { recorded in
                     shortcut = recorded
@@ -89,7 +105,7 @@ struct TapActionEditor: View {
                         }
                         Divider()
                     }
-                    if !physicalKeysOnly && !hudLayers.isEmpty {
+                    if keyboardOnly && !physicalKeysOnly && !hudLayers.isEmpty {
                         Menu("Open HUD layer") {
                             ForEach(hudLayers) { layer in
                                 Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) { shortcut = .hudLayer(layer); action = .shortcut }

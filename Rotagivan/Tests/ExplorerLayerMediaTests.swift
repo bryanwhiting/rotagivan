@@ -2,6 +2,15 @@ import AppKit
 
 @main struct ExplorerLayerMediaTests {
     @MainActor static func main() throws {
+        let blank = ExplorerHoldLayer.empty()
+        precondition(blank.favorites.isEmpty && blank.holdShortcut == nil && blank.launchShortcut == nil)
+        precondition(blank.appBundleID == nil && blank.appName == nil && blank.activation == nil && blank.slotCount == 8)
+        let blankSettings = AppExplorerSettings(holdLayers: [blank])
+        precondition(blankSettings.hasValidFavorites && blankSettings.projected(layerID: blank.id).favorites.isEmpty)
+        precondition(blankSettings.windowEditor().holdLayers?.first?.favorites.isEmpty == true,
+                     "A new empty window layer must not regenerate legacy window presets")
+        let blankDecoded = try JSONDecoder().decode(ExplorerHoldLayer.self, from: JSONEncoder().encode(blank))
+        precondition(blankDecoded == blank && ExplorerHoldLayer.empty().id != blank.id)
         let y = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
         let u = RecordedShortcut(keyCode: 32, modifiers: 1 << 19, keyLabel: "U")
         let media = AppExplorerFavorite(direction: .up, name: "Media", action: .mediaControls)

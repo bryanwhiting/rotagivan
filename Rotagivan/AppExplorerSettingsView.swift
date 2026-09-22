@@ -143,6 +143,7 @@ struct AppExplorerSettingsView: View {
     @State private var tileTransfer: ExplorerTileTransfer?
     @State private var previewSelection: ExplorerSlot = .up
     @State private var previewDrag: ExplorerSlotDrag?
+    @State private var previewEditing: ExplorerSlot?
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
     private let transferPrefix: [ExplorerTilePathStep]
@@ -244,9 +245,7 @@ struct AppExplorerSettingsView: View {
                 }
                 Button("Add layer") {
                     creatingLayer = true
-                    let y = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
-                    let used = (baseSettings.holdLayers ?? []).contains { $0.holdShortcut?.keyCode == y.keyCode && $0.holdShortcut?.modifiers == 0 }
-                    editingLayer = ExplorerHoldLayer(name: "New layer", holdShortcut: used ? nil : y, favorites: settings.favorites, windowLayout: .thirds, slotCount: settings.slotCount, windowTilesConfigured: windowManagerOnly ? true : nil)
+                    editingLayer = .empty()
                 }.disabled((baseSettings.holdLayers ?? []).count >= 16 || (scopeTitle != nil && baseSettings.holdLayers == nil))
                 if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                     Button("Edit…") { creatingLayer = false; editingLayer = layer }
@@ -306,13 +305,9 @@ struct AppExplorerSettingsView: View {
                         guard let drag = previewDrag, let target else { return }
                         var next = settings
                         if drag.apply(to: target, in: groupPath, settings: &next), save(next) { previewSelection = target }
-                    })
+                    }, editingTile: $previewEditing, editor: { direction in tilePopover(direction) })
                     .padding(.top, -20)
                     .frame(maxWidth: .infinity)
-                if !isRecentGroup {
-                    Text("Selected tile").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    slot(previewSelection)
-                }
             } else {
             VStack(spacing: 6) {
                 if settings.count(at: groupPath) != 8 {
@@ -350,7 +345,7 @@ struct AppExplorerSettingsView: View {
             }
             Text(isRecentGroup
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
-                : "Select a tile in the preview to edit it below. Drag tiles to move or swap. Use ••• → Move or copy… to move a whole group between layers. Preview clicks never launch apps or run actions.")
+                : "Click a tile to edit it right there. Drag tiles to move or swap. Use Other actions → Move or copy… to move a whole group between layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .overlay(alignment: .bottomLeading) {
@@ -490,11 +485,17 @@ struct AppExplorerSettingsView: View {
         .onChange(of: settings) { _, _ in
             while !groupPath.isEmpty && settings.favorites(at: groupPath) == nil { groupPath.removeLast() }
         }
-        .onChange(of: selectedLayerID) { _, _ in groupPath = []; groupError = nil; slotDrag = nil; dropTarget = nil; previewDrag = nil }
+        .onChange(of: selectedLayerID) { _, _ in groupPath = []; groupError = nil; slotDrag = nil; dropTarget = nil; previewDrag = nil; previewEditing = nil }
+        .onChange(of: editingShortcutPath) { _, _ in previewEditing = nil }
+        .onChange(of: editingURLPath) { _, _ in previewEditing = nil }
+        .onChange(of: editingGroupPath) { _, _ in previewEditing = nil }
+        .onChange(of: editingApplicationPath) { _, _ in previewEditing = nil }
+        .onChange(of: editingTileLayers) { _, _ in previewEditing = nil }
+        .onChange(of: tileTransfer != nil) { _, _ in previewEditing = nil }
         .onChange(of: baseSettings.holdLayers) { _, layers in
             if let selectedLayerID, layers?.contains(where: { $0.id == selectedLayerID }) != true { self.selectedLayerID = nil }
         }
-        .onChange(of: groupPath) { _, path in previewDrag = nil; onGroupPathChange?(path) }
+        .onChange(of: groupPath) { _, path in previewDrag = nil; previewEditing = nil; onGroupPathChange?(path) }
         .onChange(of: settings.count(at: groupPath)) { _, count in
             if !ExplorerSlot.slots(count).contains(previewSelection) { previewSelection = .up }
             previewDrag = nil
@@ -502,7 +503,55 @@ struct AppExplorerSettingsView: View {
         .onDisappear { slotDrag = nil; dropTarget = nil }
     }
 
-    private func slot(_ direction: ExplorerSlot) -> some View {
+    private func tilePopover(_ direction: ExplorerSlot) -> AnyView {
+        let path = groupPath
+        let owner = selectedLayerID
+        let favorite = favorites.first { $0.direction == direction }
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(favorite?.name ?? "Empty tile").font(.headline).lineLimit(1)
+                Spacer()
+                Menu("Other actions") {
+                    assignmentMenu(direction, favorite: favorite)
+                    if favorite != nil {
+                        Divider()
+                        Button("Move or copy…") {
+                            tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
+                        }
+                        Menu("Move or swap with") {
+                            ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
+                                Button(target.title) {
+                                    edit { $0.swapFavorites(from: direction, to: target, in: groupPath) }
+                                    previewEditing = nil
+                                }
+                            }
+                        }
+                    }
+                }
+                Button { previewEditing = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).help("Close tile editor")
+            }.padding(16)
+            if favorite?.isGroup == true || favorite?.isWindowManager == true {
+                slot(direction, editingPreview: true).padding(16)
+            } else {
+                ExplorerDestinationPicker(direction: direction, onSave: { destination, application in
+                    guard groupPath == path, selectedLayerID == owner else { previewEditing = nil; return }
+                    var next = settings
+                    guard next.setFavorite(destination, at: direction, in: path), next.hasValidFavorites, save(next) else {
+                        groupError = "The group changed. Reopen the tile to try again."; previewEditing = nil; return
+                    }
+                    if let application { ExplorerApplicationCatalog.remember(application) }
+                    groupError = nil; previewEditing = nil
+                }, onCancel: { previewEditing = nil })
+                if favorite != nil {
+                    Button("Remove tile", role: .destructive) {
+                        edit { $0.setFavorite(nil, at: direction, in: path) }; previewEditing = nil
+                    }.padding([.horizontal, .bottom], 16)
+                }
+            }
+        }.frame(width: 540))
+    }
+
+    private func slot(_ direction: ExplorerSlot, editingPreview: Bool = false) -> some View {
         let favorite = favorites.first { $0.direction == direction }
         let icon = Self.applicationIcon(for: favorite)
         return VStack(spacing: 5) {
@@ -573,13 +622,15 @@ struct AppExplorerSettingsView: View {
                             updateSlotDrag(from: direction, at: CGPoint(x: frame.minX + point.x, y: frame.minY + point.y))
                         }, onEnded: { point in
                             finishSlotDrag(at: CGPoint(x: frame.minX + point.x, y: frame.minY + point.y))
-                        }, onCancel: { slotDrag = nil; dropTarget = nil })
+                        }, onCancel: { slotDrag = nil; dropTarget = nil }, onClick: { if compact && !editingPreview { previewEditing = direction } })
+                            .allowsHitTesting(!editingPreview)
                     })
                     .help("Drag \(favorite.name) to move or swap slots")
                     .accessibilityIdentifier("explorer-slot-\(direction.rawValue)")
             } else {
                 Text("Empty slot").font(.caption).foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, minHeight: 24)
+                    .contentShape(Rectangle()).onTapGesture { if compact && !editingPreview { previewEditing = direction } }
             }
             if favorite != nil {
                 HStack(spacing: 12) {
@@ -599,6 +650,9 @@ struct AppExplorerSettingsView: View {
                 }.font(.caption2).buttonStyle(.link)
             }
         }.frame(maxWidth: .infinity).frame(height: 88)
+            .popover(isPresented: Binding(get: { compact && !editingPreview && previewEditing == direction }, set: { if !$0 { previewEditing = nil } })) {
+                tilePopover(direction)
+            }
             .background(dropTarget == direction ? Color.teal.opacity(0.14) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(dropTarget == direction ? Color.teal : .clear, lineWidth: 2))
             .background(GeometryReader { proxy in
@@ -869,10 +923,11 @@ private struct ExplorerSlotDragHandle: NSViewRepresentable {
     var onChanged: (CGPoint) -> Void
     var onEnded: (CGPoint) -> Void
     var onCancel: () -> Void
+    var onClick: () -> Void = {}
 
     func makeNSView(context: Context) -> ExplorerSlotDragView { ExplorerSlotDragView() }
     func updateNSView(_ view: ExplorerSlotDragView, context: Context) {
-        view.onChanged = onChanged; view.onEnded = onEnded; view.onCancel = onCancel
+        view.onChanged = onChanged; view.onEnded = onEnded; view.onCancel = onCancel; view.onClick = onClick
     }
 }
 
@@ -882,6 +937,7 @@ private final class ExplorerSlotDragView: NSView {
     var onChanged: (CGPoint) -> Void = { _ in }
     var onEnded: (CGPoint) -> Void = { _ in }
     var onCancel: () -> Void = {}
+    var onClick: () -> Void = {}
     private var start: CGPoint?
     private var dragging = false
     override var isFlipped: Bool { true }
@@ -901,10 +957,11 @@ private final class ExplorerSlotDragView: NSView {
         onChanged(convert(point, from: nil))
     }
     override func mouseUp(with event: NSEvent) {
+        guard start != nil else { return }
         let commit = dragging
         start = nil; dragging = false
         if commit { onEnded(convert(event.locationInWindow, from: nil)) }
-        else { onCancel() }
+        else { onCancel(); onClick() }
     }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { start = nil; dragging = false; onCancel() }
@@ -928,15 +985,29 @@ struct ExplorerHUDSettingsPreview: View {
     var onBack: () -> Void
     var onDrag: (ExplorerSlot, ExplorerSlot?) -> Void
     var onDrop: (ExplorerSlot, ExplorerSlot?) -> Void
+    var editingTile: Binding<ExplorerSlot?> = .constant(nil)
+    var editor: ((ExplorerSlot) -> AnyView)? = nil
     @StateObject private var model = ExplorerModel()
 
     var body: some View {
         AppExplorerView(model: model, onSelect: { slot in
-            if !model.showingRecents { selection = slot }
+            if !model.showingRecents { selection = slot; if editor != nil { editingTile.wrappedValue = slot } }
         }, onCancel: {}, onBack: onBack, isPreview: true,
-            onPreviewDrag: { source, target in model.selected = target; onDrag(source, target) },
+            onPreviewDrag: { source, target in editingTile.wrappedValue = nil; model.selected = target; onDrag(source, target) },
             onPreviewDrop: { source, target in onDrop(source, target); model.selected = selection })
             .accessibilityIdentifier("hud-layout-preview")
+            .overlayPreferenceValue(ExplorerTileAnchors.self) { anchors in
+                GeometryReader { proxy in
+                    if let slot = editingTile.wrappedValue, let anchor = anchors[slot], let editor {
+                        let rect = proxy[anchor]
+                        Color.clear.frame(width: rect.width, height: rect.height)
+                            .popover(isPresented: Binding(get: { editingTile.wrappedValue == slot }, set: { if !$0 { editingTile.wrappedValue = nil } })) {
+                                editor(slot)
+                            }
+                            .position(x: rect.midX, y: rect.midY)
+                    }
+                }
+            }
             .onAppear(perform: refresh)
             .onChange(of: settings) { _, _ in refresh() }
             .onChange(of: theme) { _, _ in refresh() }

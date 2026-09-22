@@ -280,6 +280,9 @@ enum ExplorerWindowLayout: String, Codable, CaseIterable {
 }
 
 struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
+    static func empty(name: String = "New layer") -> Self {
+        Self(name: name, holdShortcut: nil, slotCount: 8, windowTilesConfigured: true)
+    }
     var id = UUID()
     var name: String
     var holdShortcut: RecordedShortcut?

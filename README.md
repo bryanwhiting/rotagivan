@@ -31,9 +31,11 @@ keystroke-only `steps` are preserved. Mixed macros use typed `sequence` steps.
 Settings and sync include the full sequence and its stable ID.
 
 **HUD** is directly below **Devices**. Add/edit a top-level HUD layer to assign
-an **Open this HUD layer from anywhere** keyboard shortcut, or choose
-**••• → Open HUD layer** in a tap/swipe action (including two-finger double tap)
-or HUD tile. Direct launch stays on that layer after releasing the key. The
+an **Open this HUD layer from anywhere** keyboard shortcut, or use the visible
+**HUD layer** menu beside any tap/swipe action (including single and two-finger
+double taps). HUD tiles also offer **••• → Open HUD layer** in their shortcut
+editor. No keyboard shortcut is required for gesture activation. Direct launch
+stays on that layer until the HUD is dismissed. The
 existing in-HUD hold/toggle key remains separate. Launch keys require a modifier
 for letters and participate in shortcut conflict reporting.
 
@@ -43,6 +45,13 @@ targets and in-HUD activation keys respect the same restriction. In **App
 overrides**, assign a gesture to that layer for app-specific workflows. Nested
 tile-group layers can also be app-restricted; direct launch targets are the
 top-level HUD layers. Missing or unavailable targets safely do nothing.
+
+New HUD layers start with eight empty slots and no assigned keys or app
+restriction; they do not copy the current layer or generate window presets.
+Click a tile in the settings preview to open an app/URL picker anchored to
+that tile. **Other actions** includes macros, reserved groups, window commands,
+and move/copy controls. Group tiles offer their group editor. There is no
+separate inspector below the preview. Dragging still moves or swaps tiles.
 
 ### Themes
 

@@ -1,5 +1,12 @@
 import SwiftUI
 
+struct ExplorerTileAnchors: PreferenceKey {
+    static let defaultValue: [ExplorerSlot: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [ExplorerSlot: Anchor<CGRect>], nextValue: () -> [ExplorerSlot: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 /// Preview drag targets use exactly the same sector paths as the live renderer.
 enum ExplorerPreviewGeometry {
     static func dropTarget(at point: CGPoint, from source: ExplorerSlot, theme: ExplorerTheme, count: Int, depth: Int) -> ExplorerSlot? {

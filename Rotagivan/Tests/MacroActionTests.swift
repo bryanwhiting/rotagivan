@@ -75,6 +75,20 @@ private final class MacroPoster: GestureEventPosting {
             store.settings.hotkeyDictionary = []
             send(2, 1); send(2.03, 0)
             precondition(poster.sent.isEmpty, "Deleted macros fail closed")
+            engine.reset()
+            taps.oneFingerShortcut = .hudLayer(layer)
+            taps.oneFingerDoubleTap = TapAction.none
+            store.updateGestures(taps, for: 1)
+            opened = []
+            send(3, 1); send(3.03, 0)
+            precondition(opened == [layer.id] && poster.sent.isEmpty, "Single tap must open a HUD layer without a keyboard event")
+            engine.reset()
+            taps.oneFingerTap = .none
+            taps.oneFingerDoubleTap = .shortcut; taps.oneFingerDoubleShortcut = .hudLayer(layer)
+            store.updateGestures(taps, for: 1)
+            opened = []
+            send(4, 1); send(4.03, 0); send(4.12, 1); send(4.15, 0)
+            precondition(opened == [layer.id] && poster.sent.isEmpty, "One-finger double tap must open a HUD layer without a keyboard event")
             store.settings.hotkeyDictionary = [macro]; engine.reset()
         }
         print("Macro action tests passed: ordered dispatch on both devices, two-finger double-tap HUD targets, app scoping, sticky direct launch, legacy decoding and invalid/reference output rejection. No real events posted.")

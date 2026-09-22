@@ -1074,6 +1074,9 @@ struct AppExplorerView: View {
         }
         .buttonStyle(.plain).disabled(!available)
         .modifier(previewDrag(direction))
+        .anchorPreference(key: ExplorerTileAnchors.self, value: .rect(CGRect(x: point.x - 26, y: point.y - 24, width: 52, height: 48))) {
+            isPreview ? [direction: $0] : [:]
+        }
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -1146,6 +1149,7 @@ struct AppExplorerView: View {
         .modifier(previewDrag(direction))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
+        .anchorPreference(key: ExplorerTileAnchors.self, value: .bounds) { isPreview ? [direction: $0] : [:] }
     }
 
     private func previewDrag(_ direction: ExplorerSlot) -> ExplorerPreviewDrag {

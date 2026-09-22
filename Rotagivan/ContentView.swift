@@ -1,6 +1,41 @@
 import ServiceManagement
 import SwiftUI
 
+struct ProfileNameEditor: View {
+    @State var name: String
+    var onSave: (String) -> Bool
+    var onCancel: () -> Void
+    @State private var saveFailed = false
+    @FocusState private var nameFocused: Bool
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var valid: Bool { !trimmedName.isEmpty && trimmedName.count <= 80 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename profile").font(.headline)
+            TextField("Profile name", text: $name)
+                .textFieldStyle(.roundedBorder).focused($nameFocused)
+                .accessibilityIdentifier("profile-name-field")
+            Text("Names can contain up to 80 characters. Your devices, layers, HUD and other settings stay unchanged.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if trimmedName.count > 80 {
+                Text("Use 80 characters or fewer.").font(.caption).foregroundStyle(.red)
+            }
+            if saveFailed {
+                Text("This profile is no longer available. Cancel and select a profile again.")
+                    .font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save") { saveFailed = !onSave(trimmedName) }
+                    .keyboardShortcut(.defaultAction).disabled(!valid)
+            }
+        }.padding(24).frame(width: 380)
+            .onAppear { nameFocused = true }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
@@ -8,6 +43,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "Layers"
     @State private var actionDevice: GestureDevice = .navigator
+    @State private var renamingProfile: ConfigurationProfile?
     private let initialHUDGroup: ExplorerReservedGroup?
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
@@ -33,14 +69,18 @@ struct ContentView: View {
                 Image(systemName: "safari").font(.system(size: 24, weight: .light)).foregroundStyle(.teal)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("ROTAGIVAN").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
-                    TextField("Profile name", text: Binding(get: { store.activeConfigurationName }, set: { store.renameConfiguration($0) }))
-                        .font(.system(size: 19, weight: .semibold)).textFieldStyle(.plain)
+                    Text(store.activeConfigurationName)
+                        .font(.system(size: 19, weight: .semibold)).lineLimit(1)
                         .accessibilityLabel("Profile name")
                 }
                 Spacer()
                 Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { switchProfile($0) })) {
                     ForEach(store.configurationProfiles) { profile in Text(profile.name).tag(profile.id) }
                 }.frame(width: 215)
+                Button("Rename…", systemImage: "pencil") {
+                    renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID }
+                }.help("Rename the selected profile without changing its settings")
+                    .accessibilityIdentifier("rename-profile")
                 Button { switchProfile(nil) } label: { Label("Add Profile", systemImage: "plus") }
                     .disabled(store.configurationProfiles.count >= 20)
                     .help("Copy this profile, including every layer and Explorer group")
@@ -104,6 +144,13 @@ struct ContentView: View {
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
         .frame(width: 940, height: 740)
+        .sheet(item: $renamingProfile) { profile in
+            ProfileNameEditor(name: profile.name, onSave: { name in
+                guard store.renameConfiguration(name, for: profile.id) else { return false }
+                renamingProfile = nil
+                return true
+            }, onCancel: { renamingProfile = nil })
+        }
         .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
             if value == nil { hid.endCalibration() }
         })) { session in

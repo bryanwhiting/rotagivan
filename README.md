@@ -2,6 +2,13 @@
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
+## Profile names
+
+Select a profile in the Settings header, then click **Rename…** beside the
+profile picker. Enter a name (up to 80 characters) and Save, or Cancel to keep
+the old name. The original Default profile can be renamed too. Renaming keeps
+the profile's identity, devices, layers, HUD, shortcuts and pointer settings.
+
 ## HUD appearance
 
 ### Macros and direct HUD layers

@@ -41,6 +41,32 @@ import Foundation
         devices.shareTapActions = true
         store.settings.devices = devices
         precondition(store.activeGestures(for: .apple).oneFingerTap == .enter)
+        let snapshots = store.profileSnapshot()
+        let settingsBeforeRename = store.settings
+        precondition(store.renameConfiguration("  Home office  ", for: "default"))
+        precondition(store.activeConfigurationID == id && store.activeConfigurationName == "Travel",
+                     "A rename dialog must keep targeting its original profile even if selection changes")
+        precondition(store.configurationProfiles.first { $0.id == "default" }?.name == "Home office")
+        func sameEncoding<T: Encodable>(_ lhs: T, _ rhs: T) -> Bool {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            return (try? encoder.encode(lhs)) == (try? encoder.encode(rhs))
+        }
+        precondition(sameEncoding(store.settings, settingsBeforeRename))
+        for (before, after) in zip(snapshots, store.profileSnapshot()) {
+            precondition(before.id == after.id && sameEncoding(before.settings, after.settings) && sameEncoding(before.shortcuts, after.shortcuts),
+                         "Renaming must not alter profile identities, pointer settings, actions or shortcuts")
+        }
+        precondition(!store.renameConfiguration(" \n\t "))
+        precondition(!store.renameConfiguration(String(repeating: "a", count: 81)))
+        precondition(!store.renameConfiguration("Missing", for: "missing"))
+        precondition(store.activeConfigurationName == "Travel")
+        let renamed = SettingsStore(defaults: defaults)
+        precondition(renamed.configurationProfiles.first { $0.id == "default" }?.name == "Home office",
+                     "Names must persist after reopening")
+        precondition(renamed.renameConfiguration(String(repeating: "a", count: 80)))
+        precondition(renamed.activeConfigurationName.count == 80)
+        print("Profile naming passed: default/custom rename, whitespace, empty/long rejection, ID targeting, persistence and unchanged settings.")
         devices.shareTapActions = false
         store.settings.devices = devices
         precondition(store.activeGestures(for: .apple).oneFingerTap == .appExplorer, "Sharing must preserve disabled overrides")

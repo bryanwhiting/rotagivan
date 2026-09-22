@@ -1383,12 +1383,13 @@ final class SettingsStore: ObservableObject {
         return result
     }
 
-    func renameConfiguration(_ name: String) {
-        guard let index = configurationProfiles.firstIndex(where: { $0.id == activeConfigurationID }) else { return }
-        let trimmed = String(name.prefix(80))
-        guard !trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    @discardableResult func renameConfiguration(_ name: String, for profileID: String? = nil) -> Bool {
+        guard let index = configurationProfiles.firstIndex(where: { $0.id == (profileID ?? activeConfigurationID) }) else { return false }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 80 else { return false }
         configurationProfiles[index].name = trimmed
         save()
+        return true
     }
 
     @discardableResult func addConfiguration() -> String {

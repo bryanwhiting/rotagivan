@@ -76,6 +76,7 @@ extension AppExplorerPresenting {
         }
     }
     var onDismiss: (() -> Void)?
+    var onSettings: (() -> Void)?
     var onPresentationChanged: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     weak var editingStore: SettingsStore?
@@ -172,10 +173,12 @@ extension AppExplorerPresenting {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onCancel = { [weak self] in self?.dismiss() }
         panel.onEdit = { [weak self] in self?.beginEditing() }
+        panel.onSettings = { [weak self] in self?.openSettings() }
         panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
             onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() },
+            onSettings: { [weak self] in self?.openSettings() },
             onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
             onWindowPage: { [weak self] in self?.changeWindowPage($0) }))
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
@@ -640,6 +643,13 @@ extension AppExplorerPresenting {
         deadline = Date().addingTimeInterval(15)
     }
 
+    func openSettings() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        dismiss()
+        // Restore the pointer and tear down the HUD before activating settings.
+        DispatchQueue.main.async { [weak self] in self?.onSettings?() }
+    }
+
     func beginEditing() {
         guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingMediaControls, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
               contextIsValid?() != false else { return }
@@ -751,9 +761,10 @@ extension AppExplorerPresenting {
     }
 }
 
-private final class ExplorerPanel: NSPanel {
+final class ExplorerPanel: NSPanel {
     var onCancel: (() -> Void)?
     var onEdit: (() -> Void)?
+    var onSettings: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
     var allowsEditing = false
     override var canBecomeKey: Bool { true }
@@ -771,6 +782,9 @@ private final class ExplorerPanel: NSPanel {
         if onKey?(event) == true { return }
         if event.keyCode == 14, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             onEdit?(); return
+        }
+        if event.keyCode == 1, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            onSettings?(); return
         }
         if event.keyCode == 53 { onCancel?() }
         // Do not leak typing into the application behind the HUD.
@@ -857,6 +871,7 @@ struct AppExplorerView: View {
     var onCancel: () -> Void
     var onBack: () -> Void = {}
     var onEdit: () -> Void = {}
+    var onSettings: () -> Void = {}
     var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
     var onWindowPage: (Int) -> Void = { _ in }
     // Previews/tests may enforce reduced motion; they cannot override macOS's
@@ -883,32 +898,12 @@ struct AppExplorerView: View {
         if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
         if model.showingMediaControls { return "Swipe to control · repeat to adjust · center tap to go back" }
         if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
-        if model.entries.isEmpty { return model.showingRecents ? "Open another app · E to edit" : "Click Edit or press E to add favorites." }
-        return model.groupNames.isEmpty ? "Swipe to choose · lift to open · E to edit" : "Swipe to choose · tap to go back · E to edit"
+        if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
+        return model.groupNames.isEmpty ? "Swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
     }
 
     var body: some View {
         VStack(spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.groupNames.last ?? "App Explorer")
-                        .font(.system(size: 19, weight: .semibold, design: model.theme.isHUD ? .monospaced : .rounded)).lineLimit(1)
-                    Text(model.layerName.map { "\($0) · \(model.showingWindowManager ? "Window layer" : "Held layer")" } ?? (model.directWindowManager ? "WINDOW CONTROLS" : ([model.mode.title] + model.groupNames.dropLast()).joined(separator: " › ").uppercased()))
-                        .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(model.theme.isHUD ? accent : .secondary).lineLimit(1)
-                }
-                Spacer()
-                if model.canEdit {
-                    Button(action: onEdit) { Label("Edit", systemImage: "pencil") }
-                        .buttonStyle(.borderless).help("Customize favorites and groups here (E)")
-                }
-                Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
-                    .buttonStyle(.plain).disabled(isPreview).accessibilityLabel("Close App Explorer")
-            }.background {
-                if model.theme.isFloating {
-                    Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.94))
-                        .overlay(Capsule().strokeBorder(accent.opacity(0.3), lineWidth: 0.7)).padding(-10)
-                }
-            }
             if model.showingWindowManager && model.windowFullScreen {
                 VStack(spacing: 20) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 48, weight: .light)).foregroundStyle(accent)
@@ -967,6 +962,7 @@ struct AppExplorerView: View {
                 Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
             }
+            quickActionsFooter
         }
         .padding(26)
         .frame(width: 470, height: 520)
@@ -985,6 +981,41 @@ struct AppExplorerView: View {
             }
         }
         .transaction { if !animates { $0.animation = nil } }
+    }
+
+    private var quickActionsFooter: some View {
+        HStack(spacing: 4) {
+            Text("Press")
+            footerKey("E", help: "Quick edit favorites and groups", identifier: "explorer-quick-edit", action: onEdit)
+            Text("to quick edit, or")
+            footerKey("S", help: "Open App Explorer settings", identifier: "explorer-settings", action: onSettings)
+            Text("for settings")
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background {
+            Capsule().fill(model.theme.isHUD ? model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.9 : 1) : Color(nsColor: .controlBackgroundColor))
+                .overlay(Capsule().strokeBorder(accent.opacity(0.24), lineWidth: 0.7))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Press E to quick edit, or S for settings")
+    }
+
+    private func footerKey(_ key: String, help: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(key)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(accent)
+                .frame(minWidth: 18, minHeight: 18)
+                .background(RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(accent.opacity(0.45), lineWidth: 0.7))
+        }
+        .buttonStyle(.plain)
+        .disabled(isPreview || (key == "E" && !model.canEdit))
+        .help(help)
+        .accessibilityIdentifier(identifier)
     }
 
     private var starburst: some View {

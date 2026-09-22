@@ -60,6 +60,11 @@ that tile. **Other actions** includes macros, reserved groups, window commands,
 and move/copy controls. Group tiles offer their group editor. There is no
 separate inspector below the preview. Dragging still moves or swaps tiles.
 
+The HUD has no top title bar. Its footer offers **Press E to quick edit, or S for
+settings**: E edits in place, while S closes the HUD and opens the full HUD
+settings page. Configured HUD layer keys take precedence over these shortcuts;
+typing inside an editor is not intercepted.
+
 ### Themes
 
 Choose **HUD → Classic / Starburst / Starburst Air**, or use the palette menu
@@ -699,8 +704,8 @@ the HUD is open. You can also click a tile. Selecting a group keeps the HUD open
 and shows its eight slots. A fresh short tap without swiping, or a click on the
 center, goes back one level; at the root it closes the HUD. Group navigation
 never launches an app or clicks into the app behind it. Each new opening starts
-at the root. Swipe out and back to the center and lift, press Escape, or click
-close to cancel completely. It also closes after 15 seconds of navigation inactivity, on app
+at the root. Swipe out and back to the center and lift, or press Escape
+to cancel completely. It also closes after 15 seconds of navigation inactivity, on app
 switch/Space change, layer or tap-setting changes, sleep, or device disconnect.
 
 Recency is learned from [macOS application activation notifications](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification)

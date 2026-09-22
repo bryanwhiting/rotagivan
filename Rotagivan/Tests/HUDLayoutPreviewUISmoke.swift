@@ -65,23 +65,23 @@ private struct PreviewFixture: View {
         }
         try snapshot("hud-preview-before")
         // Label centers in the shared fixed-size HUD (470 × 520).
-        send(.leftMouseDown, x: 119, y: 272); send(.leftMouseUp, x: 119, y: 272)
+        send(.leftMouseDown, x: 119, y: 220); send(.leftMouseUp, x: 119, y: 220)
         precondition(state.selection == .left, "Preview clicks select tiles without sending their shortcuts")
-        send(.leftMouseDown, x: 119, y: 272)
-        for i in 1...10 { send(.leftMouseDragged, x: 119 + CGFloat(i) * 23.2, y: 272) }
-        send(.leftMouseUp, x: 351, y: 272)
+        send(.leftMouseDown, x: 119, y: 220)
+        for i in 1...10 { send(.leftMouseDragged, x: 119 + CGFloat(i) * 23.2, y: 220) }
+        send(.leftMouseUp, x: 351, y: 220)
         precondition(state.drops == 1 && state.settings.favorite(at: [.right])?.name == "Copy" && state.settings.favorite(at: [.left])?.name == "Paste", "Dragging actual HUD tiles must swap their saved destinations")
         let saved = state.settings
-        send(.leftMouseDown, x: 119, y: 272)
-        send(.leftMouseDragged, x: 160, y: 272); send(.leftMouseDragged, x: 235, y: 272)
-        send(.leftMouseUp, x: 235, y: 272)
+        send(.leftMouseDown, x: 119, y: 220)
+        send(.leftMouseDragged, x: 160, y: 220); send(.leftMouseDragged, x: 235, y: 220)
+        send(.leftMouseUp, x: 235, y: 220)
         precondition(state.settings == saved && state.drops == 1, "Dropping into the center must not move tiles")
-        send(.leftMouseDown, x: 235, y: 388); send(.leftMouseUp, x: 235, y: 388)
+        send(.leftMouseDown, x: 235, y: 336); send(.leftMouseUp, x: 235, y: 336)
         precondition(state.selection == .down, "Empty slots must be selectable for assignment")
         state.groupPath = [.up]
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         try snapshot("hud-preview-nested-actions")
-        send(.leftMouseDown, x: 235, y: 272); send(.leftMouseUp, x: 235, y: 272)
+        send(.leftMouseDown, x: 235, y: 220); send(.leftMouseUp, x: 235, y: 220)
         precondition(state.groupPath.isEmpty, "The preview center must navigate back through groups")
         for theme in ExplorerTheme.allCases {
             state.settings.theme = theme
@@ -97,7 +97,7 @@ private struct PreviewFixture: View {
             state.settings.theme = theme
             state.editorAppeared = nil
             RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            send(.leftMouseDown, x: 119, y: 272); send(.leftMouseUp, x: 119, y: 272)
+            send(.leftMouseDown, x: 119, y: 220); send(.leftMouseUp, x: 119, y: 220)
             RunLoop.main.run(until: Date().addingTimeInterval(0.4))
             precondition(state.editing == .left && state.editorAppeared == .left,
                          "Clicking a tile must present its app picker in a native popover for \(theme)")
@@ -113,7 +113,7 @@ private struct PreviewFixture: View {
             state.editing = nil
             RunLoop.main.run(until: Date().addingTimeInterval(0.3))
             state.editorAppeared = nil
-            send(.leftMouseDown, x: 351, y: 272); send(.leftMouseUp, x: 351, y: 272)
+            send(.leftMouseDown, x: 351, y: 220); send(.leftMouseUp, x: 351, y: 220)
             RunLoop.main.run(until: Date().addingTimeInterval(0.4))
             precondition(state.editing == .right && state.editorAppeared == .right)
             let rightFrame = NSApp.windows.first { $0 !== panel && $0.isVisible && $0.contentView != nil }!.frame

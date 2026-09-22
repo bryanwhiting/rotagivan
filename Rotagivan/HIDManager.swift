@@ -128,6 +128,10 @@ final class NavigatorHIDManager: ObservableObject {
             (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
             (explorer as? AppExplorerController)?.hotkeyDictionary = { [weak store] in store?.settings.resolvedHotkeyDictionary ?? [] }
             (explorer as? AppExplorerController)?.editingStore = store
+            (explorer as? AppExplorerController)?.onSettings = {
+                HUDSettingsNavigation.pending = true
+                NotificationCenter.default.post(name: .openHUDSettingsRequested, object: nil)
+            }
             (explorer as? AppExplorerController)?.onEditingChanged = { [weak self] editing in
                 guard let self else { return }
                 self.gestures.isEditingInterface = editing

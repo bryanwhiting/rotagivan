@@ -42,11 +42,7 @@ struct RotagivanApp: App {
         MenuBarExtra {
             NavigatorPanel(store: store, hid: hid)
         } label: {
-            HStack(spacing: 4) {
-            Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
-                .accessibilityLabel("Rotagivan — \(store.activeProfileName) layer")
-            Text(AppVersion.version)
-            }
+            RotagivanMenuBarLabel(store: store)
         }
         .menuBarExtraStyle(.window)
     }
@@ -235,6 +231,26 @@ struct NavigatorPanel: View {
             }.font(.caption).foregroundStyle(.secondary)
             Slider(value: percentage, in: 0...100).controlSize(.small)
                 .accessibilityLabel(title)
+        }
+    }
+}
+
+/// The menu-bar label stays mounted even when every settings window is closed.
+struct RotagivanMenuBarLabel: View {
+    @ObservedObject var store: SettingsStore
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
+                .accessibilityLabel("Rotagivan — \(store.activeProfileName) layer")
+            Text(AppVersion.version)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openHUDSettingsRequested)) { _ in
+            openWindow(id: "settings")
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.async {
+                NSApp.windows.first(where: { $0.title == "Rotagivan" })?.makeKeyAndOrderFront(nil)
+            }
         }
     }
 }

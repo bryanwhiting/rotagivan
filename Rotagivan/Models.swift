@@ -1,7 +1,12 @@
 import Foundation
 
+@MainActor enum HUDSettingsNavigation {
+    static var pending = false
+}
+
 extension Notification.Name {
     static let configurationProfileChanged = Notification.Name("Rotagivan.configurationProfileChanged")
+    static let openHUDSettingsRequested = Notification.Name("Rotagivan.openHUDSettingsRequested")
 }
 
 // Portable top-level profiles own layer settings, Explorer layouts and shortcuts.

@@ -35,6 +35,25 @@ private struct ContrastBackdrop: View {
 @main struct StarburstAirGlassUISmoke {
     @MainActor static func main() throws {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
+        let keys = ExplorerPanel(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+        keys.isReleasedWhenClosed = false
+        var edits = 0, settings = 0
+        keys.onEdit = { edits += 1 }; keys.onSettings = { settings += 1 }
+        func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags = []) {
+            keys.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                timestamp: 0, windowNumber: keys.windowNumber, context: nil,
+                characters: code == 1 ? "s" : "e", charactersIgnoringModifiers: code == 1 ? "s" : "e",
+                isARepeat: false, keyCode: code)!)
+        }
+        key(14); key(1)
+        precondition(edits == 1 && settings == 1)
+        for flags: NSEvent.ModifierFlags in [.command, .control, .option] { key(1, flags); key(14, flags) }
+        precondition(edits == 1 && settings == 1, "Modified shortcuts must not open editors")
+        keys.onKey = { _ in true }; key(1); key(14)
+        precondition(edits == 1 && settings == 1, "Assigned layer keys take precedence")
+        keys.onKey = nil; keys.allowsEditing = true; key(1); key(14)
+        precondition(edits == 1 && settings == 1, "Typing in editors must bypass HUD shortcuts")
+        keys.close()
         let model = ExplorerModel()
         model.theme = .starburstAir
         model.animationsEnabled = false

@@ -168,10 +168,18 @@ struct ContentView: View {
                 .onDisappear { hid.endCalibration() }
         }
         .onDisappear { hid.endCalibration() }
+        .onReceive(NotificationCenter.default.publisher(for: .openHUDSettingsRequested)) { _ in
+            selection = "HUD"
+            HUDSettingsNavigation.pending = false
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             hid.endCalibration()
         }
         .onAppear {
+            if HUDSettingsNavigation.pending {
+                selection = "HUD"
+                HUDSettingsNavigation.pending = false
+            }
             DispatchQueue.main.async {
                 store.recenterSliderBaselines(revision: 6)
             }

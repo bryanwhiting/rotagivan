@@ -633,7 +633,8 @@ struct AppExplorerSettingsView: View {
                 let favorite = settings.favorite(at: path)
                 ExplorerURLFavoriteEditor(direction: direction,
                     name: favorite?.url != nil ? (favorite?.name ?? "") : "",
-                    address: favorite?.url ?? "", onSave: { favorite in
+                    address: favorite?.url ?? "", iconSymbol: favorite?.url != nil ? favorite?.iconSymbol : nil,
+                    onSave: { favorite in
                         edit { $0.setFavorite(favorite, at: direction, in: Array(path.dropLast())) }
                         editingURLPath = nil
                     }, onCancel: { editingURLPath = nil })
@@ -895,6 +896,8 @@ struct AppExplorerSettingsView: View {
             Image(systemName: "macwindow").foregroundStyle(.teal)
         } else if favorite.isWindowManager {
             Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal)
+        } else if favorite.url != nil {
+            WebsiteFavicon(url: favorite.resolvedWebURL, size: 18, symbolName: favorite.iconSymbol)
         } else {
             Image(systemName: favorite.isRecentGroup ? "clock.arrow.circlepath" :
                 (favorite.isGroup ? "folder.fill" : (favorite.url != nil ? "globe" : "app")))
@@ -959,7 +962,7 @@ struct AppExplorerSettingsView: View {
                     } else if favorite.isWindowManager {
                         Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal).frame(width: 16, height: 16)
                     } else if !favorite.isGroup, favorite.url != nil {
-                        WebsiteFavicon(url: favorite.resolvedWebURL, size: 16)
+                        WebsiteFavicon(url: favorite.resolvedWebURL, size: 16, symbolName: favorite.iconSymbol)
                     } else {
                         Image(systemName: favorite.isRecentGroup ? "clock.arrow.circlepath" : (favorite.isGroup ? "folder.fill" : (favorite.url != nil ? "globe" : "app")))
                             .frame(width: 16, height: 16)
@@ -1520,11 +1523,24 @@ struct ExplorerURLFavoriteEditor: View {
     let direction: ExplorerSlot
     @State var name: String
     @State var address: String
+    @State var iconSymbol: String?
     var onSave: (AppExplorerFavorite) -> Void
     var onCancel: () -> Void
+
+    init(direction: ExplorerSlot, name: String, address: String, iconSymbol: String? = nil,
+         onSave: @escaping (AppExplorerFavorite) -> Void, onCancel: @escaping () -> Void) {
+        self.direction = direction
+        _name = State(initialValue: name)
+        _address = State(initialValue: address)
+        _iconSymbol = State(initialValue: iconSymbol)
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
     private var validURL: URL? {
         AppExplorerFavorite.webURL(address.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+    private let iconColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 8)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1537,7 +1553,32 @@ struct ExplorerURLFavoriteEditor: View {
                 Text("Enter a valid web URL without spaces or an embedded username/password.")
                     .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            Text("URLs are included in settings export and cloud sync. Avoid private sign-in links or URLs containing secrets.")
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 12) {
+                    WebsiteFavicon(url: validURL, size: 34, symbolName: iconSymbol)
+                        .frame(width: 44, height: 44)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(iconSymbol == nil ? "Automatic site icon" : "Custom icon")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(iconSymbol == nil ? "Uses the site's favicon when available." : "Overrides the site's favicon on this HUD tile.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                LazyVGrid(columns: iconColumns, spacing: 8) {
+                    iconChoice(symbol: nil, title: "Automatic favicon")
+                    ForEach(WebsiteIconCatalog.choices, id: \.symbol) { choice in
+                        iconChoice(symbol: choice.symbol, title: choice.title)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.08)))
+
+            Text("URLs and your icon choice are included in settings export and cloud sync. Avoid private sign-in links or URLs containing secrets.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
@@ -1546,10 +1587,31 @@ struct ExplorerURLFavoriteEditor: View {
                     guard let url = validURL else { return }
                     let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
                     onSave(AppExplorerFavorite(direction: direction, name: title.isEmpty ? (url.host ?? "Website") : title,
-                        url: url.absoluteString))
+                        url: url.absoluteString, iconSymbol: iconSymbol))
                 }.keyboardShortcut(.defaultAction).disabled(validURL == nil || name.count > 512)
             }
         }.textFieldStyle(.roundedBorder).padding(24).frame(width: 440)
             .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func iconChoice(symbol: String?, title: String) -> some View {
+        let selected = iconSymbol == symbol
+        return Button { iconSymbol = symbol } label: {
+            Group {
+                if let symbol { Image(systemName: symbol) }
+                else { Image(systemName: "wand.and.stars") }
+            }
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .frame(maxWidth: .infinity).frame(height: 32)
+            .background(selected ? Color.accentColor.opacity(0.13) : Color.primary.opacity(0.035),
+                        in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7)
+                .stroke(selected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

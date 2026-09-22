@@ -159,7 +159,7 @@ struct ConfigurationTests {
         withSingleSwipe.settings.appExplorer = AppExplorerSettings(defaultMode: .favorites,
             favorites: [AppExplorerFavorite(direction: .topLeft, bundleID: "com.apple.Safari", name: "Safari")],
             holdShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 19, keyLabel: "F17"))
-        withSingleSwipe.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, name: "Project docs", url: "https://example.com/docs?q=hello%20world#intro"), at: .right)
+        withSingleSwipe.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .right, name: "Project docs", url: "https://example.com/docs?q=hello%20world#intro", iconSymbol: "book.closed.fill"), at: .right)
         withSingleSwipe.settings.precision.scrollResponse = ScrollResponse(slowMultiplier:0.25,fastMultiplier:2.5,transitionSpeed:1300)
         withSingleSwipe.settings.appOverrides = [.chrome]
         var gestures = withSingleSwipe.settings.gestures(for: 1)

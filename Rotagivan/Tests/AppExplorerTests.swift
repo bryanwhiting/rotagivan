@@ -95,8 +95,13 @@ import Foundation
         precondition(restored == settings)
         let legacy = try JSONDecoder().decode(AppExplorerFavorite.self, from: Data(#"{"direction":"up","bundleID":"com.apple.Safari","name":"Safari"}"#.utf8))
         precondition(legacy.url == nil && legacy.children == nil && legacy.bundleID == "com.apple.Safari" && legacy.isValidDestination)
-        let web = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/docs?q=one%20two#section")
-        precondition(web.isValidDestination && web.bundleID == nil)
+        let web = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com/docs?q=one%20two#section",
+            iconSymbol: "book.closed.fill")
+        precondition(web.isValidDestination && web.bundleID == nil && WebsiteIconCatalog.symbols.contains(web.iconSymbol!))
+        var invalidWebIcon = web; invalidWebIcon.iconSymbol = "not.a.real.rotagivan.icon"
+        precondition(!invalidWebIcon.isValidDestination)
+        var iconOnApp = legacy; iconOnApp.iconSymbol = "star.fill"
+        precondition(!iconOnApp.isValidDestination, "Custom web icons must not attach to app tiles")
         settings.setFavorite(web, at: .up)
         precondition(settings.favorites[0].url == web.url && settings.favorites[0].bundleID == nil)
         let webRestored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))

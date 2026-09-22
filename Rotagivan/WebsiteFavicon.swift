@@ -166,17 +166,27 @@ actor FaviconService {
 struct WebsiteFavicon: View {
     let url: URL?
     let size: CGFloat
+    var symbolName: String? = nil
     var service: FaviconService = .shared
     @State private var icon: NSImage?
 
+    private var taskID: String {
+        (symbolName ?? "automatic") + "|" + (url.flatMap(FaviconDiscovery.origin)?.absoluteString ?? "")
+    }
+
     var body: some View {
         Group {
-            if let icon { Image(nsImage: icon).resizable().renderingMode(.original).scaledToFit() }
-            else { Image(systemName: "globe").resizable().scaledToFit().foregroundStyle(.teal) }
+            if let symbolName {
+                Image(systemName: symbolName).resizable().scaledToFit().foregroundStyle(.teal)
+            } else if let icon {
+                Image(nsImage: icon).resizable().renderingMode(.original).scaledToFit()
+            } else {
+                Image(systemName: "globe").resizable().scaledToFit().foregroundStyle(.teal)
+            }
         }.frame(width: size, height: size).accessibilityHidden(true)
-            .task(id: url.flatMap(FaviconDiscovery.origin)) {
+            .task(id: taskID) {
                 icon = nil
-                guard let url else { return }
+                guard symbolName == nil, let url else { return }
                 do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
                 let data = await service.icon(for: url)
                 guard !Task.isCancelled else { return }

@@ -215,7 +215,7 @@ private indirect enum ConfigurationValue: Codable {
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts favorites slotCount"
             case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
-            case "favorites", "children": allowed = "direction bundleID name url children groupMode action shortcut holdLayers slotCount showsWindows windowPlacement"
+            case "favorites", "children": allowed = "direction bundleID name url iconSymbol children groupMode action shortcut holdLayers slotCount showsWindows windowPlacement"
             case "windowPlacement": allowed = "direction layout"
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"

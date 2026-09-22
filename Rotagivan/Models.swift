@@ -346,11 +346,24 @@ struct ExplorerHeldKeys {
     mutating func updateModifiers(_ flags: UInt64) { held.removeAll { $0.modifiers & flags != $0.modifiers } }
 }
 
+enum WebsiteIconCatalog {
+    static let choices: [(symbol: String, title: String)] = [
+        ("link", "Link"), ("book.closed.fill", "Reading"), ("doc.text.fill", "Document"),
+        ("newspaper.fill", "News"), ("cart.fill", "Shopping"), ("play.rectangle.fill", "Video"),
+        ("music.note", "Music"), ("message.fill", "Messages"), ("calendar", "Calendar"),
+        ("chart.bar.fill", "Analytics"), ("star.fill", "Favorite"), ("heart.fill", "Personal"),
+        ("briefcase.fill", "Work"), ("graduationcap.fill", "Learning"), ("cloud.fill", "Cloud")
+    ]
+    static let symbols = Set(choices.map(\.symbol))
+}
+
 struct AppExplorerFavorite: Codable, Equatable {
     var direction: ExplorerSlot
     var bundleID: String? = nil
     var name: String
     var url: String? = nil
+    // A portable SF Symbol override for web favorites. Nil discovers the site's favicon.
+    var iconSymbol: String? = nil
     // A non-nil array is a named group, including an empty group.
     var children: [AppExplorerFavorite]? = nil
     // Optional so existing groups retain their manually assigned slots.
@@ -371,6 +384,7 @@ struct AppExplorerFavorite: Codable, Equatable {
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        guard iconSymbol == nil || (url != nil && WebsiteIconCatalog.symbols.contains(iconSymbol!)) else { return false }
         guard holdLayers == nil || supportsHoldLayers else { return false }
         guard slotCount == nil || ((isGroup || isWindowManager) && [4, 8, 12, 16].contains(slotCount!)) else { return false }
         if windowPlacement != nil {

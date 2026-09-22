@@ -407,7 +407,8 @@ extension AppExplorerPresenting {
         }
         if favorite.url != nil {
             return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true)
+                icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true,
+                webIconSymbol: favorite.iconSymbol)
         }
         let url = favorite.bundleID.flatMap(applicationURL)
         return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
@@ -804,6 +805,7 @@ struct ExplorerEntry {
     var icon: NSImage?
     var url: URL?
     var isWebURL: Bool
+    var webIconSymbol: String?
     var isGroup: Bool
     var isRecentGroup: Bool
     var isWindowManager: Bool
@@ -815,9 +817,10 @@ struct ExplorerEntry {
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
-    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
+        self.webIconSymbol = webIconSymbol
         self.isGroup = isGroup
         self.isRecentGroup = isRecentGroup
         self.isWindowManager = isWindowManager
@@ -1148,7 +1151,7 @@ struct AppExplorerView: View {
         } else if entry.isGroup {
             Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if entry.isWebURL {
-            WebsiteFavicon(url: entry.url, size: 42)
+            WebsiteFavicon(url: entry.url, size: 42, symbolName: entry.webIconSymbol)
         } else {
             Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
         }

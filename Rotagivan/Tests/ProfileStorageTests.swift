@@ -160,6 +160,24 @@ struct ProfileStorageTests {
         precondition(saved["additionalProfiles"] != nil && saved["additionalLayers"] == nil, "Keep existing YAML and sync schema")
         let savedModel = try decoder.decode(StoredSettings.self, from: encoder.encode(store.settings))
         precondition(savedModel.additionalProfiles?.first?.name == "Layer 3")
+        var customGestures = store.settings.gestures(for: added)
+        customGestures.oneFingerTap = .rightClick
+        store.updateGestures(customGestures, for: added)
+        store.updateAppleGestures(customGestures, for: added)
+        store.settings.profileNames?[added] = "Temporary"
+        store.settings.customTapProfiles = [added]
+        store.setActiveProfile(added)
+        precondition(store.removeProfile(added), "Custom non-default layers should be removable")
+        precondition(store.activeProfileID == store.defaultProfileID, "Deleting the active layer should return to the default")
+        precondition(store.settings.additionalProfiles?.contains { $0.id == added } == false)
+        precondition(store.settings.profileNames?[added] == nil)
+        precondition(store.settings.profileGestures?[added] == nil)
+        precondition(store.settings.customTapProfiles?.contains(added) == false)
+        precondition(store.settings.sliderBaselines?[added] == nil)
+        precondition(store.settings.devices?.appleLayerGestures?[added] == nil)
+        precondition(!store.removeProfile(store.defaultProfileID), "The default layer must remain protected")
+        precondition(!store.removeProfile(2), "Built-in layers must remain protected")
+        print("Layer deletion passed: custom state cleanup, active-layer fallback and built-in protection.")
         print("Layer terminology passed: new default names, preserved legacy names and unchanged storage keys.")
     }
 }

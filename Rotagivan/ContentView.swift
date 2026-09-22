@@ -37,6 +37,11 @@ struct ProfileNameEditor: View {
 }
 
 struct ContentView: View {
+    private struct PendingLayerDeletion: Identifiable {
+        let id: UInt32
+        let name: String
+    }
+
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
     @ObservedObject var sync: SettingsSync
@@ -45,7 +50,9 @@ struct ContentView: View {
     @State private var actionDevice: GestureDevice = .navigator
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
+    @State private var pendingLayerDeletion: PendingLayerDeletion?
     private let initialHUDGroup: ExplorerReservedGroup?
+    private let layerColumnWidth: CGFloat = 468
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
         ("Layers", "square.3.layers.3d"), ("Calibration", "dial.low"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
@@ -163,6 +170,19 @@ struct ContentView: View {
                 return true
             }, onCancel: { renamingProfile = nil })
         }
+        .confirmationDialog(
+            "Delete \(pendingLayerDeletion?.name ?? "layer")?",
+            isPresented: Binding(get: { pendingLayerDeletion != nil }, set: { if !$0 { pendingLayerDeletion = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Layer", role: .destructive) {
+                if let id = pendingLayerDeletion?.id { deleteLayer(id) }
+                pendingLayerDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingLayerDeletion = nil }
+        } message: {
+            Text("This removes the layer's tap actions, device overrides, and activation shortcut.")
+        }
         .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
             if value == nil { hid.endCalibration() }
         })) { session in
@@ -224,7 +244,7 @@ struct ContentView: View {
                     GridRow(alignment: .top) {
                         ForEach(store.profiles, id: \.id) { profile in
                             profileCell(profile.name, id: profile.id, section: section)
-                                .frame(width: 322, alignment: .topLeading)
+                                .frame(width: layerColumnWidth, alignment: .topLeading)
                         }
                     }
                 }
@@ -235,7 +255,7 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color(nsColor: .controlBackgroundColor))
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(store.activeProfileID == profile.id ? Color.teal.opacity(0.65) : Color.primary.opacity(0.16), lineWidth: 1))
-                            .frame(width: 322)
+                            .frame(width: layerColumnWidth)
                     }
                 }.allowsHitTesting(false)
             }
@@ -318,9 +338,20 @@ struct ContentView: View {
             if id != store.defaultProfileID {
                 Button("Make default") { makeDefault(id) }.buttonStyle(.link).font(.caption)
             }
+            if store.canRemoveProfile(id) {
+                Button {
+                    pendingLayerDeletion = PendingLayerDeletion(id: id, name: title)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Delete \(title)")
+                .accessibilityLabel("Delete \(title)")
+            }
             }
         }
-        .frame(width: 270, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 120, alignment: .topLeading)
     }
 
@@ -331,6 +362,12 @@ struct ContentView: View {
         shortcuts.disableActivation(for: store.defaultProfileID)
         shortcuts.disableActivation(for: id)
         store.makeDefault(id)
+    }
+
+    private func deleteLayer(_ id: UInt32) {
+        guard store.removeProfile(id) else { return }
+        ShortcutSettings.shared.additional.removeValue(forKey: id)
+        ShortcutSettings.shared.profileActions.removeValue(forKey: id)
     }
 
     private func profileSlider(_ title: String, name: String, value: Binding<Double>, scale: SettingsScale) -> some View {

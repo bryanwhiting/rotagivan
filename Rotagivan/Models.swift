@@ -1649,6 +1649,27 @@ final class SettingsStore: ObservableObject {
         return id
     }
 
+    func canRemoveProfile(_ id: UInt32) -> Bool {
+        id != defaultProfileID && (settings.additionalProfiles ?? []).contains { $0.id == id }
+    }
+
+    /// Removes a user-created action layer and every per-layer setting keyed by
+    /// its ID. Built-in and default layers remain protected.
+    @discardableResult
+    func removeProfile(_ id: UInt32) -> Bool {
+        guard canRemoveProfile(id) else { return false }
+        var updated = settings
+        updated.additionalProfiles?.removeAll { $0.id == id }
+        updated.profileNames?.removeValue(forKey: id)
+        updated.profileGestures?.removeValue(forKey: id)
+        updated.customTapProfiles?.remove(id)
+        updated.sliderBaselines?.removeValue(forKey: id)
+        updated.devices?.appleLayerGestures?.removeValue(forKey: id)
+        settings = updated
+        if activeProfileID == id { activeProfileID = defaultProfileID }
+        return true
+    }
+
     func reset() {
         replaceSettings(factorySettings ?? StoredSettings())
     }

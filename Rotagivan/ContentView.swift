@@ -365,9 +365,15 @@ struct ContentView: View {
     }
 
     private func deleteLayer(_ id: UInt32) {
+        if id == store.defaultProfileID,
+           let replacement = store.profiles.first(where: { $0.id != id }) {
+            makeDefault(replacement.id)
+        }
         guard store.removeProfile(id) else { return }
-        ShortcutSettings.shared.additional.removeValue(forKey: id)
-        ShortcutSettings.shared.profileActions.removeValue(forKey: id)
+        let shortcuts = ShortcutSettings.shared
+        shortcuts.disableActivation(for: id)
+        shortcuts.additional.removeValue(forKey: id)
+        shortcuts.profileActions.removeValue(forKey: id)
     }
 
     private func profileSlider(_ title: String, name: String, value: Binding<Double>, scale: SettingsScale) -> some View {

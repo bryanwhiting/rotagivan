@@ -1284,6 +1284,9 @@ struct StoredSettings: Codable {
     var oneFingerTap: TapAction?
     var twoFingerTap: TapAction?
     var additionalProfiles: [AdditionalProfile]?
+    // IDs 1 and 2 are retained in storage for backward-compatible motion data,
+    // but can be removed from the user's action-layer list.
+    var removedLayerIDs: Set<UInt32>?
     var profileNames: [UInt32: String]?
     var profileGestures: [UInt32: ProfileGestures]?
     var customTapProfiles: Set<UInt32>?
@@ -1291,13 +1294,20 @@ struct StoredSettings: Codable {
     var sliderBaselines: [UInt32: ProfileSliderBaseline]?
     var sliderBaselineRevision: Int?
     var appExplorer: AppExplorerSettings?
+    var availableLayerIDs: [UInt32] {
+        let removed = removedLayerIDs ?? []
+        let ids = [UInt32(1), 2].filter { !removed.contains($0) } + (additionalProfiles ?? []).map(\.id)
+        // Recover safely from corrupt local data. Imported configurations reject
+        // removing every layer before they can reach this model.
+        return ids.isEmpty ? [1] : ids
+    }
     var resolvedDefaultProfileID: UInt32 {
-        let id = defaultProfileID ?? 1
-        return id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) ? id : 1
+        let id = defaultProfileID ?? availableLayerIDs[0]
+        return availableLayerIDs.contains(id) ? id : availableLayerIDs[0]
     }
 
     mutating func makeDefault(_ id: UInt32) {
-        guard id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) else { return }
+        guard availableLayerIDs.contains(id) else { return }
         guard id != resolvedDefaultProfileID else { return }
         // Changing the default action layer must not pick a different legacy
         // mouse response or drag behavior after importing an old config.
@@ -1450,7 +1460,7 @@ final class SettingsStore: ObservableObject {
         // Revision 4 deliberately re-centres the user's existing live tuning
         // after profile baselines were introduced.
         if (settings.sliderBaselineRevision ?? 0) < 4 {
-            let ids: [UInt32] = [1, 2] + (settings.additionalProfiles ?? []).map(\.id)
+            let ids = settings.availableLayerIDs
             settings.sliderBaselines = Dictionary(uniqueKeysWithValues: ids.map { ($0, settings.sliderBaseline(for: $0, preferStored: false)) })
             settings.sliderBaselineRevision = 4
         }
@@ -1595,7 +1605,7 @@ final class SettingsStore: ObservableObject {
 
     func recenterSliderBaselines(revision: Int) {
         guard (settings.sliderBaselineRevision ?? 0) < revision else { return }
-        let ids: [UInt32] = [1, 2] + (settings.additionalProfiles ?? []).map(\.id)
+        let ids = settings.availableLayerIDs
         var updated = settings
         updated.sliderBaselines = Dictionary(uniqueKeysWithValues: ids.map { ($0, updated.sliderBaseline(for: $0, preferStored: false)) })
         updated.sliderBaselineRevision = revision
@@ -1604,7 +1614,9 @@ final class SettingsStore: ObservableObject {
 
     var profiles: [(id: UInt32, name: String)] {
         let defaults: [(id: UInt32, name: String)] = [(1, "Normal"), (2, "Precision")] + (settings.additionalProfiles ?? []).map { ($0.id, $0.name) }
-        let named = defaults.map { (id: $0.id, name: settings.profileName(for: $0.id, fallback: $0.name)) }
+        let available = Set(settings.availableLayerIDs)
+        let named = defaults.filter { available.contains($0.id) }
+            .map { (id: $0.id, name: settings.profileName(for: $0.id, fallback: $0.name)) }
         return named.filter { $0.id == defaultProfileID } + named.filter { $0.id != defaultProfileID }
     }
 
@@ -1650,23 +1662,36 @@ final class SettingsStore: ObservableObject {
     }
 
     func canRemoveProfile(_ id: UInt32) -> Bool {
-        id != defaultProfileID && (settings.additionalProfiles ?? []).contains { $0.id == id }
+        profiles.count > 1 && profiles.contains { $0.id == id }
     }
 
-    /// Removes a user-created action layer and every per-layer setting keyed by
-    /// its ID. Built-in and default layers remain protected.
+    /// Removes any visible action layer and every per-layer setting keyed by
+    /// its ID. The legacy built-ins keep only their backward-compatible motion
+    /// storage; custom layers are removed entirely.
     @discardableResult
     func removeProfile(_ id: UInt32) -> Bool {
         guard canRemoveProfile(id) else { return false }
         var updated = settings
-        updated.additionalProfiles?.removeAll { $0.id == id }
+        if id == updated.resolvedDefaultProfileID,
+           let replacement = updated.availableLayerIDs.first(where: { $0 != id }) {
+            updated.makeDefault(replacement)
+        }
+        if id == 1 || id == 2 {
+            var removed = updated.removedLayerIDs ?? []
+            removed.insert(id)
+            updated.removedLayerIDs = removed
+        } else {
+            updated.additionalProfiles?.removeAll { $0.id == id }
+        }
         updated.profileNames?.removeValue(forKey: id)
         updated.profileGestures?.removeValue(forKey: id)
         updated.customTapProfiles?.remove(id)
         updated.sliderBaselines?.removeValue(forKey: id)
         updated.devices?.appleLayerGestures?.removeValue(forKey: id)
         settings = updated
-        if activeProfileID == id { activeProfileID = defaultProfileID }
+        if activeProfileID == id || !settings.availableLayerIDs.contains(activeProfileID) {
+            activeProfileID = defaultProfileID
+        }
         return true
     }
 

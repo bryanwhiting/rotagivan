@@ -69,7 +69,7 @@ extension AppConfiguration {
                     for i in stride(from: 0, to: array.count, by: 2) { pairs.append((String(describing: array[i]), canonical(array[i + 1]))) }
                     return pairs.sorted { $0.0 < $1.0 }.flatMap { [$0.0, $0.1] }
                 }
-                if key == "customTapProfiles" { return array.map { String(describing: $0) }.sorted() }
+                if ["customTapProfiles", "removedLayerIDs"].contains(key) { return array.map { String(describing: $0) }.sorted() }
                 return array.map { canonical($0) }
             }
             return value

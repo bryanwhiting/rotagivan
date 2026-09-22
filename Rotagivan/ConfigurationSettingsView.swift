@@ -76,7 +76,7 @@ struct ConfigurationSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
                 .accessibilityLabel("YAML configuration")
             if let candidate {
-                Text("Valid • \(2 + (candidate.settings.additionalProfiles?.count ?? 0)) layers • Default: \(candidate.settings.profileName(for: candidate.settings.resolvedDefaultProfileID, fallback: candidate.settings.resolvedDefaultProfileID == 1 ? "Normal" : "Precision"))")
+                Text("Valid • \(candidate.settings.availableLayerIDs.count) layers • Default: \(candidate.settings.profileName(for: candidate.settings.resolvedDefaultProfileID, fallback: candidate.settings.resolvedDefaultProfileID == 1 ? "Normal" : "Precision"))")
                     .font(.caption).foregroundStyle(.green)
             }
             if let error {

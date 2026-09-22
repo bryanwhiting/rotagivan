@@ -34,7 +34,7 @@ struct RotagivanApp: App {
             ContentView(store: store, hid: hid, sync: sync)
                 .onAppear { start() }
                 .onReceive(store.$settings) { settings in
-                    hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [])
+                    hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [], availableIDs: Set(settings.availableLayerIDs))
                     hotKeys.configureExplorer(nil)
                     hotKeys.configureHUDLayers(settings.enabled ? settings.appExplorer?.holdLayers ?? [] : [])
                     hotKeys.configureNamedHotkeys(settings.enabled ? settings.resolvedHotkeyDictionary : [])
@@ -66,7 +66,7 @@ struct RotagivanApp: App {
         }
         hotKeys.configureHUDLayers(store.settings.enabled ? store.settings.appExplorer?.holdLayers ?? [] : [])
         hotKeys.configureNamedHotkeys(store.settings.enabled ? store.settings.resolvedHotkeyDictionary : [])
-        hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [])
+        hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [], availableIDs: Set(store.settings.availableLayerIDs))
         hotKeys.install()
         if store.settings.enabled { hid.start() }
         if !AXIsProcessTrusted() {

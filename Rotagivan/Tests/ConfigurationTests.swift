@@ -18,7 +18,7 @@ struct ConfigurationTests {
                 }
                 return map
             }
-            if key == "customTapProfiles" { return list.map { String(describing: $0) }.sorted() }
+            if ["customTapProfiles", "removedLayerIDs"].contains(key) { return list.map { String(describing: $0) }.sorted() }
             return list.map { canonical($0) }
         }
         return value
@@ -379,6 +379,22 @@ struct ConfigurationTests {
         bad = factory
         bad.settings.additionalProfiles = [.init(id: 1, name: "Duplicate", motion: .normal)]
         rejected(try ConfigurationYAML.encode(bad), "duplicate profile IDs")
+        var removedLayer = factory
+        let removedID: UInt32 = removedLayer.settings.resolvedDefaultProfileID == 1 ? 2 : 1
+        removedLayer.settings.removedLayerIDs = [removedID]
+        removedLayer.settings.profileNames?.removeValue(forKey: removedID)
+        removedLayer.settings.profileGestures?.removeValue(forKey: removedID)
+        removedLayer.settings.customTapProfiles?.remove(removedID)
+        removedLayer.settings.sliderBaselines?.removeValue(forKey: removedID)
+        removedLayer.settings.devices?.appleLayerGestures?.removeValue(forKey: removedID)
+        removedLayer.shortcuts.profileActions.removeValue(forKey: removedID)
+        if removedID == 1 { removedLayer.shortcuts.normal.enabled = false }
+        else { removedLayer.shortcuts.precision.enabled = false }
+        let removedRoundtrip = try AppConfiguration.parse(removedLayer.yaml())
+        precondition(tryEqual(removedLayer, removedRoundtrip) && !removedRoundtrip.settings.availableLayerIDs.contains(removedID))
+        var noLayers = factory
+        noLayers.settings.removedLayerIDs = [1, 2]
+        rejected(try ConfigurationYAML.encode(noLayers), "removing every layer")
 
         let suite = "Rotagivan.ConfigurationTests.\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: suite)!

@@ -168,10 +168,12 @@ final class HotKeyManager {
     private var profileDragShortcut = ProfileShortcut(keyCode: 90)
     private var customTapProfiles = Set<UInt32>()
     private var defaultProfileID: UInt32 = 1
+    private var availableProfileIDs: Set<UInt32>?
 
-    func configureProfiles(defaultID: UInt32, customTaps: Set<UInt32>) {
-        let changed = defaultProfileID != defaultID
+    func configureProfiles(defaultID: UInt32, customTaps: Set<UInt32>, availableIDs: Set<UInt32>? = nil) {
+        let changed = defaultProfileID != defaultID || availableProfileIDs != availableIDs
         defaultProfileID = defaultID
+        availableProfileIDs = availableIDs
         if changed {
             // Imports suspend registrations while replacing multiple stores.
             // Reset the activation baseline even while registration is paused.
@@ -291,8 +293,9 @@ final class HotKeyManager {
         onProfileChanged?(activation.active)
         ShortcutSettings.shared.error = nil
         let configured: [(id: UInt32, name: String, shortcut: ProfileShortcut)] =
-            [(1, "Normal", normal), (2, "Precision", precision)] +
-            additional.sorted { $0.key < $1.key }.map { ($0.key, "Layer \($0.key - 97)", $0.value) }
+            ([(1, "Normal", normal), (2, "Precision", precision)] +
+            additional.sorted { $0.key < $1.key }.map { ($0.key, "Layer \($0.key - 97)", $0.value) })
+            .filter { availableProfileIDs?.contains($0.id) ?? true }
         let all = configured.filter { $0.id != defaultProfileID }
         let enabled = all.map(\.shortcut).filter(\.enabled)
         profileCombinations = Set(enabled.map { "\($0.keyCode):\($0.modifiers)" })

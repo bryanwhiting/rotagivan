@@ -96,13 +96,23 @@ struct AppConfiguration: Codable {
         }
         guard formatVersion == 1 else { throw ConfigurationError("Unsupported formatVersion \(formatVersion). This app supports 1.") }
         let extra = settings.additionalProfiles ?? []
-        let ids = [UInt32(1), 2] + extra.map(\.id)
+        let allIDs = [UInt32(1), 2] + extra.map(\.id)
+        let allValid = Set(allIDs)
+        let removed = settings.removedLayerIDs ?? []
+        let ids = allIDs.filter { !removed.contains($0) }
         let valid = Set(ids)
-        guard extra.count <= 98, valid.count == ids.count,
+        guard extra.count <= 98, allValid.count == allIDs.count,
               extra.allSatisfy({ $0.id >= 100 && $0.id < UInt32.max - 100 && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
             throw ConfigurationError("Layers need unique IDs (additional IDs start at 100); at most 100 layers are supported.")
         }
-        guard valid.contains(settings.defaultProfileID ?? 1) else { throw ConfigurationError("The default layer does not exist.") }
+        guard removed.isSubset(of: [1, 2]), !ids.isEmpty else {
+            throw ConfigurationError("Removed layers must be legacy layer IDs, and at least one layer must remain.")
+        }
+        guard valid.contains(settings.defaultProfileID ?? ids[0]) else { throw ConfigurationError("The default layer does not exist.") }
+        guard (!removed.contains(1) || !shortcuts.normal.enabled) &&
+              (!removed.contains(2) || !shortcuts.precision.enabled) else {
+            throw ConfigurationError("A removed layer cannot keep an activation shortcut.")
+        }
         let references = Array((settings.profileNames ?? [:]).keys)
             + Array((settings.profileGestures ?? [:]).keys)
             + Array((settings.sliderBaselines ?? [:]).keys)
@@ -198,7 +208,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
             case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
             case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
@@ -255,6 +265,12 @@ private indirect enum ConfigurationValue: Codable {
                 var seen = Set<Double>()
                 for i in stride(from: 0, to: values.count, by: 2) {
                     guard case .number(let id) = values[i], id >= 1, id < Double(UInt32.max - 100), id.rounded() == id,
+                          seen.insert(id).inserted else { throw ConfigurationError("\(path) has an invalid or duplicate layer ID.") }
+                }
+            } else if ["customTapProfiles", "removedLayerIDs"].contains(key) {
+                var seen = Set<Double>()
+                for value in values {
+                    guard case .number(let id) = value, id >= 1, id < Double(UInt32.max - 100), id.rounded() == id,
                           seen.insert(id).inserted else { throw ConfigurationError("\(path) has an invalid or duplicate layer ID.") }
                 }
             }

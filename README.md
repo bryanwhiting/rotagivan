@@ -38,9 +38,10 @@ keystroke-only `steps` are preserved. Mixed macros use typed `sequence` steps.
 Settings and sync include the full sequence and its stable ID.
 
 **HUD** is directly below **Devices**. Add/edit a top-level HUD layer to assign
-an **Open this HUD layer from anywhere** keyboard shortcut, or use the visible
-**HUD layer** menu beside any tap/swipe action (including single and two-finger
-double taps). HUD tiles also offer **••• → Open HUD layer** in their shortcut
+an **Open this HUD layer from anywhere** keyboard shortcut, or choose
+**HUD layer** inside any tap/swipe action's dropdown (including single and two-finger
+double taps). HUD tile shortcut editors also offer **HUD layer** in that menu.
+The single-chevron menu button has room to stay readable alongside the shortcut
 editor. No keyboard shortcut is required for gesture activation. Direct launch
 stays on that layer until the HUD is dismissed. The
 existing in-HUD hold/toggle key remains separate. Launch keys require a modifier

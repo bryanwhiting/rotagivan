@@ -77,19 +77,6 @@ struct TapActionEditor: View {
             HStack {
                 Text(title).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                if !keyboardOnly && !physicalKeysOnly {
-                    Menu {
-                        Button("Favorites") { action = .appExplorer; shortcut = nil }
-                        ForEach(hudLayers) { layer in
-                            Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) {
-                                shortcut = .hudLayer(layer); action = .shortcut
-                            }
-                        }
-                    } label: { Label("HUD layer", systemImage: "square.3.layers.3d") }
-                        .fixedSize()
-                        .help("Make this gesture open a HUD layer directly. No keyboard shortcut is needed.")
-                        .accessibilityIdentifier("gesture-hud-layer-menu")
-                }
             }
             HStack(spacing: 6) {
                 ShortcutRecorder(title: action == .shortcut ? (shortcut.map { dictionary.title(for: $0) } ?? "Record shortcut…") : action.title) { recorded in
@@ -105,8 +92,11 @@ struct TapActionEditor: View {
                         }
                         Divider()
                     }
-                    if keyboardOnly && !physicalKeysOnly && !hudLayers.isEmpty {
-                        Menu("Open HUD layer") {
+                    if !physicalKeysOnly && (!keyboardOnly || !hudLayers.isEmpty) {
+                        Menu("HUD layer") {
+                            if !keyboardOnly {
+                                Button("Favorites") { action = .appExplorer; shortcut = nil }
+                            }
                             ForEach(hudLayers) { layer in
                                 Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) { shortcut = .hudLayer(layer); action = .shortcut }
                             }
@@ -132,9 +122,17 @@ struct TapActionEditor: View {
                     }
                     Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                     }
-                } label: { Image(systemName: "ellipsis") }
-                    .menuStyle(.borderlessButton).frame(width: 24)
-                    .help("Manual shortcut entry and other tap actions")
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 28, height: 26)
+                        .contentShape(Rectangle())
+                }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .controlSize(.regular).frame(width: 32, height: 26)
+                    .accessibilityLabel("\(title) action options")
+                    .accessibilityIdentifier("gesture-action-menu")
+                    .help("Choose a HUD layer, keybinding, macro, or tap action")
             }
         }
         .popover(isPresented: $showManual) {

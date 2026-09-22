@@ -331,7 +331,12 @@ uploads the previous account's settings to a different existing account.
 Local YAML works without an account or internet connection. Invalid YAML pauses
 sync and leaves the working app settings intact. **Reload YAML** imports a fixed
 file; **Save app settings** backs up and replaces a conflicting local file.
-`settings-backup-*.yaml` files in the same directory retain replaced copies;
+Conflicts immediately preserve the working settings (and any differing local YAML)
+in `~/.config/rotagivan/backup/`, before you choose which copy to keep.
+Replacements also preserve the previous settings there. Filenames use UTC with
+six-digit microseconds, e.g. `settings-20260922-181530-123456Z.yaml`.
+Existing backups are never overwritten; older `settings-backup-*.yaml` files
+remain untouched in the config directory.
 `sync-state.json` stores per-account revision metadata, not credentials. Keep or
 remove old backups as desired. Config files are owner-only (0600), in a private
 directory (0700). Symlink config files/directories are rejected.

@@ -64,6 +64,7 @@ private struct SyncAPIError: LocalizedError {
                     if UserDefaults.standard.bool(forKey: "sync.localPending") {
                         guard digest == UserDefaults.standard.string(forKey: "sync.localDigest") else {
                             localConflict = true
+                            try await files.backupConflict(AppConfiguration(store: store))
                             throw ConfigurationError("Unsaved app changes and a modified YAML file were found. Choose which local copy to keep.")
                         }
                         try await saveLocal()
@@ -119,6 +120,7 @@ private struct SyncAPIError: LocalizedError {
             guard let digest = try await files.rawDigest(), digest != localDigest else { return }
             guard try AppConfiguration(store: store).syncFingerprint() == localFingerprint else {
                 localConflict = true
+                try await files.backupConflict(AppConfiguration(store: store))
                 throw ConfigurationError("Both the app and settings.yaml changed. Choose Reload YAML or Save app settings.")
             }
             guard let (config, readDigest) = try await files.read() else { return }
@@ -232,6 +234,7 @@ private struct SyncAPIError: LocalizedError {
             case .equal:
                 try await remember(remote.revision, fingerprint: fingerprint, account: signed)
             case .conflict:
+                try await files.backupConflict(captured)
                 conflictRemote = remote; hasConflict = true
                 status = remoteConfig == nil
                     ? "This account has no cloud settings. Confirm before uploading the configuration left by another account."

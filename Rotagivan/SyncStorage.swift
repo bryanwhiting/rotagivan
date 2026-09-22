@@ -111,6 +111,7 @@ actor SyncFiles {
     let directory: URL
     let file: URL
     static let maximumBytes = 1_048_576
+    private var lastBackupMicroseconds: Int64 = 0
     init(directory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/rotagivan", isDirectory: true)) {
         self.directory = directory
         file = directory.appendingPathComponent("settings.yaml")
@@ -151,6 +152,7 @@ actor SyncFiles {
         try prepare()
         let current = try readData(file)
         if !force, current.map(Self.digest) != expectedDigest {
+            try backupConflict(config)
             throw ConfigurationError("settings.yaml changed outside the app. Reload YAML or choose Save app settings before syncing.")
         }
         if force, let current { try backupData(current) }
@@ -160,8 +162,45 @@ actor SyncFiles {
         return Self.digest(data)
     }
     func backup(_ config: AppConfiguration) throws { try prepare(); try backupData(Data(try config.yaml().utf8)) }
+    /// Preserve the working copy and any differing on-disk copy before asking
+    /// the user to resolve a conflict. Never chooses a winner or changes either.
+    func backupConflict(_ config: AppConfiguration) throws {
+        try prepare()
+        let working = Data(try config.yaml().utf8)
+        try backupData(working)
+        if let disk = try readData(file), disk != working { try backupData(disk) }
+    }
     private func backupData(_ data: Data) throws {
-        try writePrivate(data, to: directory.appendingPathComponent("settings-backup-\(UUID().uuidString).yaml"))
+        let folder = directory.appendingPathComponent("backup", isDirectory: true)
+        let fm = FileManager.default
+        if let attributes = try attributesIfPresent(folder) {
+            guard attributes[.type] as? FileAttributeType == .typeDirectory else {
+                throw ConfigurationError("The backup directory must not be a symbolic link or file.")
+            }
+        } else {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        }
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        var micros = max(Int64(Date().timeIntervalSince1970 * 1_000_000), lastBackupMicroseconds + 1)
+        while true {
+            let stamp = formatter.string(from: Date(timeIntervalSince1970: Double(micros / 1_000_000)))
+            let name = "settings-\(stamp)-\(String(format: "%06lld", micros % 1_000_000))Z.yaml"
+            let url = folder.appendingPathComponent(name)
+            do {
+                // Exclusive creation also protects against collisions across app
+                // processes or a clock adjustment. Existing backups are immutable.
+                try data.write(to: url, options: .withoutOverwriting)
+                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                lastBackupMicroseconds = micros
+                return
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
+                micros += 1
+            }
+        }
     }
     private func writePrivate(_ data: Data, to url: URL) throws {
         if let attributes = try attributesIfPresent(url), attributes[.type] as? FileAttributeType != .typeRegular {

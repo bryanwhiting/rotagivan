@@ -1455,12 +1455,15 @@ struct ExplorerHUDSettingsPreview: View {
 }
 
 struct ExplorerInlineEditor: View {
+    static let preferredWidth: CGFloat = 760
     @ObservedObject var store: SettingsStore
     var groupPath: [ExplorerSlot]
     var onGroupPathChange: ([ExplorerSlot]) -> Void
     var onDone: () -> Void
     var configurationOverride: Binding<AppExplorerSettings>? = nil
     var windowManagerOnly = false
+    var contentWidth: CGFloat = Self.preferredWidth
+    var contentHeight: CGFloat = 760
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -1468,12 +1471,16 @@ struct ExplorerInlineEditor: View {
                 Spacer()
                 Button("Done", action: onDone).keyboardShortcut(.defaultAction)
             }
-            AppExplorerSettingsView(store: store, groupPath: groupPath, compact: true,
-                configurationOverride: configurationOverride, windowManagerOnly: windowManagerOnly,
-                onGroupPathChange: onGroupPathChange)
+            ScrollView {
+                AppExplorerSettingsView(store: store, groupPath: groupPath, compact: false,
+                    configurationOverride: configurationOverride, windowManagerOnly: windowManagerOnly,
+                    onGroupPathChange: onGroupPathChange)
+                    .padding(.horizontal, 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             Text("Changes save automatically · taps click while editing · swipe shortcuts resume when you finish")
                 .font(.caption).foregroundStyle(.secondary)
-        }.padding(26).frame(width: 680)
+        }.padding(26).frame(width: contentWidth, height: contentHeight)
             .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
             .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))

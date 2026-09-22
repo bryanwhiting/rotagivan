@@ -681,9 +681,13 @@ extension AppExplorerPresenting {
         // can leave AppKit's key-focus behavior inconsistent.
         let frame = previous.frame
         let previousScreen = previous.screen
+        let visibleFrame = (previousScreen ?? NSScreen.main)?.visibleFrame
+        let editorWidth = min(ExplorerInlineEditor.preferredWidth, (visibleFrame?.width ?? 792) - 32)
+        let editorHeight = min(980, (visibleFrame?.height ?? 1012) - 32)
         previous.onCancel = nil
         previous.orderOut(nil); previous.close()
-        let editor = ExplorerPanel(contentRect: NSRect(x: frame.midX - 340, y: frame.midY - 250, width: 680, height: 500),
+        let editor = ExplorerPanel(contentRect: NSRect(x: frame.midX - editorWidth / 2, y: frame.midY - editorHeight / 2,
+            width: editorWidth, height: editorHeight),
             styleMask: [.borderless], backing: .buffered, defer: false)
         editor.isReleasedWhenClosed = false
         editor.title = "Edit App Explorer"
@@ -705,11 +709,11 @@ extension AppExplorerPresenting {
             onGroupPathChange: { [weak self] path in
                 if editingWindows { self?.windowGroupPath = path } else { self?.groupPath = path }
             }, onDone: { [weak self] in self?.finishEditing() },
-            configurationOverride: editingWindows ? windowBinding : nil, windowManagerOnly: editingWindows))
-        if let screen = previousScreen ?? NSScreen.main {
-            let visible = screen.visibleFrame
-            editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - 680)),
-                                          y: max(visible.minY, min(editor.frame.minY, visible.maxY - 500))))
+            configurationOverride: editingWindows ? windowBinding : nil, windowManagerOnly: editingWindows,
+            contentWidth: editorWidth, contentHeight: editorHeight))
+        if let visible = visibleFrame {
+            editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - editorWidth)),
+                                          y: max(visible.minY, min(editor.frame.minY, visible.maxY - editorHeight))))
         }
         panel = editor
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }

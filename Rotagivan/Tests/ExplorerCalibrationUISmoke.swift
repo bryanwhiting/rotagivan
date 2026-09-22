@@ -326,39 +326,18 @@ import SwiftUI
         editView.cacheDisplay(in: editView.bounds, to: editBitmap)
         try editBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/inline-editor.png"))
         let previousOpenCount = openedApps.count
-        let beforeDrag = store.settings.appExplorer!
-        // Resolve actual native drag handles so toolbar additions don't break the fixture.
+        precondition(editPanel.frame.width >= 700 && editPanel.frame.height >= 600,
+            "The E-key editor must make room for the Settings-style HUD preview")
+        // The legacy editor installed one native drag handle per grid cell. The
+        // Settings-style editor uses the real HUD renderer and its sector gestures.
         func dragHandles(_ view: NSView) -> [NSView] {
             if String(describing: type(of: view)).contains("ExplorerSlotDragView") { return [view] }
             return view.subviews.flatMap(dragHandles)
         }
-        let centers = dragHandles(editView).map { $0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil) }
-        precondition(centers.count >= 3)
-        let sourcePoint = centers.min { abs($0.x - 130) < abs($1.x - 130) }!
-        let targetPoint = centers.min { abs($0.x - 550) < abs($1.x - 550) }!
-        drag(in: editPanel, from: sourcePoint, to: targetPoint)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .right])?.name == "Development",
-                     "Actual mouse drag must swap group with URL")
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.name == "Docs")
-        precondition(controller.isEditing && openedApps.count == previousOpenCount, "Dragging must not launch apps or leave edit mode")
-        drag(in: editPanel, from: targetPoint, to: sourcePoint)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.children == beforeDrag.favorite(at: [.left, .left])?.children)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .right])?.url == beforeDrag.favorite(at: [.left, .right])?.url)
-        let beforeCancelledDrag = store.settings.appExplorer!
-        drag(in: editPanel, from: sourcePoint, to: NSPoint(x: -20, y: sourcePoint.y))
-        precondition(store.settings.appExplorer == beforeCancelledDrag, "Dropping outside the grid cancels")
-        drag(in: editPanel, from: sourcePoint, to: NSPoint(x: 340, y: sourcePoint.y))
-        precondition(store.settings.appExplorer == beforeCancelledDrag, "Dropping on the center cancels")
-        drag(in: editPanel, from: sourcePoint, to: targetPoint, cancel: true)
-        precondition(store.settings.appExplorer == beforeCancelledDrag, "Escape cancels without saving")
-        let emptyPoint = NSPoint(x: sourcePoint.x, y: sourcePoint.y - 94)
-        drag(in: editPanel, from: sourcePoint, to: emptyPoint)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .left]) == nil)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .bottomLeft])?.name == "Development")
-        drag(in: editPanel, from: emptyPoint, to: sourcePoint)
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .left])?.name == "Development")
-        precondition(store.settings.appExplorer!.favorite(at: [.left, .bottomLeft]) == nil)
-        print("Native mouse dragging passed: swap/reverse, empty move, outside/center/Escape cancellation, no app activation.")
+        precondition(dragHandles(editView).isEmpty, "The E-key editor must not render the legacy cell grid")
+        precondition(controller.isEditing && openedApps.count == previousOpenCount,
+            "Opening the Settings-style HUD editor must not launch apps or leave edit mode")
+        print("Native E-key editor passed: shared Settings HUD preview, display-aware sizing, no legacy cell grid or app activation.")
         swipeLeft()
         precondition(controller.isEditing && controller.groupPath == [.left] && openedApps.count == previousOpenCount,
             "Raw edit-mode contacts cannot navigate or launch favorites")

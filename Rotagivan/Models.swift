@@ -867,11 +867,40 @@ struct RecordedShortcut: Codable, Equatable {
     var keyCode: UInt16
     var modifiers: UInt64
     var keyLabel: String
+    /// Labels do not participate in key identity (keyboard layouts can rename a key).
+    var identity: String { "\(keyCode):\(modifiers & 0x1e0000)" }
+    var readableCombination: String {
+        let parts = [(UInt64(1 << 20), "Cmd"), (1 << 18, "Ctrl"), (1 << 19, "Option"), (1 << 17, "Shift")]
+        return (parts.compactMap { modifiers & $0.0 != 0 ? $0.1 : nil } + [keyLabel]).joined(separator: "+")
+    }
     var isValidExplorerShortcut: Bool {
         let allowedModifiers: UInt64 = (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)
         return keyCode <= 127 && modifiers & ~allowedModifiers == 0 &&
             !keyLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && keyLabel.count <= 128 &&
             !keyLabel.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+}
+
+struct NamedHotkey: Codable, Equatable, Identifiable {
+    var id: String = UUID().uuidString
+    var name: String
+    var shortcut: RecordedShortcut
+    var isValid: Bool {
+        !id.isEmpty && id.count <= 128 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isValidExplorerShortcut
+    }
+}
+
+extension Array where Element == NamedHotkey {
+    func label(for shortcut: RecordedShortcut) -> String? {
+        first { $0.shortcut.identity == shortcut.identity }?.name
+    }
+    func title(for shortcut: RecordedShortcut) -> String {
+        label(for: shortcut).map { "\($0) (\(shortcut.readableCombination))" } ?? shortcut.readableCombination
+    }
+    var isValidDictionary: Bool {
+        count <= 500 && allSatisfy(\.isValid) && Set(map(\.id)).count == count &&
+        Set(map { $0.shortcut.identity }).count == count
     }
 }
 
@@ -1071,6 +1100,8 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    var hotkeyDictionary: [NamedHotkey]? = nil
+    var resolvedHotkeyDictionary: [NamedHotkey] { hotkeyDictionary ?? [] }
     var navigatorTapCalibration: TapCalibrationSettings? = nil
     var appleTapCalibration: TapCalibrationSettings? = nil
     // One Navigator response per top-level profile. Legacy layer motion stays

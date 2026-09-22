@@ -56,6 +56,7 @@ extension AppExplorerPresenting {
     private var controlDirection: ExplorerSlot?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
+    var hotkeyDictionary: () -> [NamedHotkey] = { [] }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     var openApplication: (URL, NSWorkspace.OpenConfiguration, @escaping @MainActor (pid_t?) -> Void) -> Void = { url, configuration, completion in
@@ -369,7 +370,9 @@ extension AppExplorerPresenting {
             return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
         }
         if let shortcut = favorite.shortcut {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+            let dictionary = hotkeyDictionary()
+            let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
+            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
                 icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
         }
         if favorite.isWindowManager {
@@ -1024,7 +1027,7 @@ struct AppExplorerView: View {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
                         Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: .medium))
-                            .lineLimit(2).multilineTextAlignment(.center)
+                            .lineLimit(entry.shortcut == nil ? 2 : 3).multilineTextAlignment(.center)
                     } else {
                         Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -1084,8 +1087,10 @@ struct AppExplorerView: View {
             VStack(spacing: 5) {
                 if let entry {
                     entrySymbol(entry)
-                    Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    if let shortcut = entry.shortcut { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
+                    Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(entry.shortcut == nil ? 1 : 2)
+                    if let shortcut = entry.shortcut {
+                        if !entry.name.hasSuffix("(\(shortcut.readableCombination))") { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
+                    }
                     else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil && entry.command == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }

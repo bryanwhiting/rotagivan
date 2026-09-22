@@ -795,6 +795,34 @@ Existing layer timing is preserved until that timing is calibrated or edited
 there; before then, the controls display the default layer's values. Shared
 calibration overrides timing, not actions, and is included in YAML and sync.
 
+### Hotkey organizer and dictionary
+
+Open **Hotkeys** in the settings sidebar:
+
+- **Dictionary** names combinations without registering any additional hotkeys.
+  Add, edit, or remove entries; choose them from **••• → Saved hotkeys** in a
+  shortcut editor, including HUD shortcut tiles. A matching HUD tile displays
+  `Name (Cmd+Shift+…)`. Renaming updates matching tiles when the HUD next opens.
+  Removing a name or changing its dictionary combination never rebinds an
+  existing action. Names are scoped to the top-level profile and included in
+  YAML exports, profile copies, and sync. No sample bindings are preloaded.
+- **Conflicts & overrides** audits the selected layer/device, its app-specific
+  rules, global activation/click/drag/HUD hotkeys, and nested HUD groups. It
+  distinguishes competing registered keys from harmless reuse of an outgoing
+  shortcut. App overrides show the global action → app action, including explicit
+  “Nothing” rules. Two-finger navigation remains independent of tap-to-click.
+  HUD-local overlaps and shortcuts sent to combinations also registered by
+  Rotagivan are flagged as potential overlaps, not guaranteed failures.
+- **All assignments** is a searchable inventory with app scope, precedence, and
+  an option to include inactive actions. Choose another layer/device to audit
+  its actions; keys in unrelated HUD groups are not treated as simultaneous
+  conflicts.
+
+This is an audit of **Rotagivan's configured bindings**, not a scanner of other
+apps' private shortcuts or macOS shortcut settings. Runtime registration errors
+are displayed when macOS rejects one of Rotagivan's global hotkeys. Dictionary
+combinations are unique by physical key and modifiers, not by their display text.
+
 ### Sharing settings
 
 General → Configuration provides **Copy YAML**, **Save YAML…**, and **Import YAML…**.

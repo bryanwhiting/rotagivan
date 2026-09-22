@@ -38,6 +38,15 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var namedConfig = factory
+        let namedKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
+        namedConfig.settings.hotkeyDictionary = [NamedHotkey(name: "Copy selection", shortcut: namedKey)]
+        let namedYAML = try namedConfig.yaml()
+        let namedRoundtrip = try AppConfiguration.parse(namedYAML)
+        precondition(tryEqual(namedConfig, namedRoundtrip), "Hotkey dictionary survives YAML and sync")
+        namedConfig.settings.hotkeyDictionary?.append(NamedHotkey(name: "Duplicate", shortcut: namedKey))
+        do { try namedConfig.validate(); fatalError("Accepted duplicate named combination") } catch { print("Rejected duplicate dictionary combination") }
+        rejected(namedYAML.replacingOccurrences(of: "Copy selection", with: ""), "empty dictionary name")
         var calibrated = factory
         calibrated.settings.navigatorTapCalibration = TapCalibrationSettings(doubleTapInterval: 0.18, tripleTapFirstInterval: 0.2,
             tripleTapSecondInterval: 0.22, singleSwipeWindow: 0.3, singleSwipeDuration: 0.12, doubleSwipeWindow: 0.4)

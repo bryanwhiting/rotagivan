@@ -10,6 +10,8 @@ for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollRespo
   xcrun swiftc "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"
 done
+xcrun swiftc "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/HotkeyOrganizerTests.swift -o "$test_dir/HotkeyOrganizerTests"
+"$test_dir/HotkeyOrganizerTests"
 xcrun swiftc "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/LiveCursorPreviewTests"
 "$test_dir/LiveCursorPreviewTests" "$test_dir"

@@ -126,6 +126,7 @@ final class NavigatorHIDManager: ObservableObject {
             self.explorer = explorer
             explorer.onPresentationChanged = { [weak self] in self?.updateExplorerPointer() }
             (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
+            (explorer as? AppExplorerController)?.hotkeyDictionary = { [weak store] in store?.settings.resolvedHotkeyDictionary ?? [] }
             (explorer as? AppExplorerController)?.editingStore = store
             (explorer as? AppExplorerController)?.onEditingChanged = { [weak self] editing in
                 guard let self else { return }

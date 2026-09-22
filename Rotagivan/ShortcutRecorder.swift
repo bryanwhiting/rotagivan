@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+private struct HotkeyDictionaryKey: EnvironmentKey { static let defaultValue: [NamedHotkey] = [] }
+extension EnvironmentValues {
+    var hotkeyDictionary: [NamedHotkey] {
+        get { self[HotkeyDictionaryKey.self] }
+        set { self[HotkeyDictionaryKey.self] = newValue }
+    }
+}
+
 extension ProfileShortcut {
     mutating func assign(_ recorded: RecordedShortcut) {
         keyCode = UInt32(recorded.keyCode)
@@ -42,6 +50,7 @@ extension RecordedShortcut {
 }
 
 struct TapActionEditor: View {
+    @Environment(\.hotkeyDictionary) private var dictionary
     var title: String
     @Binding var action: TapAction
     @Binding var shortcut: RecordedShortcut?
@@ -60,11 +69,19 @@ struct TapActionEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                ShortcutRecorder(title: action == .shortcut ? (shortcut?.displayName ?? "Record shortcut…") : action.title) { recorded in
+                ShortcutRecorder(title: action == .shortcut ? (shortcut.map { dictionary.title(for: $0) } ?? "Record shortcut…") : action.title) { recorded in
                     shortcut = recorded
                     action = .shortcut
                 }.frame(maxWidth: .infinity).frame(height: 26)
                 Menu {
+                    if !dictionary.isEmpty {
+                        Menu("Saved hotkeys") {
+                            ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
+                                Button(dictionary.title(for: entry.shortcut)) { shortcut = entry.shortcut; action = .shortcut }
+                            }
+                        }
+                        Divider()
+                    }
                     Button("Set shortcut manually…") {
                         if action == .shortcut, let shortcut { draft = shortcut }
                         else if action == .optionF19 { draft = RecordedShortcut(keyCode: 80, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), keyLabel: "F19") }

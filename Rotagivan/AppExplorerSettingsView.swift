@@ -531,7 +531,9 @@ struct AppExplorerSettingsView: View {
             }.padding(.horizontal, 10)
             if let favorite {
                 Label {
-                    Text(favorite.name).lineLimit(1)
+                    Text(favorite.shortcut.flatMap { key in
+                        store.settings.resolvedHotkeyDictionary.label(for: key).map { _ in store.settings.resolvedHotkeyDictionary.title(for: key) }
+                    } ?? favorite.name).lineLimit(2)
                 } icon: {
                     if let icon {
                         Image(nsImage: icon).resizable().renderingMode(.original)
@@ -922,6 +924,7 @@ struct ExplorerInlineEditor: View {
             Text("Changes save automatically · taps click while editing · swipe shortcuts resume when you finish")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(26).frame(width: 680)
+            .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
     }
 }
@@ -949,6 +952,7 @@ struct ExplorerGroupNameEditor: View {
 }
 
 struct ExplorerShortcutEditor: View {
+    @Environment(\.hotkeyDictionary) private var dictionary
     let direction: ExplorerSlot
     @State var name: String
     @State var shortcut: RecordedShortcut?
@@ -961,6 +965,9 @@ struct ExplorerShortcutEditor: View {
             Label("\(direction.title) · Keyboard shortcut", systemImage: "keyboard").font(.headline)
             TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
             TapActionEditor(title: "Shortcut to send", action: $action, shortcut: $shortcut, keyboardOnly: true)
+            if let shortcut, dictionary.label(for: shortcut) != nil {
+                Text("HUD label: \(dictionary.title(for: shortcut))").font(.caption).foregroundStyle(.secondary)
+            }
             Text("Swipe to this slot and lift to send the shortcut to the app you were using. Use ••• → Set shortcut manually if another app intercepts the keys while recording.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {

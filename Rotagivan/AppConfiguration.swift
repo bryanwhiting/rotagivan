@@ -68,6 +68,9 @@ struct AppConfiguration: Codable {
     }
 
     func validate() throws {
+        guard settings.resolvedHotkeyDictionary.isValidDictionary else {
+            throw ConfigurationError("Hotkey dictionary entries need unique IDs and key combinations, valid shortcuts, and nonempty names (maximum 500 entries).")
+        }
         if let profiles {
             guard !profiles.isEmpty, profiles.count <= 20, Set(profiles.map(\.id)).count == profiles.count,
                   profiles.contains(where: { $0.id == activeConfigurationID }),
@@ -193,7 +196,8 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration"
+            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "hotkeyDictionary": allowed = "id name shortcut"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts favorites slotCount"

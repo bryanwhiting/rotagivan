@@ -11,7 +11,7 @@ struct ContentView: View {
     private let initialHUDGroup: ExplorerReservedGroup?
 
     private let sections = [("Devices", "computermouse"), ("Layers", "square.3.layers.3d"),
-        ("HUD", "safari"), ("App overrides", "app.badge"),
+        ("HUD", "safari"), ("Hotkeys", "keyboard"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
@@ -77,6 +77,7 @@ struct ContentView: View {
                         case "General": general
                         case "Devices": devices
                         case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
+                        case "Hotkeys": HotkeyOrganizerView(store: store)
                         case "App overrides": AppOverridesView(store: store)
                         case "Pointer & scrolling": pointerSettings
                         default: profiles
@@ -100,6 +101,7 @@ struct ContentView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .toggleStyle(.checkbox)
         .tint(.primary)
+        .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .frame(width: 940, height: 740)
         .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
             if value == nil { hid.endCalibration() }

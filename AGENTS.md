@@ -7,6 +7,8 @@
 
 ## Builds
 
+- After every verified app change, build and install the new version locally, then reopen it. Use a Sol subagent for the build/install workflow when available. Do not stop at a built artifact or wait for a separate install request.
+- Install using `./launch.sh --keep-accessibility` so existing Accessibility permission is preserved. Never run bare `launch.sh` for routine updates: its default resets Accessibility. Verify the installed bundle version and running executable under `/Applications/Rotagivan.app`; report any build/install blocker explicitly.
 - For each user-requested app change, increment CFBundleShortVersionString (normally the patch component) and CFBundleVersion in Rotagivan/Info.plist before building. Multiple implementation edits for the same update share one version.
 - Keep version labels sourced from bundle metadata, not hardcoded UI strings.
 - Report the version and build in the final response, and explicitly distinguish built from installed. Never imply the user is testing a fix that has not been installed.

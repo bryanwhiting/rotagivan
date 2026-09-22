@@ -31,10 +31,9 @@ private final class MacroPoster: GestureEventPosting {
             favorites: [AppExplorerFavorite(direction: .left, name: macro.name, shortcut: reference)],
             launchShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"), appBundleID: "test.editor", appName: "Editor")
         let hud = AppExplorerSettings(holdLayers: [layer])
-        precondition(hud.hasValidFavorites && layer.isAvailable(in: "test.editor") && !layer.isAvailable(in: "other.app"))
+        precondition(hud.hasValidFavorites && layer.isAvailable(in: "test.editor") && layer.isAvailable(in: "other.app"))
         var held = ExplorerScopedHeldKeys()
-        precondition(!held.press(key: 16, modifiers: 0, path: [], settings: hud, bundleID: "other.app"))
-        precondition(held.press(key: 16, modifiers: 0, path: [], settings: hud, bundleID: "test.editor"))
+        precondition(held.press(key: 16, modifiers: 0, path: [], settings: hud, bundleID: "other.app"))
         held.release(key: 16)
         precondition(held.selectRootLayer(layer.id, settings: hud))
         held.release(key: 64); held.updateModifiers(0)
@@ -91,6 +90,6 @@ private final class MacroPoster: GestureEventPosting {
             precondition(opened == [layer.id] && poster.sent.isEmpty, "One-finger double tap must open a HUD layer without a keyboard event")
             store.settings.hotkeyDictionary = [macro]; engine.reset()
         }
-        print("Macro action tests passed: ordered dispatch on both devices, two-finger double-tap HUD targets, app scoping, sticky direct launch, legacy decoding and invalid/reference output rejection. No real events posted.")
+        print("Macro action tests passed: ordered dispatch on both devices, two-finger double-tap HUD targets, global HUD launch, sticky direct launch, legacy decoding and invalid/reference output rejection. No real events posted.")
     }
 }

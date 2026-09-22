@@ -115,7 +115,8 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/WindowTiling.swift \
   Rotagivan/ExplorerAppearance.swift \
   Rotagivan/MediaControls.swift \
-  Rotagivan/ExplorerHoldLayerEditor.swift \
+  Rotagivan/HotkeyOrganizer.swift \
+  Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \

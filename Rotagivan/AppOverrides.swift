@@ -109,6 +109,87 @@ extension ProfileGestures {
     }
 }
 
+extension AppGestureTrigger {
+    func assignment(in taps: ProfileGestures) -> (binding: AppGestureBinding, enabled: Bool) {
+        var action: TapAction = .none
+        var shortcut: RecordedShortcut?
+        var enabled = taps.gestures.tapToClick
+        switch self {
+        case .oneFingerTap: action = taps.oneFingerTap; shortcut = taps.oneFingerShortcut
+        case .twoFingerTap: action = taps.twoFingerTap; shortcut = taps.twoFingerShortcut
+        case .oneFingerDoubleTap: action = taps.oneFingerDoubleTap ?? .none; shortcut = taps.oneFingerDoubleShortcut
+        case .twoFingerDoubleTap: action = taps.twoFingerDoubleTap ?? .none; shortcut = taps.twoFingerDoubleShortcut
+        case .oneFingerTripleTap: action = taps.oneFingerTripleTap ?? .none; shortcut = taps.oneFingerTripleShortcut
+        case .twoFingerTripleTap: action = taps.twoFingerTripleTap ?? .none; shortcut = taps.twoFingerTripleShortcut
+        default:
+            let swipe: DoubleTapSwipeSettings?
+            switch rawValue.split(separator: ".").first {
+            case "single": swipe = taps.singleTapSwipe
+            case "double": swipe = taps.doubleTapSwipe
+            case "twoSingle": swipe = taps.twoFingerSingleTapSwipe
+            case "twoDouble": swipe = taps.twoFingerDoubleTapSwipe
+            default: swipe = taps.twoFingerSwipe; enabled = true // Navigation does not require tap-to-click.
+            }
+            if let swipe, let direction {
+                action = swipe.action(for: direction); shortcut = swipe[direction]
+                enabled = enabled && swipe.enabled
+            } else { enabled = false }
+        }
+        return (AppGestureBinding(trigger: self, action: action, shortcut: shortcut), enabled && action != .none)
+    }
+}
+
+struct HUDTapAssignmentScope: Hashable {
+    var profileID: UInt32
+    var device: GestureDevice
+}
+
+extension StoredSettings {
+    /// Applies staged HUD-layer tap hotkeys through the same profile fields used
+    /// by Layer actions. Shared Apple actions canonicalize to Navigator so one
+    /// edit cannot create two competing copies of the same assignment.
+    mutating func updateHUDLayerTapAssignments(
+        _ staged: [HUDTapAssignmentScope: Set<AppGestureTrigger>],
+        for layer: ExplorerHoldLayer
+    ) {
+        var normalized: [HUDTapAssignmentScope: Set<AppGestureTrigger>] = [:]
+        for (scope, triggers) in staged {
+            let device: GestureDevice = scope.device == .apple && resolvedDevices.shareTapActions ? .navigator : scope.device
+            normalized[HUDTapAssignmentScope(profileID: scope.profileID, device: device)] = triggers
+        }
+        for (scope, desired) in normalized {
+            let separateApple = scope.device == .apple && !resolvedDevices.shareTapActions
+            var profile = separateApple
+                ? (devices?.appleLayerGestures?[scope.profileID] ?? effectiveGestures(for: scope.profileID))
+                : effectiveGestures(for: scope.profileID)
+            for trigger in AppGestureTrigger.baseTapTriggers {
+                let current = trigger.assignment(in: profile).binding
+                if desired.contains(trigger) {
+                    _ = profile.setLayerAction(.shortcut, shortcut: .hudLayer(layer), for: trigger)
+                } else if current.shortcut?.hudLayerID == layer.id {
+                    _ = profile.setLayerAction(.none, shortcut: nil, for: trigger)
+                }
+            }
+            if separateApple {
+                var deviceSettings = resolvedDevices
+                var overrides = deviceSettings.appleLayerGestures ?? [:]
+                overrides[scope.profileID] = profile
+                deviceSettings.appleLayerGestures = overrides
+                devices = deviceSettings
+            } else {
+                var profiles = profileGestures ?? [:]
+                profiles[scope.profileID] = profile
+                profileGestures = profiles
+                if scope.profileID != resolvedDefaultProfileID {
+                    var custom = customTapProfiles ?? []
+                    custom.insert(scope.profileID)
+                    customTapProfiles = custom
+                }
+            }
+        }
+    }
+}
+
 struct AppGestureBinding: Codable, Equatable, Identifiable {
     var trigger: AppGestureTrigger
     var action: TapAction = .none

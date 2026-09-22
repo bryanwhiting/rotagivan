@@ -57,7 +57,7 @@ struct ConfigurationTests {
         rejected(macroYAML.replacingOccurrences(of: "stepDelayMilliseconds: 150", with: "stepDelayMilliseconds: 9999"), "invalid macro delay")
         var invalidMacro = macroConfig; invalidMacro.settings.hotkeyDictionary?[0].steps = [.macro(macro)]
         do { try invalidMacro.validate(); fatalError("Accepted recursive macro") } catch { print("Rejected recursive macro") }
-        print("Macro/HUD YAML passed: ordered steps, delays, stable action references, app-scoped layer launchers and legacy import")
+        print("Macro/HUD YAML passed: ordered steps, delays, stable action references, legacy layer metadata and import")
         var appMacroConfig = macroConfig
         appMacroConfig.settings.hotkeyDictionary?[0].steps = nil
         appMacroConfig.settings.hotkeyDictionary?[0].sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(firstStep)]

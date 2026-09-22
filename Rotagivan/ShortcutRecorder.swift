@@ -98,7 +98,7 @@ struct TapActionEditor: View {
                                 Button("Favorites") { action = .appExplorer; shortcut = nil }
                             }
                             ForEach(hudLayers) { layer in
-                                Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) { shortcut = .hudLayer(layer); action = .shortcut }
+                                Button(layer.name) { shortcut = .hudLayer(layer); action = .shortcut }
                             }
                         }
                     }

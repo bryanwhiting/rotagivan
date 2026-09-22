@@ -569,8 +569,9 @@ import SwiftUI
             AppExplorerFavorite(direction: .left, name: "Window Manager", action: .windowManager),
             AppExplorerFavorite(direction: .right, name: "Media Controls", action: .mediaControls)
         ], holdLayers: [heldLayer, wideLayer])
-        try render(ExplorerHoldLayerEditor(layer: heldLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}),
-            size: CGSize(width: 450, height: 360), path: CommandLine.arguments[1] + "/hold-layer-editor.png")
+        try render(HUDLayerHotkeyEditor(store: store, layer: heldLayer, settings: store.settings.appExplorer!,
+            onSave: { _, _ in true }, onCancel: {}),
+            size: CGSize(width: 560, height: 720), path: CommandLine.arguments[1] + "/hold-layer-editor.png")
         try render(AppExplorerSettingsView(store: store, initialLayerID: heldLayer.id).padding(24).frame(width: 680, height: 500).background(Color(nsColor: .windowBackgroundColor)),
             size: CGSize(width: 680, height: 500), path: CommandLine.arguments[1] + "/held-layer-grid.png")
         func layerKey(_ code: UInt16, down: Bool, repeatKey: Bool = false) {

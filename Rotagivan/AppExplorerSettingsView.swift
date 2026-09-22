@@ -132,7 +132,6 @@ struct AppExplorerSettingsView: View {
     @State private var selectedLayerID: UUID?
     @State private var editingLayer: ExplorerHoldLayer?
     @State private var creatingLayer = false
-    @State private var editingTapLayer: ExplorerHoldLayer?
     @State private var removingLayer = false
     @State private var editingTileLayers: [ExplorerSlot]?
     @State private var tileLayerSnapshot: AppExplorerFavorite?
@@ -192,17 +191,16 @@ struct AppExplorerSettingsView: View {
                 detail: "The default App Explorer layer")]
         }
         var sources: [HUDLayerActivationSource] = []
-        let appScope = layer.appName.map { " · \($0) only" } ?? ""
         if let shortcut = layer.holdShortcut {
             let behavior = (layer.activation ?? .hold) == .hold ? "Hold" : "Tap to toggle"
             sources.append(HUDLayerActivationSource(symbol: "keyboard",
                 title: "\(behavior) \(shortcut.readableCombination)",
-                detail: "While this HUD is open\(appScope)"))
+                detail: "While this HUD is open"))
         }
         if let shortcut = layer.launchShortcut {
             sources.append(HUDLayerActivationSource(symbol: "command",
                 title: shortcut.readableCombination,
-                detail: "Global hotkey\(appScope)"))
+                detail: "Global hotkey"))
         }
         if canAssignDirectTap {
             let customProfiles = store.settings.customTapProfiles ?? []
@@ -292,12 +290,9 @@ struct AppExplorerSettingsView: View {
             if let layer {
                 Divider()
                 HStack(spacing: 12) {
-                    Button("Edit triggers") {
+                    Button("Edit hotkeys") {
                         creatingLayer = false
                         editingLayer = layer
-                    }
-                    if canAssignDirectTap {
-                        Button("Assign tap") { editingTapLayer = layer }
                     }
                     Spacer(minLength: 0)
                 }
@@ -426,7 +421,7 @@ struct AppExplorerSettingsView: View {
                     }.disabled((baseSettings.holdLayers ?? []).count >= 16 ||
                         (scopeTitle != nil && baseSettings.holdLayers == nil))
                     if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
-                        Button("Edit triggers…") { creatingLayer = false; editingLayer = layer }
+                        Button("Edit hotkeys…") { creatingLayer = false; editingLayer = layer }
                         Button("Remove", role: .destructive) { removingLayer = true }
                     }
                 }.font(.subheadline)
@@ -567,26 +562,31 @@ struct AppExplorerSettingsView: View {
             }
         }
         .sheet(item: $editingLayer) { layer in
-            ExplorerHoldLayerEditor(layer: layer, settings: baseSettings, onSave: { updated in
+            HUDLayerHotkeyEditor(store: store, layer: layer, settings: baseSettings, onSave: { updated, tapDrafts in
                 var next = baseSettings
                 var layers = next.holdLayers ?? []
                 if let index = layers.firstIndex(where: { $0.id == updated.id }) {
                     // Preserve slot edits that may have arrived via sync while the sheet was open.
                     var merged = updated; merged.favorites = layers[index].favorites; layers[index] = merged
                 } else {
-                    guard creatingLayer else { groupError = "This layer was removed while editing."; editingLayer = nil; return }
+                    guard creatingLayer else {
+                        groupError = "This layer was removed while editing."; editingLayer = nil
+                        return false
+                    }
                     layers.append(updated)
                 }
                 next.holdLayers = layers
-                guard next.hasValidFavorites else { groupError = "Use unique hold keys and stay within the 16-layer / 256-slot limits."; return }
-                guard saveBase(next) else { return }
+                guard next.hasValidFavorites else {
+                    groupError = "Use unique hold keys and stay within the 16-layer / 256-slot limits."
+                    return false
+                }
+                guard saveBase(next) else { return false }
+                var stored = store.settings
+                stored.updateHUDLayerTapAssignments(tapDrafts, for: updated)
+                store.settings = stored
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
+                return true
             }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly)
-        }
-        .sheet(item: $editingTapLayer) { layer in
-            HUDLayerTapAssignmentEditor(store: store, layer: layer) {
-                editingTapLayer = nil
-            }
         }
         .confirmationDialog("Remove this HUD layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
             Button("Remove HUD layer", role: .destructive) {

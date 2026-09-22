@@ -75,10 +75,8 @@ import SwiftUI
         store.settings.appExplorer = AppExplorerSettings(holdLayers: [editorLayer])
         controller.frontmostBundleID = { "other.app" }
         controller.showLayer(editorLayer.id, waitingForLift: false)
-        precondition(!controller.isVisible, "App-scoped direct launch must fail closed in other apps")
-        controller.frontmostBundleID = { "test.editor" }
-        controller.showLayer(editorLayer.id, waitingForLift: false)
-        precondition(controller.isVisible && controller.displayedEntries.first?.shortcut?.macroID == macro.id)
+        precondition(controller.isVisible && controller.displayedEntries.first?.shortcut?.macroID == macro.id,
+            "Legacy app metadata must not restrict a global HUD launch")
         precondition(controller.displayedEntries.first?.name == "Copy and paste (Cmd+Shift+C → Cmd+V)")
         controller.dismiss()
         store.settings.appExplorer?.favorites = [AppExplorerFavorite(direction: .right, name: "Editor layer", shortcut: .hudLayer(editorLayer))]
@@ -110,8 +108,9 @@ import SwiftUI
         appMacro.sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(shortcut), .key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]
         appMacro.activationShortcut = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
         try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], requiresGlobalHotkey: true, onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
-        try renderEditor(ExplorerHoldLayerEditor(layer: editorLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 498, height: 570))
-        print("Macro and HUD layer native UI passed: editor renders, app-restricted direct launch, unknown-target rejection and sequence labels. No real events posted.")
+        try renderEditor(HUDLayerHotkeyEditor(store: store, layer: editorLayer, settings: store.settings.appExplorer!,
+            onSave: { _, _ in true }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 560, height: 720))
+        print("Macro and HUD layer native UI passed: unified keyboard/tap editor renders, global direct launch, unknown-target rejection and sequence labels. No real events posted.")
         print("Hotkey UI rendered saved actions, tap assignments, audit, exact-hotkey search and keyboard map; no actual shortcuts sent.")
     }
 }

@@ -379,9 +379,10 @@ private final class CalibrationPoster: GestureEventPosting {
             f.store.settings.appExplorer?.holdLayers?[0].appBundleID = "restricted.editor"
             f.hid.foregroundAppChanged("other.app")
             f.hid.openHUDLayer(layer.id, fromKeyboard: true)
-            precondition(!f.explorer.isVisible && f.explorer.layerShows.count == 1)
+            precondition(f.explorer.isVisible && f.explorer.layerShows.count == 2,
+                "Legacy app restrictions must not prevent a global HUD launch")
         }
-        print("Direct HUD-layer HID handoff and app restriction passed")
+        print("Direct HUD-layer HID handoff and global launch migration passed")
         check { f in
             var taps = f.store.activeGestures
             taps.oneFingerTap = .appExplorer

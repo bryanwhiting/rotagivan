@@ -219,7 +219,7 @@ private struct LayerActionValueMenu: View {
             if !hudLayers.isEmpty {
                 Section("HUD layers") {
                     ForEach(hudLayers) { layer in
-                        Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) {
+                        Button(layer.name) {
                             shortcut = .hudLayer(layer)
                             action = .shortcut
                         }

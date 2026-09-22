@@ -118,9 +118,9 @@ struct HotkeyAudit {
         let explorer = settings.appExplorer ?? AppExplorerSettings()
         for layer in explorer.holdLayers ?? [] {
             if let key = layer.launchShortcut {
-                assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: layer.appName ?? "All apps", trigger: "Open HUD layer: \(layer.name)",
+                assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: "Global keyboard hotkeys", trigger: "Open HUD layer: \(layer.name)",
                     action: dictionary.title(for: key), shortcut: key, enabled: settings.enabled,
-                    precedence: layer.appBundleID.map { "Registered only while \($0) is frontmost" } ?? "Global HUD launcher", inputScope: "", application: layer.appBundleID))
+                    precedence: "Global HUD launcher", inputScope: ""))
             }
         }
         func layers(_ values: [ExplorerHoldLayer], path: String, depth: Int, active: Bool) {
@@ -199,35 +199,5 @@ struct HotkeyAudit {
                     detail: "Used by " + outputs.map { $0.scope + " / " + $0.trigger }.joined(separator: "; ") + ". Reusing an output shortcut is allowed; it is not a hotkey-registration conflict."))
             }
         }
-    }
-}
-
-extension AppGestureTrigger {
-    func assignment(in taps: ProfileGestures) -> (binding: AppGestureBinding, enabled: Bool) {
-        var action: TapAction = .none
-        var shortcut: RecordedShortcut?
-        var enabled = taps.gestures.tapToClick
-        switch self {
-        case .oneFingerTap: action = taps.oneFingerTap; shortcut = taps.oneFingerShortcut
-        case .twoFingerTap: action = taps.twoFingerTap; shortcut = taps.twoFingerShortcut
-        case .oneFingerDoubleTap: action = taps.oneFingerDoubleTap ?? .none; shortcut = taps.oneFingerDoubleShortcut
-        case .twoFingerDoubleTap: action = taps.twoFingerDoubleTap ?? .none; shortcut = taps.twoFingerDoubleShortcut
-        case .oneFingerTripleTap: action = taps.oneFingerTripleTap ?? .none; shortcut = taps.oneFingerTripleShortcut
-        case .twoFingerTripleTap: action = taps.twoFingerTripleTap ?? .none; shortcut = taps.twoFingerTripleShortcut
-        default:
-            let swipe: DoubleTapSwipeSettings?
-            switch rawValue.split(separator: ".").first {
-            case "single": swipe = taps.singleTapSwipe
-            case "double": swipe = taps.doubleTapSwipe
-            case "twoSingle": swipe = taps.twoFingerSingleTapSwipe
-            case "twoDouble": swipe = taps.twoFingerDoubleTapSwipe
-            default: swipe = taps.twoFingerSwipe; enabled = true // Navigation does not require tap-to-click.
-            }
-            if let swipe, let direction {
-                action = swipe.action(for: direction); shortcut = swipe[direction]
-                enabled = enabled && swipe.enabled
-            } else { enabled = false }
-        }
-        return (AppGestureBinding(trigger: self, action: action, shortcut: shortcut), enabled && action != .none)
     }
 }

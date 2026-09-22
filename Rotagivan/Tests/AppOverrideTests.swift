@@ -53,6 +53,37 @@ import CoreGraphics
         precondition(!layer.setLayerAction(.rightClick, shortcut: nil, for: .twoDoubleDown),
             "Swipe rows only accept actions supported by their persisted schema")
 
+
+        let targetHUD = ExplorerHoldLayer.empty(name: "Research")
+        let otherHUD = ExplorerHoldLayer.empty(name: "Utilities")
+        var assigned = StoredSettings()
+        var assignedProfile = assigned.effectiveGestures(for: 1)
+        assignedProfile.gestures.tapToClick = true
+        _ = assignedProfile.setLayerAction(.leftClick, shortcut: nil, for: .oneFingerTap)
+        _ = assignedProfile.setLayerAction(.shortcut, shortcut: .hudLayer(otherHUD), for: .oneFingerDoubleTap)
+        _ = assignedProfile.setLayerAction(.shortcut, shortcut: .hudLayer(targetHUD), for: .oneFingerTripleTap)
+        assigned.profileGestures = [1: assignedProfile]
+        assigned.updateHUDLayerTapAssignments([
+            HUDTapAssignmentScope(profileID: 1, device: .navigator): [.oneFingerTap, .twoFingerDoubleTap]
+        ], for: targetHUD)
+        let updatedProfile = assigned.gestures(for: 1)
+        precondition(updatedProfile.oneFingerTap == .shortcut && updatedProfile.oneFingerShortcut?.hudLayerID == targetHUD.id)
+        precondition(updatedProfile.twoFingerDoubleTap == .shortcut && updatedProfile.twoFingerDoubleShortcut?.hudLayerID == targetHUD.id)
+        precondition(updatedProfile.oneFingerDoubleShortcut?.hudLayerID == otherHUD.id,
+            "Assigning a HUD tap hotkey must preserve unrelated Layer actions")
+        precondition(updatedProfile.oneFingerTripleTap == TapAction.none && updatedProfile.oneFingerTripleShortcut == nil,
+            "Removing this HUD layer's tap hotkey must clear only that assignment")
+
+        var separateDevices = assigned.resolvedDevices
+        separateDevices.shareTapActions = false
+        assigned.devices = separateDevices
+        assigned.updateHUDLayerTapAssignments([
+            HUDTapAssignmentScope(profileID: 1, device: .apple): [.twoFingerTap]
+        ], for: targetHUD)
+        let appleProfile = assigned.devices?.appleLayerGestures?[1]
+        precondition(appleProfile?.twoFingerShortcut?.hudLayerID == targetHUD.id)
+        precondition(assigned.gestures(for: 1).twoFingerShortcut?.hudLayerID != targetHUD.id,
+            "Separate Apple tap hotkeys must not overwrite Navigator assignments")
         let settings = chrome.twoFingerSwipe!
         let t = Date(timeIntervalSince1970:1000)
         func report(_ dx:Double=0, _ dy:Double=0, count:Int=2) -> TrackpadReport {

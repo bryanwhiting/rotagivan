@@ -327,7 +327,7 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var launchShortcut: RecordedShortcut? = nil
     var appBundleID: String? = nil
     var appName: String? = nil
-    func isAvailable(in bundleID: String?) -> Bool { appBundleID == nil || appBundleID == bundleID }
+    func isAvailable(in _: String?) -> Bool { true }
     // Old Window Manager layers generated their slots from windowLayout.
     // True distinguishes a deliberately empty custom grid from a legacy preset.
     var windowTilesConfigured: Bool? = nil

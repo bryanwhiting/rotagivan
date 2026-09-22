@@ -261,9 +261,6 @@ final class HotKeyManager {
             return noErr
         }
         InstallEventHandler(GetApplicationEventTarget(), callback, eventTypes.count, &eventTypes, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification).sink { [weak self] _ in
-            MainActor.assumeIsolated { if self?.hudLayers.contains(where: { $0.appBundleID != nil }) == true { self?.registerActions() } }
-        }.store(in: &recordingObservers)
 
         observation = ShortcutSettings.shared.$normal.combineLatest(ShortcutSettings.shared.$precision, ShortcutSettings.shared.$additional)
             .sink { [weak self] normal, precision, additional in

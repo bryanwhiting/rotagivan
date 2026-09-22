@@ -941,7 +941,7 @@ struct AppExplorerView: View {
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(canGoBack ? "Back to parent group" : "Close \(model.directWindowManager ? "Window Manager" : "App Explorer")")
+                                    .accessibilityLabel(canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "App Explorer")")
                             }
                         }
                     }
@@ -990,7 +990,7 @@ struct AppExplorerView: View {
     private var quickActionsFooter: some View {
         HStack(spacing: 4) {
             Text("Press")
-            footerKey("E", help: "Quick edit favorites and groups", identifier: "explorer-quick-edit", action: onEdit)
+            footerKey("E", help: "Quick edit tiles and HUD layers", identifier: "explorer-quick-edit", action: onEdit)
             Text("to quick edit, or")
             footerKey("S", help: "Open App Explorer settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")
@@ -1066,7 +1066,7 @@ struct AppExplorerView: View {
             .buttonStyle(.plain)
             .position(center)
             .help(canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")
-            .accessibilityLabel("\(canGoBack ? "Back to parent group" : "Close App Explorer"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+            .accessibilityLabel("\(canGoBack ? "Back to previous HUD layer" : "Close App Explorer"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
         }
         .frame(width: 418, height: 310)
         .animation(feedback, value: names)
@@ -1170,7 +1170,7 @@ struct AppExplorerView: View {
                     if let shortcut = entry.shortcut {
                         if !entry.name.hasSuffix("(\(shortcut.readableCombination))") { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     }
-                    else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "Explorer group").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "HUD layer").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
                     else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil && entry.command == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
                 } else {

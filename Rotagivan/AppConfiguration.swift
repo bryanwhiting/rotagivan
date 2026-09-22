@@ -83,7 +83,7 @@ struct AppConfiguration: Codable {
         } else if activeConfigurationID != nil { throw ConfigurationError("The active profile has no profile library.") }
         if let explorer = settings.appExplorer {
             guard explorer.hasValidFavorites else {
-                throw ConfigurationError("App Explorer needs named apps, web URLs, or groups with unique directions: at most eight slots per group, four group levels, and 256 entries total. URLs must be HTTP(S) without embedded credentials.")
+                throw ConfigurationError("App Explorer needs named apps, web URLs, or HUD layers with unique directions: up to 16 slots per layer, four nested layers, and 256 entries total. URLs must be HTTP(S) without embedded credentials.")
             }
         }
         let apps = settings.appOverrides ?? []

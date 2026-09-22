@@ -723,14 +723,14 @@ struct ExplorerTileTransfer: Identifiable {
         let sourceTile = source + [.group(slot)]
         let destinationTile = destination + [.group(target)]
         guard !destination.starts(with: sourceTile), !source.starts(with: destinationTile) else {
-            return "A group cannot be moved or copied into itself, or swapped with an enclosing group."
+            return "A HUD layer cannot be moved or copied into itself, or swapped with an enclosing HUD layer."
         }
         let displaced = container.favorites.first { $0.direction == target }
         guard !copy || displaced == nil else { return "Choose an empty slot for a copy. Move swaps occupied slots without deleting either tile." }
         var next = settings
         guard next.writeTile(moving, at: target, container: destination),
               copy || next.writeTile(displaced, at: slot, container: source), next.hasValidFavorites else {
-            return "This would exceed the group-depth, tile, or custom-layer limits. Nothing was changed."
+            return "This would exceed the nested HUD-layer, tile, or custom-layer limits. Nothing was changed."
         }
         settings = next
         return nil
@@ -1186,6 +1186,44 @@ struct ProfileGestures: Codable, Equatable {
     var twoFingerTripleTap: TapAction? = nil
     var oneFingerTripleShortcut: RecordedShortcut? = nil
     var twoFingerTripleShortcut: RecordedShortcut? = nil
+
+    /// Assigns one of the discrete tap gestures to an action reference. HUD
+    /// layers and macros use the same portable RecordedShortcut representation.
+    /// Swipe assignments keep their existing direction-specific editor.
+    @discardableResult mutating func assignTapShortcut(_ shortcut: RecordedShortcut,
+                                                        to trigger: AppGestureTrigger) -> Bool {
+        gestures.tapToClick = true
+        switch trigger {
+        case .oneFingerTap:
+            oneFingerTap = .shortcut; oneFingerShortcut = shortcut
+        case .twoFingerTap:
+            twoFingerTap = .shortcut; twoFingerShortcut = shortcut
+        case .oneFingerDoubleTap:
+            oneFingerDoubleTap = .shortcut; oneFingerDoubleShortcut = shortcut
+        case .twoFingerDoubleTap:
+            twoFingerDoubleTap = .shortcut; twoFingerDoubleShortcut = shortcut
+        case .oneFingerTripleTap:
+            oneFingerTripleTap = .shortcut; oneFingerTripleShortcut = shortcut
+        case .twoFingerTripleTap:
+            twoFingerTripleTap = .shortcut; twoFingerTripleShortcut = shortcut
+        default:
+            return false
+        }
+        return true
+    }
+    func tapTriggers(targetingHUDLayer id: UUID) -> [AppGestureTrigger] {
+        let candidates: [(AppGestureTrigger, RecordedShortcut?)] = [
+            (.oneFingerTap, oneFingerShortcut),
+            (.oneFingerDoubleTap, oneFingerDoubleShortcut),
+            (.oneFingerTripleTap, oneFingerTripleShortcut),
+            (.twoFingerTap, twoFingerShortcut),
+            (.twoFingerDoubleTap, twoFingerDoubleShortcut),
+            (.twoFingerTripleTap, twoFingerTripleShortcut)
+        ]
+        return candidates.compactMap { trigger, shortcut in
+            shortcut?.hudLayerID == id ? trigger : nil
+        }
+    }
 }
 
 struct AdditionalProfile: Codable, Identifiable {

@@ -93,7 +93,7 @@ struct ContentView: View {
                     .accessibilityIdentifier("rename-profile")
                 Button { switchProfile(nil) } label: { Label("Add Profile", systemImage: "plus") }
                     .disabled(store.configurationProfiles.count >= 20)
-                    .help("Copy this profile, including every layer and Explorer group")
+                    .help("Copy this profile, including every action layer and HUD layer")
             }
             .padding(.horizontal, 22).padding(.vertical, 16)
             Divider()

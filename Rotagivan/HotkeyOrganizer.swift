@@ -188,7 +188,7 @@ struct HotkeyAudit {
             let localGroups = Dictionary(grouping: inputs.filter { $0.inputScope != "" }, by: { $0.inputScope! })
             for (scope, local) in localGroups.sorted(by: { $0.key < $1.key }) where local.count > 1 || !globals.isEmpty {
                 findings.append(Finding(id: "local.\(scope).\(identity)", kind: .caution, title: title + " · " + scope,
-                    detail: "Overlapping HUD controls: " + (globals + local).map(\.trigger).joined(separator: ", ") + ". Check precedence while this HUD group is open."))
+                    detail: "Overlapping HUD controls: " + (globals + local).map(\.trigger).joined(separator: ", ") + ". Check precedence while this HUD layer is open."))
             }
             if !globals.isEmpty && !outputs.isEmpty {
                 findings.append(Finding(id: "interception." + identity, kind: .caution, title: title,

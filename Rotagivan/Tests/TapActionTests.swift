@@ -262,6 +262,21 @@ struct TapActionTests {
         precondition(tripleRestored.effectiveGestures(for: 2).oneFingerTripleTap == .tripleLeftClick)
         precondition(tripleRestored.effectiveGestures(for: 100).twoFingerTripleShortcut == primary.twoFingerTripleShortcut)
         precondition(!TapAction.tripleLeftClick.supportsTapAndHoldDrag)
+        let hudLayer = ExplorerHoldLayer.empty(name: "Tools")
+        let hudShortcut = RecordedShortcut.hudLayer(hudLayer)
+        var assigned = primary
+        let tapTriggers: [AppGestureTrigger] = [
+            .oneFingerTap, .oneFingerDoubleTap, .oneFingerTripleTap,
+            .twoFingerTap, .twoFingerDoubleTap, .twoFingerTripleTap
+        ]
+        for trigger in tapTriggers {
+            precondition(assigned.assignTapShortcut(hudShortcut, to: trigger))
+        }
+        precondition(Set(assigned.tapTriggers(targetingHUDLayer: hudLayer.id)) == Set(tapTriggers))
+        precondition(assigned.gestures.tapToClick)
+        precondition(!assigned.assignTapShortcut(hudShortcut, to: .singleLeft),
+            "Directional swipes stay in their distance-aware editor")
+        print("Direct HUD-layer tap assignment passed for all six tap rhythms.")
         print("Triple taps passed: one/two fingers, single-tap triple click, no extra clicks, single/double fallbacks, timeout, cancellation, drag, persistence and inheritance.")
     }
 }

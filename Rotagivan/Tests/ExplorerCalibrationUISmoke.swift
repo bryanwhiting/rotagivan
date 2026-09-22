@@ -230,9 +230,22 @@ import SwiftUI
             ]),
             AppExplorerFavorite(direction: .up, name: "Empty group", children: [])
         ]), at: .left)
+        let researchLayer = ExplorerHoldLayer(name: "Research",
+            holdShortcut: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17"),
+            favorites: [AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari")],
+            activation: .hold,
+            launchShortcut: RecordedShortcut(keyCode: 46, modifiers: (1 << 20) | (1 << 17), keyLabel: "M"))
+        var layerRailSettings = settings
+        layerRailSettings.holdLayers = [researchLayer]
+        store.settings.appExplorer = layerRailSettings
+        let originalGestures = store.settings.gestures(for: store.defaultProfileID)
+        var previewGestures = originalGestures
+        precondition(previewGestures.assignTapShortcut(.hudLayer(researchLayer), to: .oneFingerDoubleTap))
+        store.updateGestures(previewGestures, for: store.defaultProfileID)
+        try render(AppExplorerSettingsView(store: store).padding(24).frame(width: 680, height: 760, alignment: .top)
+            .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 760), path: CommandLine.arguments[1] + "/hud-layer-rail.png")
+        store.updateGestures(originalGestures, for: store.defaultProfileID)
         store.settings.appExplorer = settings
-        try render(AppExplorerSettingsView(store: store).padding(24).frame(width: 680, height: 600)
-            .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 600), path: CommandLine.arguments[1] + "/group-settings.png")
         try render(AppExplorerSettingsView(store: store, groupPath: [.left]).padding(24).frame(width: 680, height: 600)
             .background(Color(nsColor: .windowBackgroundColor)), size: CGSize(width: 680, height: 600), path: CommandLine.arguments[1] + "/inside-group-settings.png")
         try render(ExplorerGroupNameEditor(name: "Work", isNew: false, onSave: { _ in }, onCancel: {}),

@@ -12,9 +12,9 @@ struct HUDSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             AppExplorerSettingsView(store: store)
-            GroupBox("Reserved Groups") {
+            GroupBox("Built-in HUD layers") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Built-in groups, always available from any tile’s ••• → Reserved Groups menu.")
+                    Text("Ready-made HUD layers, available from every tile’s HUD Layers menu.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         ForEach(ExplorerReservedGroup.allCases) { group in
@@ -33,7 +33,7 @@ struct HUDSettingsView: View {
                     Spacer()
                     Button("Done") { selectedGroup = nil }.keyboardShortcut(.cancelAction)
                 }
-                Text("Reserved Groups · \(group.summary)").font(.callout).foregroundStyle(.secondary)
+                Text("Built-in HUD layer · \(group.summary)").font(.callout).foregroundStyle(.secondary)
                 ScrollView {
                     if group == .windowManager { WindowManagerSettingsView(store: store) }
                     else { ReservedGroupPreview(group: group) }
@@ -47,9 +47,9 @@ struct ReservedGroupPreview: View {
     let group: ExplorerReservedGroup
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Assign this group to a tile using ••• → Reserved Groups → \(group.title).")
+            Text("Assign this HUD layer to a tile using HUD Layers → \(group.title).")
             if group == .actions {
-                Text("Each added Actions group starts with these shortcuts. Edit or rearrange its tiles independently. Commands go to the app you were using before opening the HUD; support varies by app.")
+                Text("Each Actions layer starts with these shortcuts. Edit or rearrange its tiles independently. Commands go to the app you were using before opening the HUD; support varies by app.")
                     .font(.caption).foregroundStyle(.secondary)
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
                     ForEach(group.tile(at: .up).children ?? [], id: \.direction) { tile in
@@ -64,8 +64,8 @@ struct ReservedGroupPreview: View {
                     }
                 }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             } else {
-                Text("This group fills itself with running apps. The most recent app starts on the left, followed by the top-left, then clockwise. The current app is excluded. Tap the center to return to the parent group.")
-                Text("Its contents update on this Mac. Add it anywhere in your HUD, including inside another group; edit the assigned group to change its capacity or name.")
+                Text("This HUD layer fills itself with running apps. The most recent app starts on the left, followed by the top-left, then clockwise. The current app is excluded. Tap the center to return to the previous layer.")
+                Text("Its contents update on this Mac. Assign it from any tile, then edit that HUD layer to change its capacity or name.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -87,13 +87,13 @@ struct WindowManagerSettingsView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Customize this group like App Explorer. Each tile can place the window, run a command, or open another group. Drag tiles to rearrange them; use layers for alternate layouts.")
+            Text("Customize this HUD layer like App Explorer. Each tile can place the window, run a command, or open another HUD layer. Drag tiles to rearrange them; use the layer rail for alternate layouts.")
                 .font(.callout).foregroundStyle(.secondary)
             AppExplorerSettingsView(store: store, configurationOverride: Binding(get: {
                 explorer.windowEditor()
             }, set: { updated in
                 var next = explorer
-                guard next.saveWindowEditor(updated) else { error = "This group exceeds the nesting or tile limits."; return }
+                guard next.saveWindowEditor(updated) else { error = "This HUD layer exceeds the nesting or tile limits."; return }
                 store.settings.appExplorer = next; error = nil
             }), scopeTitle: "Window Manager", windowManagerOnly: true, windowApplet: true)
             Divider()
@@ -119,6 +119,12 @@ struct WindowManagerSettingsView: View {
     }
 }
 
+private struct HUDLayerActivationSource: Hashable {
+    let symbol: String
+    let title: String
+    let detail: String
+}
+
 struct AppExplorerSettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var editingURLPath: [ExplorerSlot]?
@@ -126,6 +132,7 @@ struct AppExplorerSettingsView: View {
     @State private var selectedLayerID: UUID?
     @State private var editingLayer: ExplorerHoldLayer?
     @State private var creatingLayer = false
+    @State private var editingTapLayer: ExplorerHoldLayer?
     @State private var removingLayer = false
     @State private var editingTileLayers: [ExplorerSlot]?
     @State private var tileLayerSnapshot: AppExplorerFavorite?
@@ -175,6 +182,175 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
         })
     }
+    private var canAssignDirectTap: Bool {
+        configurationOverride == nil && !windowManagerOnly
+    }
+
+    private func activationSources(for layer: ExplorerHoldLayer?) -> [HUDLayerActivationSource] {
+        guard let layer else {
+            return [HUDLayerActivationSource(symbol: "sparkles", title: "Opens first",
+                detail: "The default App Explorer layer")]
+        }
+        var sources: [HUDLayerActivationSource] = []
+        let appScope = layer.appName.map { " · \($0) only" } ?? ""
+        if let shortcut = layer.holdShortcut {
+            let behavior = (layer.activation ?? .hold) == .hold ? "Hold" : "Tap to toggle"
+            sources.append(HUDLayerActivationSource(symbol: "keyboard",
+                title: "\(behavior) \(shortcut.readableCombination)",
+                detail: "While this HUD is open\(appScope)"))
+        }
+        if let shortcut = layer.launchShortcut {
+            sources.append(HUDLayerActivationSource(symbol: "command",
+                title: shortcut.readableCombination,
+                detail: "Global hotkey\(appScope)"))
+        }
+        if canAssignDirectTap {
+            let customProfiles = store.settings.customTapProfiles ?? []
+            for profile in store.profiles where
+                profile.id == store.defaultProfileID || customProfiles.contains(profile.id) {
+                let shared = store.settings.gestures(for: profile.id)
+                let appleOverride = store.settings.devices?.appleLayerGestures?[profile.id]
+                if store.settings.resolvedDevices.shareTapActions || appleOverride == nil {
+                    for trigger in shared.tapTriggers(targetingHUDLayer: layer.id) {
+                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
+                            title: trigger.title, detail: "\(profile.name) · both trackpads"))
+                    }
+                } else {
+                    for trigger in shared.tapTriggers(targetingHUDLayer: layer.id) {
+                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
+                            title: trigger.title, detail: "\(profile.name) · ZSA Navigator"))
+                    }
+                    for trigger in appleOverride!.tapTriggers(targetingHUDLayer: layer.id) {
+                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
+                            title: trigger.title, detail: "\(profile.name) · Apple trackpad override"))
+                    }
+                }
+            }
+            for app in store.settings.resolvedAppOverrides where app.enabled {
+                for binding in app.bindings where binding.shortcut?.hudLayerID == layer.id {
+                    sources.append(HUDLayerActivationSource(symbol: "app.badge",
+                        title: binding.trigger.title, detail: "\(app.name) app override"))
+                }
+            }
+            for container in baseSettings.tileContainers(rootTitle: "Default HUD layer") {
+                for tile in container.favorites where tile.shortcut?.hudLayerID == layer.id {
+                    sources.append(HUDLayerActivationSource(symbol: "arrow.turn.down.right",
+                        title: "\(tile.direction.title) · \(tile.name)", detail: container.title))
+                }
+            }
+        }
+        var seen = Set<HUDLayerActivationSource>()
+        let unique = sources.filter { seen.insert($0).inserted }
+        return unique.isEmpty
+            ? [HUDLayerActivationSource(symbol: "exclamationmark.circle", title: "No activation assigned",
+                detail: "Add a hotkey or tap action")]
+            : unique
+    }
+
+    private func hudLayerCard(_ layer: ExplorerHoldLayer?, index: Int) -> some View {
+        let layerID = layer?.id
+        let selected = selectedLayerID == layerID
+        let sources = activationSources(for: layer)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                selectedLayerID = layerID
+                groupPath = []
+            } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(String(format: "%02d", index + 1))
+                            .font(.caption2.monospacedDigit().weight(.bold))
+                            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                        Text(layer?.name ?? "Default")
+                            .font(.headline).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if selected {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(Array(sources.prefix(3)), id: \.self) { source in
+                            HStack(alignment: .top, spacing: 7) {
+                                Image(systemName: source.symbol)
+                                    .frame(width: 14).foregroundStyle(Color.accentColor)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(source.title).font(.caption.weight(.semibold)).lineLimit(1)
+                                    Text(source.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                        }
+                        if sources.count > 3 {
+                            Text("+\(sources.count - 3) more activation sources")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+                .padding(13).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if let layer {
+                Divider()
+                HStack(spacing: 12) {
+                    Button("Edit triggers") {
+                        creatingLayer = false
+                        editingLayer = layer
+                    }
+                    if canAssignDirectTap {
+                        Button("Assign tap") { editingTapLayer = layer }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.caption).buttonStyle(.link).padding(.horizontal, 13).frame(height: 32)
+            } else {
+                Divider()
+                HStack {
+                    Label("Base layer", systemImage: "pin.fill")
+                    Spacer(minLength: 0)
+                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 13).frame(height: 32)
+            }
+        }
+        .frame(width: 220)
+        .background(selected ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.035),
+                    in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(selected ? Color.accentColor.opacity(0.72) : Color.primary.opacity(0.1),
+                              lineWidth: selected ? 1.5 : 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(layerID.map { "hud-layer-\($0.uuidString)" } ?? "hud-layer-default")
+    }
+
+    private var hudLayerRail: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HUD layers").font(.headline)
+                    Text("Select a layer to edit its tiles. Each card shows exactly what opens it and where that assignment comes from.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    creatingLayer = true
+                    editingLayer = .empty()
+                } label: {
+                    Label("Add HUD layer", systemImage: "plus")
+                }
+                .disabled((baseSettings.holdLayers ?? []).count >= 16 ||
+                    (scopeTitle != nil && baseSettings.holdLayers == nil))
+            }
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 10) {
+                    hudLayerCard(nil, index: 0)
+                    ForEach(Array((baseSettings.holdLayers ?? []).enumerated()), id: \.element.id) { index, layer in
+                        hudLayerCard(layer, index: index + 1)
+                    }
+                }.padding(.vertical, 2)
+            }
+        }
+    }
+
     var compact = false
     var onGroupPathChange: (([ExplorerSlot]) -> Void)? = nil
 
@@ -204,7 +380,7 @@ struct AppExplorerSettingsView: View {
                 Text(windowApplet ? "These layers belong to Window Manager. Hold a key temporarily, or tap a toggle key to switch tiles until you close the applet." : "These keys work only inside this tile. Hold temporarily or tap to toggle; leaving the tile returns to its default.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !windowApplet && !windowManagerOnly {
-                Toggle("Use tile-specific layers", isOn: Binding(get: { baseSettings.holdLayers != nil }, set: { custom in
+                Toggle("Use local HUD layers", isOn: Binding(get: { baseSettings.holdLayers != nil }, set: { custom in
                     if !custom && !(baseSettings.holdLayers ?? []).isEmpty { inheritTileLayers = true; return }
                     var next = baseSettings; next.holdLayers = custom ? [] : nil
                     saveBase(next); selectedLayerID = nil
@@ -215,7 +391,7 @@ struct AppExplorerSettingsView: View {
                 }
                 }
             }
-            if !compact && selectedLayerID == nil && scopeTitle == nil {
+            if !compact && scopeTitle == nil {
                 HStack {
                     Label("HUD layout", systemImage: "safari").font(.headline)
                     Spacer()
@@ -228,39 +404,44 @@ struct AppExplorerSettingsView: View {
                     } label: { Label("Options", systemImage: "slider.horizontal.3") }.fixedSize()
                 }
             }
-            HStack {
-                if compact && scopeTitle == nil {
-                    Menu {
-                        Picker("Theme", selection: themeBinding) {
-                            ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-                        }
-                        Toggle("Animate HUD feedback", isOn: animationBinding)
-                        Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
-                    } label: { Image(systemName: "paintpalette") }
-                        .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
-                }
-                Picker(windowApplet ? "Window layer" : scopeTitle == nil ? "Explorer-wide layer" : "Tile layer", selection: $selectedLayerID) {
-                    Text("Default").tag(nil as UUID?)
-                    ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
-                }
-                Button("Add layer") {
-                    creatingLayer = true
-                    editingLayer = .empty()
-                }.disabled((baseSettings.holdLayers ?? []).count >= 16 || (scopeTitle != nil && baseSettings.holdLayers == nil))
-                if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
-                    Button("Edit…") { creatingLayer = false; editingLayer = layer }
-                    Button("Remove", role: .destructive) { removingLayer = true }
-                }
-            }.font(.subheadline)
+            if compact {
+                HStack {
+                    if scopeTitle == nil {
+                        Menu {
+                            Picker("Theme", selection: themeBinding) {
+                                ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
+                            }
+                            Toggle("Animate HUD feedback", isOn: animationBinding)
+                            Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
+                        } label: { Image(systemName: "paintpalette") }
+                            .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
+                    }
+                    Picker("HUD layer", selection: $selectedLayerID) {
+                        Text("Default").tag(nil as UUID?)
+                        ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
+                    }
+                    Button("Add HUD layer") {
+                        creatingLayer = true
+                        editingLayer = .empty()
+                    }.disabled((baseSettings.holdLayers ?? []).count >= 16 ||
+                        (scopeTitle != nil && baseSettings.holdLayers == nil))
+                    if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
+                        Button("Edit triggers…") { creatingLayer = false; editingLayer = layer }
+                        Button("Remove", role: .destructive) { removingLayer = true }
+                    }
+                }.font(.subheadline)
+            } else {
+                hudLayerRail
+            }
             if scopeTitle == nil && compact {
-                Text("For keys that apply to just one group or Window Manager, use that tile’s ••• → Tile layers…")
+                Text("For activation keys limited to one HUD layer or Window Manager, open that tile’s editor and choose Edit HUD layers.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if windowManagerOnly {
                 Text("Slot direction and window position are independent. Use ••• → Window management → Resize window to assign any position and size.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Picker("Slots in this group / layer", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
+            Picker("Slots in this HUD layer", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                 var next = settings
                 guard next.resize(to: count, at: groupPath) else {
                     groupError = "Remove some tiles before choosing fewer slots. Your existing tiles have been kept."; return
@@ -269,10 +450,11 @@ struct AppExplorerSettingsView: View {
             })) { ForEach([4, 8, 12, 16], id: \.self) { Text("\($0)").tag($0) } }
                 .pickerStyle(.segmented)
             HStack(spacing: 5) {
-                Button("Favorites") { groupPath = [] }.buttonStyle(.link)
+                Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? "Default") { groupPath = [] }
+                    .buttonStyle(.link)
                 ForEach(groupPath.indices, id: \.self) { index in
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                    Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "Group") {
+                    Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD layer") {
                         groupPath = Array(groupPath.prefix(index + 1))
                     }.buttonStyle(.link).lineLimit(1)
                 }
@@ -282,7 +464,7 @@ struct AppExplorerSettingsView: View {
                 }
             }.font(.subheadline.weight(.medium))
             if !groupPath.isEmpty {
-                Picker("Group contents", selection: Binding(get: {
+                Picker("HUD layer contents", selection: Binding(get: {
                     settings.favorite(at: groupPath)?.groupMode ?? .favorites
                 }, set: { mode in
                     guard let direction = groupPath.last, var group = settings.favorite(at: groupPath) else { return }
@@ -331,7 +513,7 @@ struct AppExplorerSettingsView: View {
                                     VStack(spacing: 5) {
                                         Image(systemName: groupPath.isEmpty ? "safari" : "arrow.uturn.backward")
                                             .font(.largeTitle).foregroundStyle(.teal)
-                                        Text(groupPath.isEmpty ? "Favorites" : "Back").font(.caption)
+                                        Text(groupPath.isEmpty ? (baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? "Default") : "Back").font(.caption)
                                     }.frame(maxWidth: .infinity).frame(height: 88).contentShape(Rectangle())
                                 }.buttonStyle(.plain).disabled(groupPath.isEmpty)
                             }
@@ -345,7 +527,7 @@ struct AppExplorerSettingsView: View {
             }
             Text(isRecentGroup
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
-                : "Click a tile to edit it right there. Drag tiles to move or swap. Use Other actions → Move or copy… to move a whole group between layers. Preview clicks never launch apps or run actions.")
+                : "Click a tile to edit it right there. Drag to rearrange, or choose Send to HUD layer to move it across layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .overlay(alignment: .bottomLeading) {
@@ -355,7 +537,7 @@ struct AppExplorerSettingsView: View {
             ExplorerTileTransferEditor(transfer: transfer, onSave: { destination, slot, copy in
                 var next = transferSettings
                 if let error = transfer.apply(to: destination, slot: slot, copy: copy, settings: &next) { return error }
-                guard commitTransfer(next) else { return "The configuration changed or could not be saved. Reopen Move or copy." }
+                guard commitTransfer(next) else { return "The configuration changed or could not be saved. Reopen Send to HUD layer." }
                 tileTransfer = nil
                 return nil
             }, onCancel: { tileTransfer = nil })
@@ -401,8 +583,13 @@ struct AppExplorerSettingsView: View {
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
             }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly)
         }
-        .confirmationDialog("Remove this Explorer layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
-            Button("Remove layer", role: .destructive) {
+        .sheet(item: $editingTapLayer) { layer in
+            HUDLayerTapAssignmentEditor(store: store, layer: layer) {
+                editingTapLayer = nil
+            }
+        }
+        .confirmationDialog("Remove this HUD layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
+            Button("Remove HUD layer", role: .destructive) {
                 var next = baseSettings
                 next.holdLayers?.removeAll { $0.id == selectedLayerID }
                 saveBase(next)
@@ -414,7 +601,7 @@ struct AppExplorerSettingsView: View {
                 ExplorerDestinationPicker(direction: direction, onSave: { favorite, application in
                     var next = settings
                     guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
-                        groupError = "The destination group changed. Reopen the picker and try again."
+                        groupError = "The destination HUD layer changed. Reopen the picker and try again."
                         editingApplicationPath = nil
                         return
                     }
@@ -432,7 +619,7 @@ struct AppExplorerSettingsView: View {
                     shortcut: favorite?.shortcut, onSave: { favorite in
                         var next = settings
                         guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
-                            groupError = "The destination group changed. Reopen the shortcut editor and try again."
+                            groupError = "The destination HUD layer changed. Reopen the shortcut editor and try again."
                             editingShortcutPath = nil
                             return
                         }
@@ -463,7 +650,7 @@ struct AppExplorerSettingsView: View {
                             ?? AppExplorerFavorite(direction: direction, name: name, children: [])
                         group.name = name
                         guard next.setFavorite(group, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
-                            groupError = "Groups support four levels and 256 total favorites. The parent group must still exist."
+                            groupError = "HUD layers support four nested levels and 256 total tiles. The parent layer must still exist."
                             editingGroupPath = nil
                             return
                         }
@@ -473,8 +660,8 @@ struct AppExplorerSettingsView: View {
                     }, onCancel: { editingGroupPath = nil })
             }
         }
-        .confirmationDialog("Remove this group and all its favorites?", isPresented: Binding(get: { removingGroupPath != nil }, set: { if !$0 { removingGroupPath = nil } }), titleVisibility: .visible) {
-            Button("Remove group", role: .destructive) {
+        .confirmationDialog("Remove this HUD layer and all its tiles?", isPresented: Binding(get: { removingGroupPath != nil }, set: { if !$0 { removingGroupPath = nil } }), titleVisibility: .visible) {
+            Button("Remove HUD layer", role: .destructive) {
                 if let path = removingGroupPath, let direction = path.last {
                     edit { $0.setFavorite(nil, at: direction, in: Array(path.dropLast())) }
                 }
@@ -504,51 +691,215 @@ struct AppExplorerSettingsView: View {
     }
 
     private func tilePopover(_ direction: ExplorerSlot) -> AnyView {
-        let path = groupPath
-        let owner = selectedLayerID
         let favorite = favorites.first { $0.direction == direction }
         return AnyView(VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(favorite?.name ?? "Empty tile").font(.headline).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit \(direction.title) tile").font(.headline)
+                    Text(favorite == nil ? "Choose what this tile does" : "Replace or manage its current action")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Menu("Other actions") {
-                    assignmentMenu(direction, favorite: favorite)
-                    if favorite != nil {
-                        Divider()
-                        Button("Move or copy…") {
-                            tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
+                Button { previewEditing = nil } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .help("Close tile editor")
+            }
+            .padding(16)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                if let favorite {
+                    HStack(spacing: 10) {
+                        tileAssignmentIcon(favorite)
+                            .frame(width: 26, height: 26)
+                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(favorite.name).fontWeight(.medium).lineLimit(1)
+                            Text("Current assignment").font(.caption).foregroundStyle(.secondary)
                         }
-                        Menu("Move or swap with") {
-                            ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
-                                Button(target.title) {
-                                    edit { $0.swapFavorites(from: direction, to: target, in: groupPath) }
-                                    previewEditing = nil
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
+                }
+
+                Text("ACTIONS")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Menu {
+                        Button("Choose app…", systemImage: "app") {
+                            editingApplicationPath = groupPath + [direction]
+                        }
+                        Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") {
+                            editingURLPath = groupPath + [direction]
+                        }
+                        if let favorite, favorite.bundleID != nil {
+                            Divider()
+                            Toggle("Show this app’s windows", isOn: Binding(get: {
+                                favorite.showsWindows == true
+                            }, set: { enabled in
+                                var updated = favorite
+                                updated.showsWindows = enabled
+                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                            }))
+                        }
+                    } label: {
+                        ExplorerTileActionLabel(title: "Apps & websites", detail: "Launch an app or URL", systemImage: "app.badge", showsMenu: true)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        editingShortcutPath = groupPath + [direction]
+                    } label: {
+                        ExplorerTileActionLabel(title: "Keyboard & macros", detail: "Keys, shortcuts, sequences", systemImage: "keyboard")
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                }
+
+                HStack(spacing: 10) {
+                    Menu {
+                        ForEach(ExplorerReservedGroup.allCases) { group in
+                            Button(group.title, systemImage: group.symbol) {
+                                let tile = group.tile(at: direction, insideWindowManager: windowManagerOnly)
+                                edit { $0.setFavorite(tile, at: direction, in: groupPath) }
+                                previewEditing = nil
+                            }
+                            .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth &&
+                                (group != .windowManager || windowManagerOnly))
+                        }
+                        Divider()
+                        Button("Create HUD layer…", systemImage: "square.3.layers.3d") {
+                            editingGroupPath = groupPath + [direction]
+                        }
+                        .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+                    } label: {
+                        ExplorerTileActionLabel(title: "HUD layers", detail: "Open or create another layer", systemImage: "square.3.layers.3d", showsMenu: true)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: .infinity)
+
+                    Menu {
+                        Menu("Resize window") {
+                            windowActionButton(.maximize, at: direction, closeEditor: true)
+                            Divider()
+                            ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
+                                Menu(layout.title) {
+                                    ForEach(SwipeDirection.allCases, id: \.self) { placementDirection in
+                                        let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
+                                        Button(placement.title) {
+                                            edit {
+                                                $0.setFavorite(AppExplorerFavorite(direction: direction, name: placement.title,
+                                                    windowPlacement: placement), at: direction, in: groupPath)
+                                            }
+                                            previewEditing = nil
+                                        }
+                                    }
                                 }
                             }
                         }
+                        Menu("Full screen") {
+                            windowActionButton(.toggleFullScreen, at: direction, closeEditor: true)
+                            windowActionButton(.exitFullScreen, at: direction, closeEditor: true)
+                        }
+                        Divider()
+                        windowActionButton(.appWindows, at: direction, closeEditor: true)
+                        windowActionButton(.minimize, at: direction, closeEditor: true)
+                        windowActionButton(.closeWindow, at: direction, closeEditor: true)
+                    } label: {
+                        ExplorerTileActionLabel(title: "Window management", detail: "Move, resize, full screen", systemImage: "macwindow", showsMenu: true)
                     }
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: .infinity)
                 }
-                Button { previewEditing = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).help("Close tile editor")
-            }.padding(16)
-            if favorite?.isGroup == true || favorite?.isWindowManager == true {
-                slot(direction, editingPreview: true).padding(16)
-            } else {
-                ExplorerDestinationPicker(direction: direction, onSave: { destination, application in
-                    guard groupPath == path, selectedLayerID == owner else { previewEditing = nil; return }
-                    var next = settings
-                    guard next.setFavorite(destination, at: direction, in: path), next.hasValidFavorites, save(next) else {
-                        groupError = "The group changed. Reopen the tile to try again."; previewEditing = nil; return
+
+                Button {
+                    edit {
+                        $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls",
+                            action: .mediaControls), at: direction, in: groupPath)
                     }
-                    if let application { ExplorerApplicationCatalog.remember(application) }
-                    groupError = nil; previewEditing = nil
-                }, onCancel: { previewEditing = nil })
+                    previewEditing = nil
+                } label: {
+                    ExplorerTileActionLabel(title: "Media controls", detail: "Playback and volume controls",
+                        systemImage: "speaker.wave.2.fill", compact: true)
+                }
+                .buttonStyle(.plain)
+
                 if favorite != nil {
-                    Button("Remove tile", role: .destructive) {
-                        edit { $0.setFavorite(nil, at: direction, in: path) }; previewEditing = nil
-                    }.padding([.horizontal, .bottom], 16)
+                    Divider().padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let favorite, favorite.isGroup {
+                            HStack(spacing: 12) {
+                                Button(favorite.isWindowManager ? "Edit Window Manager…" : "Edit HUD layer…") {
+                                    if favorite.isWindowManager {
+                                        tileLayerSnapshot = favorite
+                                        tileLayerOwnerID = selectedLayerID
+                                        editingTileLayers = groupPath + [direction]
+                                    } else {
+                                        groupPath.append(direction)
+                                        previewEditing = nil
+                                    }
+                                }
+                                Button("Rename…") { editingGroupPath = groupPath + [direction] }
+                            }
+                        } else if let favorite, favorite.supportsHoldLayers {
+                            Button("Edit HUD layers…") {
+                                tileLayerSnapshot = favorite
+                                tileLayerOwnerID = selectedLayerID
+                                editingTileLayers = groupPath + [direction]
+                            }
+                        }
+                        HStack(spacing: 14) {
+                            Button("Send to HUD layer…") {
+                                tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
+                            }
+                            Menu("Move within this layer") {
+                                ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
+                                    Button(target.title) {
+                                        edit { $0.swapFavorites(from: direction, to: target, in: groupPath) }
+                                        previewEditing = nil
+                                    }
+                                }
+                            }
+                            Spacer()
+                            Button("Remove tile", role: .destructive) {
+                                edit { $0.setFavorite(nil, at: direction, in: groupPath) }
+                                previewEditing = nil
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .controlSize(.small)
                 }
             }
-        }.frame(width: 540))
+            .padding(16)
+        }
+        .frame(width: 560))
+    }
+
+    @ViewBuilder private func tileAssignmentIcon(_ favorite: AppExplorerFavorite) -> some View {
+        if let icon = Self.applicationIcon(for: favorite) {
+            Image(nsImage: icon).resizable().renderingMode(.original).scaledToFit().padding(5)
+        } else if let action = favorite.action {
+            Image(systemName: action.symbol).foregroundStyle(.teal)
+        } else if favorite.shortcut != nil {
+            Image(systemName: "keyboard").foregroundStyle(.teal)
+        } else if favorite.windowPlacement != nil {
+            Image(systemName: "macwindow").foregroundStyle(.teal)
+        } else if favorite.isWindowManager {
+            Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal)
+        } else {
+            Image(systemName: favorite.isRecentGroup ? "clock.arrow.circlepath" :
+                (favorite.isGroup ? "folder.fill" : (favorite.url != nil ? "globe" : "app")))
+                .foregroundStyle(.teal)
+        }
     }
 
     private func slot(_ direction: ExplorerSlot, editingPreview: Bool = false) -> some View {
@@ -560,7 +911,7 @@ struct AppExplorerSettingsView: View {
                 Spacer(minLength: 4)
                 Menu {
                     if let favorite, favorite.supportsHoldLayers {
-                        Button(favorite.isWindowManager ? "Edit Window Manager group…" : "Tile layers…") {
+                        Button(favorite.isWindowManager ? "Edit Window Manager layer…" : "Edit HUD layers…") {
                             tileLayerSnapshot = favorite
                             tileLayerOwnerID = selectedLayerID
                             editingTileLayers = groupPath + [direction]
@@ -568,17 +919,17 @@ struct AppExplorerSettingsView: View {
                         Divider()
                     }
                     if favorite?.isGroup == true {
-                        if favorite?.isWindowManager != true { Button("Edit group…") { groupPath.append(direction) } }
-                        Button("Rename group…") { editingGroupPath = groupPath + [direction] }
+                        if favorite?.isWindowManager != true { Button("Edit HUD layer…") { groupPath.append(direction) } }
+                        Button("Rename HUD layer…") { editingGroupPath = groupPath + [direction] }
                     } else {
                         assignmentMenu(direction, favorite: favorite)
                     }
                     if favorite != nil {
                         Divider()
-                        Button("Move or copy…") {
+                        Button("Send to HUD layer…") {
                             tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
                         }
-                        Menu("Move or swap with") {
+                        Menu("Move within this layer") {
                             ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
                                 Button(target.title) { edit { $0.swapFavorites(from: direction, to: target, in: groupPath) } }
                             }
@@ -635,7 +986,7 @@ struct AppExplorerSettingsView: View {
             if favorite != nil {
                 HStack(spacing: 12) {
                     if favorite?.isGroup == true {
-                        Button("Edit group") {
+                        Button("Edit HUD layer") {
                             if let favorite, favorite.isWindowManager {
                                 tileLayerSnapshot = favorite
                                 tileLayerOwnerID = selectedLayerID
@@ -686,8 +1037,8 @@ struct AppExplorerSettingsView: View {
                     edit { $0.setFavorite(tile, at: direction, in: groupPath) }
                 }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth && (group != .windowManager || windowManagerOnly))
             }
-        } label: { Label("Reserved Groups", systemImage: "square.stack.3d.up") }
-        Button("Create tile group…", systemImage: "folder.badge.plus") { editingGroupPath = groupPath + [direction] }
+        } label: { Label("Built-in HUD layers", systemImage: "square.stack.3d.up") }
+        Button("Create HUD layer…", systemImage: "square.3.layers.3d") { editingGroupPath = groupPath + [direction] }
             .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
         Divider()
         Menu {
@@ -720,9 +1071,10 @@ struct AppExplorerSettingsView: View {
         }
     }
 
-    private func windowActionButton(_ action: AppExplorerAction, at direction: ExplorerSlot) -> some View {
+    private func windowActionButton(_ action: AppExplorerAction, at direction: ExplorerSlot, closeEditor: Bool = false) -> some View {
         Button(action.title, systemImage: action.symbol) {
             edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: action.title, action: action), at: direction, in: groupPath) }
+            if closeEditor { previewEditing = nil }
         }
     }
 
@@ -784,7 +1136,7 @@ struct AppExplorerSettingsView: View {
         }, set: { updated in
             guard tileLayerOwnerID == selectedLayerID, let expected = tileLayerSnapshot,
                   var tile = settings.favorite(at: path), tile == expected, let direction = path.last else {
-                groupError = "This tile changed or moved while editing. Reopen its Tile layers editor."
+                groupError = "This tile changed or moved while editing. Reopen its HUD layer editor."
                 editingTileLayers = nil
                 return
             }
@@ -804,7 +1156,7 @@ struct AppExplorerSettingsView: View {
 
     private func edit(_ update: (inout AppExplorerSettings) -> Void) {
         var next = settings; update(&next)
-        guard next.hasValidFavorites else { groupError = "Use the selected slot count, at most four group levels, and 256 total favorites."; return }
+        guard next.hasValidFavorites else { groupError = "Use the selected slot count, at most four nested HUD layers, and 256 total tiles."; return }
         _ = save(next)
     }
 
@@ -830,6 +1182,42 @@ struct AppExplorerSettingsView: View {
         let icon = NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage
         icon?.size = NSSize(width: 16, height: 16)
         return icon
+    }
+}
+
+/// Gives first-click tile actions equal visual weight while keeping native menu behavior.
+private struct ExplorerTileActionLabel: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    var compact = false
+    var showsMenu = false
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: showsMenu ? "chevron.down" : "arrow.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: compact ? 52 : 62, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.primary.opacity(0.09))
+        }
     }
 }
 
@@ -861,15 +1249,15 @@ struct ExplorerTileTransferEditor: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Move or copy \(transfer.favorite?.name ?? "tile")", systemImage: "square.on.square")
+            Label("Send \(transfer.favorite?.name ?? "tile") to a HUD layer", systemImage: "square.on.square")
                 .font(.title2.weight(.semibold))
-            Text("All nested tiles, group layouts, and custom layers travel together.")
+            Text("The tile and any HUD layers beneath it travel together.")
                 .font(.callout).foregroundStyle(.secondary)
             Picker("Operation", selection: $copy) {
                 Text("Move / swap").tag(false)
                 Text("Copy").tag(true)
             }.pickerStyle(.segmented).labelsHidden()
-            Picker("To layer / group", selection: $destination) {
+            Picker("Destination HUD layer", selection: $destination) {
                 ForEach(containers) { container in Text(container.title).tag(container.id) }
             }.accessibilityIdentifier("explorer-transfer-container")
             ScrollView {
@@ -1080,14 +1468,14 @@ struct ExplorerGroupNameEditor: View {
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(isNew ? "New Explorer group" : "Rename Explorer group", systemImage: "folder.fill").font(.headline)
-            TextField("Group name", text: $name).textFieldStyle(.roundedBorder)
-            Text("Name this group. Its contents can be assigned favorites or automatically filled recent apps.")
+            Label(isNew ? "New HUD layer" : "Rename HUD layer", systemImage: "square.3.layers.3d").font(.headline)
+            TextField("HUD layer name", text: $name).textFieldStyle(.roundedBorder)
+            Text("Name this HUD layer. Its tiles can be assigned actions or automatically filled with recent apps.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(isNew ? "Create group" : "Save") { onSave(trimmedName) }
+                Button(isNew ? "Create HUD layer" : "Save") { onSave(trimmedName) }
                     .keyboardShortcut(.defaultAction).disabled(trimmedName.isEmpty || trimmedName.count > 512)
             }
         }.padding(24).frame(width: 400).background(Color(nsColor: .windowBackgroundColor))

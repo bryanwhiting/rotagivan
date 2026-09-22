@@ -176,7 +176,7 @@ struct HotkeyOrganizerView: View {
 
     private func findings(_ audit: HotkeyAudit) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Auditing the selected layer/device, its app rules, global launch hotkeys, and every HUD group.")
+            Text("Auditing the selected layer/device, its app rules, global launch hotkeys, and every HUD layer.")
                 .font(.caption).foregroundStyle(.secondary)
             let visible = audit.findings.filter { finding in
                 textMatches(finding.title + " " + finding.detail) &&

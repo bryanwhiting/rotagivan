@@ -38,7 +38,7 @@ import SwiftUI
             fatalError("Tile actions must be backed by a native macOS menu")
         }
         let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-        for title in ["Keybindings and Macros", "App launches", "Built-in HUD layers", "Create HUD layer…", "Window management", "Media controls"] {
+        for title in ["Keybindings and Macros", "App launches", "Built-in HUD layers", "Create HUD layer…", "Window management", "Mac commands", "Media controls"] {
             precondition(titles.contains(title), "Missing action category: \(title)")
         }
         func submenu(_ title: String, in menu: NSMenu) -> NSMenu {
@@ -47,6 +47,7 @@ import SwiftUI
             return result
         }
         let windows = submenu("Window management", in: menu)
+        let macCommands = submenu("Mac commands", in: menu)
         let reserved = submenu("Built-in HUD layers", in: menu)
         precondition(reserved.items.map(\.title) == ExplorerReservedGroup.allCases.map(\.title))
         let resize = submenu("Resize window", in: windows)
@@ -58,9 +59,13 @@ import SwiftUI
         let fullScreen = submenu("Full screen", in: windows)
         precondition(fullScreen.items.contains { $0.title == "Toggle full screen" })
         precondition(fullScreen.items.contains { $0.title == "Exit full screen" })
-        for action in [AppExplorerAction.appWindows, .minimize, .closeWindow] {
+        for action in [AppExplorerAction.minimize, .closeWindow] {
             precondition(windows.items.contains { $0.title == action.title })
         }
+        precondition(macCommands.items.filter { !$0.isSeparatorItem }.map(\.title) == AppExplorerAction.macOSCommands.map(\.title))
+        macCommands.performActionForItem(at: macCommands.items.firstIndex { $0.title == "Mission Control" }!)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(store.settings.appExplorer?.favorites.first?.action == .missionControl)
         precondition(submenu("App launches", in: menu).items.contains { $0.title == "Open URL…" })
         precondition(submenu("Keybindings and Macros", in: menu).items.contains { $0.title == "Assign macro or keystroke…" })
         // Selecting a menu entry configures a tile; it must not act on a real window.
@@ -77,6 +82,6 @@ import SwiftUI
         let actions = store.settings.appExplorer!.favorites.first!
         precondition(actions.name == "Actions" && actions.children?.count == 8)
         precondition(actions.children?.first { $0.name == "Copy" }?.shortcut?.keyCode == 8)
-        print("Native action menus passed: built-in HUD layer assignment, all 32 resize placements, full-screen/window commands, URL/keybinding choices, and assignment without executing the action.")
+        print("Native action menus passed: built-in HUD layer assignment, all 32 resize placements, full-screen/window and Mac commands, URL/keybinding choices, and assignment without executing the action.")
     }
 }

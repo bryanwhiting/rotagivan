@@ -77,6 +77,16 @@ import Foundation
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", children: [], shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", action: .windowManager, shortcut: chord).isValidDestination)
+        precondition(AppExplorerAction.macOSCommands == [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop])
+        precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: nil) == RecordedShortcut(keyCode: 126,
+            modifiers: UInt64(1 << 18), keyLabel: "Up Arrow"))
+        let customized: [String: Any] = ["32": ["enabled": NSNumber(value: true), "value": ["parameters": [
+            NSNumber(value: 105), NSNumber(value: 34), NSNumber(value: 917_504)
+        ]]]]
+        precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: customized) == RecordedShortcut(
+            keyCode: 34, modifiers: 917_504, keyLabel: "Mission Control"))
+        precondition(AppExplorerAction.showDesktop.resolvedMacOSShortcut(symbolicHotKeys: nil)?.keyCode == 103)
+        precondition(AppExplorerAction.appWindows.macOSShortcut == nil, "App windows uses Rotagivan's window picker")
         print("Explorer shortcut destinations passed: nested persistence, swaps, invalid keys/modifiers/labels and mixed-type rejection.")
         try testSlotSwaps()
         var settings = AppExplorerSettings()

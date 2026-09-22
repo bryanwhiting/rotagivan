@@ -50,6 +50,10 @@ extension AppExplorerPresenting {
     var listWindows: (pid_t) -> [WindowTiling.AppWindow] = { WindowTiling.windows(pid: $0) }
     private var baseGroupPath: [ExplorerSlot] = []
     var performMedia: (ExplorerMediaAction) -> Void = { ExplorerMediaAction.perform($0) }
+    var performMacCommand: (AppExplorerAction) -> Void = { action in
+        guard let shortcut = action.macOSShortcut else { return }
+        EventPoster().performTap(.shortcut, shortcut: shortcut)
+    }
     private(set) var groupPath: [ExplorerSlot] = []
     private var contactIsDown = false
     private var selectionGeneration: UInt64 = 0
@@ -472,6 +476,19 @@ extension AppExplorerPresenting {
             windowList = pid.map(listWindows) ?? []; windowPage = 0
             model.showingAppWindows = true
             refreshGroup(); return
+        }
+        if let command = entry?.command, command.macOSShortcut != nil {
+            let originalPID = sourcePID
+            dismiss()
+            let generation = selectionGeneration
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.selectionGeneration == generation,
+                          self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
+                    self.performMacCommand(command)
+                }
+            }
+            return
         }
         if let command = entry?.command { performWindowCommand(command); return }
         if let media = entry?.mediaAction {

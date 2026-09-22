@@ -178,6 +178,14 @@ import SwiftUI
             controller.show(waitingForLift: false); swipe(.up)
             precondition(commands.last == command && !controller.isVisible)
         }
-        print("Explorer applets UI passed: every 4/8/12/16 slot, group toggle/repeat/back, Window Manager fourths and maximize, fullscreen exit-only safety, paged window activation and close/minimize dispatch. No real windows modified.")
+        var macCommands: [AppExplorerAction] = []
+        controller.performMacCommand = { macCommands.append($0) }
+        for command in [AppExplorerAction.missionControl, .previousDesktop, .nextDesktop, .showDesktop] {
+            store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: command.title, action: command)])
+            controller.show(waitingForLift: false); swipe(.up)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            precondition(macCommands.last == command && !controller.isVisible)
+        }
+        print("Explorer applets UI passed: every 4/8/12/16 slot, group toggle/repeat/back, Window Manager fourths and maximize, fullscreen exit-only safety, paged window activation, window commands, and macOS desktop command dispatch. No real windows modified.")
     }
 }

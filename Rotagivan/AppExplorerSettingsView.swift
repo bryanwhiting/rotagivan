@@ -811,7 +811,6 @@ struct AppExplorerSettingsView: View {
                             windowActionButton(.exitFullScreen, at: direction, closeEditor: true)
                         }
                         Divider()
-                        windowActionButton(.appWindows, at: direction, closeEditor: true)
                         windowActionButton(.minimize, at: direction, closeEditor: true)
                         windowActionButton(.closeWindow, at: direction, closeEditor: true)
                     } label: {
@@ -821,17 +820,31 @@ struct AppExplorerSettingsView: View {
                     .frame(maxWidth: .infinity)
                 }
 
-                Button {
-                    edit {
-                        $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls",
-                            action: .mediaControls), at: direction, in: groupPath)
+                HStack(spacing: 10) {
+                    Menu {
+                        ForEach(AppExplorerAction.macOSCommands, id: \.self) { action in
+                            windowActionButton(action, at: direction, closeEditor: true)
+                        }
+                    } label: {
+                        ExplorerTileActionLabel(title: "Mac commands", detail: "Mission Control, desktops, app windows",
+                            systemImage: "macbook", showsMenu: true)
                     }
-                    previewEditing = nil
-                } label: {
-                    ExplorerTileActionLabel(title: "Media controls", detail: "Playback and volume controls",
-                        systemImage: "speaker.wave.2.fill", compact: true)
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        edit {
+                            $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls",
+                                action: .mediaControls), at: direction, in: groupPath)
+                        }
+                        previewEditing = nil
+                    } label: {
+                        ExplorerTileActionLabel(title: "Media controls", detail: "Playback and volume controls",
+                            systemImage: "speaker.wave.2.fill", compact: true)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
 
                 if favorite != nil {
                     Divider().padding(.top, 2)
@@ -1065,10 +1078,14 @@ struct AppExplorerSettingsView: View {
                 windowActionButton(.exitFullScreen, at: direction)
             }
             Divider()
-            windowActionButton(.appWindows, at: direction)
             windowActionButton(.minimize, at: direction)
             windowActionButton(.closeWindow, at: direction)
         } label: { Label("Window management", systemImage: "macwindow") }
+        Menu {
+            ForEach(AppExplorerAction.macOSCommands, id: \.self) { action in
+                windowActionButton(action, at: direction)
+            }
+        } label: { Label("Mac commands", systemImage: "macbook") }
         Button("Media controls", systemImage: "speaker.wave.2.fill") {
             edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls), at: direction, in: groupPath) }
         }

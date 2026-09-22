@@ -168,12 +168,17 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
-    case windowManager, mediaControls, appWindows, maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
+    case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop
+    case maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
     var title: String {
         switch self {
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
-        case .appWindows: return "Show app windows"
+        case .appWindows: return "Show current app’s windows"
+        case .missionControl: return "Mission Control"
+        case .previousDesktop: return "Previous desktop"
+        case .nextDesktop: return "Next desktop"
+        case .showDesktop: return "Show Desktop"
         case .maximize: return "Fill desktop"
         case .toggleFullScreen: return "Toggle full screen"
         case .exitFullScreen: return "Exit full screen"
@@ -186,6 +191,10 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .windowManager: return "rectangle.split.2x2"
         case .mediaControls: return "speaker.wave.2.fill"
         case .appWindows: return "macwindow.on.rectangle"
+        case .missionControl: return "rectangle.3.group"
+        case .previousDesktop: return "arrow.left.square"
+        case .nextDesktop: return "arrow.right.square"
+        case .showDesktop: return "menubar.dock.rectangle"
         case .maximize: return "arrow.up.left.and.arrow.down.right"
         case .toggleFullScreen: return "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
         case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
@@ -194,6 +203,44 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         }
     }
     static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
+    static let macOSCommands: [Self] = [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop]
+    /// Uses the current System Settings shortcut when present, then the macOS default.
+    /// App windows uses Rotagivan's accessible window picker instead.
+    var macOSShortcut: RecordedShortcut? {
+        resolvedMacOSShortcut(symbolicHotKeys: Self.symbolicHotKeys())
+    }
+    func resolvedMacOSShortcut(symbolicHotKeys: [String: Any]?) -> RecordedShortcut? {
+        let ids: [Int]
+        switch self {
+        case .missionControl: ids = [32, 34]
+        case .previousDesktop: ids = [79, 80]
+        case .nextDesktop: ids = [81, 82]
+        case .showDesktop: ids = [36, 37]
+        default: return nil
+        }
+        for id in ids {
+            guard let entry = symbolicHotKeys?[String(id)] as? [String: Any],
+                  (entry["enabled"] as? NSNumber)?.boolValue == true,
+                  let value = entry["value"] as? [String: Any],
+                  let parameters = value["parameters"] as? [NSNumber], parameters.count >= 3 else { continue }
+            let keyCode = UInt16(truncating: parameters[1])
+            let modifiers = UInt64(truncating: parameters[2])
+            let shortcut = RecordedShortcut(keyCode: keyCode, modifiers: modifiers, keyLabel: title)
+            if shortcut.isPhysicalShortcut { return shortcut }
+        }
+        let control = UInt64(1 << 18)
+        switch self {
+        case .missionControl: return RecordedShortcut(keyCode: 126, modifiers: control, keyLabel: "Up Arrow")
+        case .previousDesktop: return RecordedShortcut(keyCode: 123, modifiers: control, keyLabel: "Left Arrow")
+        case .nextDesktop: return RecordedShortcut(keyCode: 124, modifiers: control, keyLabel: "Right Arrow")
+        case .showDesktop: return RecordedShortcut(keyCode: 103, modifiers: 0, keyLabel: "F11")
+        default: return nil
+        }
+    }
+    private static func symbolicHotKeys() -> [String: Any]? {
+        CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString,
+                                  "com.apple.symbolichotkeys" as CFString) as? [String: Any]
+    }
 }
 
 /// Explorer geometry is independent of the eight physical swipe bindings.

@@ -57,6 +57,17 @@ struct ConfigurationTests {
         var invalidMacro = macroConfig; invalidMacro.settings.hotkeyDictionary?[0].steps = [.macro(macro)]
         do { try invalidMacro.validate(); fatalError("Accepted recursive macro") } catch { print("Rejected recursive macro") }
         print("Macro/HUD YAML passed: ordered steps, delays, stable action references, app-scoped layer launchers and legacy import")
+        var appMacroConfig = macroConfig
+        appMacroConfig.settings.hotkeyDictionary?[0].steps = nil
+        appMacroConfig.settings.hotkeyDictionary?[0].sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(firstStep)]
+        let appMacroYAML = try appMacroConfig.yaml()
+        let appMacroRoundtrip = try AppConfiguration.parse(appMacroYAML)
+        precondition(tryEqual(appMacroConfig, appMacroRoundtrip))
+        rejected(appMacroYAML.replacingOccurrences(of: "kind: openApp", with: "kind: shellCommand"), "unknown macro step")
+        var badAppMacro = appMacroConfig
+        badAppMacro.settings.hotkeyDictionary?[0].sequence?[0].bundleID = "file:///tmp/script"
+        do { try badAppMacro.validate(); fatalError("Accepted executable path as app step") } catch { print("Rejected non-app macro target") }
+        print("Open-app macro YAML passed: typed sequence, portable bundle ID, validation and roundtrip")
         var namedConfig = factory
         let namedKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         namedConfig.settings.hotkeyDictionary = [NamedHotkey(name: "Copy selection", shortcut: namedKey)]

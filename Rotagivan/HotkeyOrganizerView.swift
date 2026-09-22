@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HotkeyOrganizerView: View {
     @ObservedObject var store: SettingsStore
@@ -19,7 +20,7 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Build reusable macros: key combinations sent one after another. Review conflicts and app overrides for bindings configured in Rotagivan.")
+            Text("Build reusable macros: open apps and send key combinations in order. Review conflicts and app overrides for bindings configured in Rotagivan.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("View", selection: $tab) {
                 Text("Macros").tag("Dictionary")
@@ -76,7 +77,7 @@ struct HotkeyOrganizerView: View {
             Text("Assign a macro from an action’s ••• menu in layers, app overrides, or HUD tiles. Editing its sequence updates every macro assignment. Macros travel with YAML/sync; creating one does not register a global hotkey.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if store.settings.resolvedHotkeyDictionary.isEmpty {
-                Label("No macros yet. Add a named sequence of keystrokes.", systemImage: "book.closed")
+                Label("No macros yet. Add a named sequence of app and keystroke steps.", systemImage: "book.closed")
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             ForEach(store.settings.resolvedHotkeyDictionary.filter { matches($0.name + " " + $0.summary) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
@@ -131,9 +132,19 @@ struct NamedHotkeyEditor: View {
     var onSave: (NamedHotkey) -> Void
     var onCancel: () -> Void
     @State private var action: TapAction = .shortcut
-    private func updateSteps(_ steps: [RecordedShortcut]) {
-        entry.steps = steps
-        if let first = steps.first { entry.shortcut = first }
+    private func updateSteps(_ steps: [MacroStep]) {
+        entry.sequence = steps; entry.steps = nil
+        if let first = steps.compactMap(\.shortcut).first { entry.shortcut = first }
+    }
+    private func chooseApp(replacing index: Int? = nil) {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications"); panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url, let app = ExplorerApplicationCatalog.application(at: url) else { return }
+        var steps = entry.resolvedSequence
+        let step = MacroStep.app(bundleID: app.bundleID, name: app.name)
+        if let index, steps.indices.contains(index) { steps[index] = step }
+        else if steps.count < 32 { steps.append(step) }
+        updateSteps(steps)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -141,28 +152,39 @@ struct NamedHotkeyEditor: View {
             TextField("Macro name", text: $entry.name).textFieldStyle(.roundedBorder)
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(Array(entry.resolvedSteps.indices), id: \.self) { index in
+                    ForEach(Array(entry.resolvedSequence.indices), id: \.self) { index in
                         HStack {
+                            if entry.resolvedSequence[index].kind == .openApp {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Step \(index + 1) · Open app").foregroundStyle(.secondary)
+                                    Button(entry.resolvedSequence[index].appName ?? "Choose app…") { chooseApp(replacing: index) }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            } else {
                             TapActionEditor(title: "Step \(index + 1)", action: $action, shortcut: Binding(get: {
-                                entry.resolvedSteps.indices.contains(index) ? entry.resolvedSteps[index] : nil
+                                entry.resolvedSequence.indices.contains(index) ? entry.resolvedSequence[index].shortcut : nil
                             }, set: { value in
-                                guard let value, value.isPhysicalShortcut, entry.resolvedSteps.indices.contains(index) else { return }
-                                var steps = entry.resolvedSteps; steps[index] = value; updateSteps(steps)
+                                guard let value, value.isPhysicalShortcut, entry.resolvedSequence.indices.contains(index) else { return }
+                                var steps = entry.resolvedSequence; steps[index] = .key(value); updateSteps(steps)
                             }), keyboardOnly: true, physicalKeysOnly: true)
-                            Button { var steps = entry.resolvedSteps; steps.swapAt(index, index - 1); updateSteps(steps) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).help("Move step earlier")
-                            Button { var steps = entry.resolvedSteps; steps.remove(at: index); updateSteps(steps) } label: { Image(systemName: "minus.circle") }.disabled(entry.resolvedSteps.count == 1).help("Remove step")
+                            }
+                            Button { var steps = entry.resolvedSequence; steps.swapAt(index, index - 1); updateSteps(steps) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).help("Move step earlier")
+                            Button { var steps = entry.resolvedSequence; steps.remove(at: index); updateSteps(steps) } label: { Image(systemName: "minus.circle") }.disabled(entry.resolvedSequence.count == 1).help("Remove step")
                         }
                     }
                 }
-            }.frame(height: min(320, CGFloat(entry.resolvedSteps.count) * 66))
-            Button("Add keystroke") { updateSteps(entry.resolvedSteps + [RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return")]) }.disabled(entry.resolvedSteps.count >= 32)
+            }.frame(height: min(320, CGFloat(entry.resolvedSequence.count) * 66))
+            HStack {
+                Button("Add keystroke") { updateSteps(entry.resolvedSequence + [.key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]) }
+                Button("Add open app…") { chooseApp() }
+            }.disabled(entry.resolvedSequence.count >= 32)
             Stepper("Delay between steps: \(entry.resolvedDelay) ms", value: Binding(get: { entry.resolvedDelay }, set: { entry.stepDelayMilliseconds = $0 }), in: 0...2000, step: 25)
-            Text("Up to 32 combinations, in order. Each is fully released before the next. Playback stops if the frontmost app changes. Existing plain-shortcut assignments retain their original keys; choose this macro from the action menu to link them.")
+            Text("Up to 32 steps. Open app launches or activates it before the next keystroke. The delay also gives the app time to prepare. If opening fails or focus changes unexpectedly, playback stops. Move steps with ↑ to set their order.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); updateSteps(entry.resolvedSteps); onSave(entry) }
+                Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); updateSteps(entry.resolvedSequence); onSave(entry) }
                     .keyboardShortcut(.defaultAction).disabled(!entry.isValid)
             }
         }.padding(24).frame(width: 560)

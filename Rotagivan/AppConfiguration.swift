@@ -69,7 +69,7 @@ struct AppConfiguration: Codable {
 
     func validate() throws {
         guard settings.resolvedHotkeyDictionary.isValidDictionary else {
-            throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 physical keystrokes, and a 0–2000 ms step delay (maximum 500 macros).")
+            throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 keystroke or open-app steps, and a 0–2000 ms step delay (maximum 500 macros).")
         }
         if let profiles {
             guard !profiles.isEmpty, profiles.count <= 20, Set(profiles.map(\.id)).count == profiles.count,
@@ -197,7 +197,8 @@ private indirect enum ConfigurationValue: Codable {
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
             case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
-            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds"
+            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence"
+            case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts favorites slotCount"

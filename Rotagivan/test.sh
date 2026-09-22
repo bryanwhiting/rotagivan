@@ -23,7 +23,7 @@ for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
   "$test_dir/$test"
 done
 for test in ClickTests ParagraphSelectionTests; do
-  xcrun swiftc "${common[@]}" Rotagivan/EventPoster.swift "Rotagivan/Tests/$test.swift" \
+  xcrun swiftc "${common[@]}" Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift "Rotagivan/Tests/$test.swift" \
     -framework AppKit -framework CoreGraphics -o "$test_dir/$test"
   "$test_dir/$test"
 done
@@ -39,15 +39,15 @@ xcrun swiftc Rotagivan/TrackpadReport.swift Rotagivan/TrackpadDistance.swift Rot
 "$test_dir/AppleTrackpadInputTests"
 xcrun swiftc Rotagivan/TrackpadDistance.swift Rotagivan/Tests/TrackpadDistanceTests.swift -o "$test_dir/TrackpadDistanceTests"
 "$test_dir/TrackpadDistanceTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/DoubleTapSwipeTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/DoubleTapSwipeTests"
 "$test_dir/DoubleTapSwipeTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/TwoFingerTapSwipeTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/TwoFingerTapSwipeTests"
 "$test_dir/TwoFingerTapSwipeTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/NativeTrackpadGestureTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/NativeTrackpadGestureTests"
 "$test_dir/NativeTrackpadGestureTests"
@@ -83,27 +83,30 @@ xcrun swiftc "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/MediaControls
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/DoubleTapSwipe.swift \
   Rotagivan/Tests/AppOverrideTests.swift -o "$test_dir/AppOverrideTests"
 "$test_dir/AppOverrideTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/TapActionTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/TapActionTests"
 "$test_dir/TapActionTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/MacroActionTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/MacroActionTests"
 "$test_dir/MacroActionTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift Rotagivan/Tests/MacroPlaybackTests.swift \
+  -framework AppKit -framework CoreGraphics -o "$test_dir/MacroPlaybackTests"
+"$test_dir/MacroPlaybackTests"
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/StationaryTapTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/StationaryTapTests"
 "$test_dir/StationaryTapTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/ScrollResponseIntegrationTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/ScrollResponseIntegrationTests"
 "$test_dir/ScrollResponseIntegrationTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/PointerLayerIsolationTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/PointerLayerIsolationTests"
 "$test_dir/PointerLayerIsolationTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \

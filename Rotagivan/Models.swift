@@ -907,26 +907,52 @@ struct RecordedShortcut: Codable, Equatable {
     }
 }
 
+struct MacroStep: Codable, Equatable {
+    enum Kind: String, Codable { case keystroke, openApp }
+    var kind: Kind
+    var shortcut: RecordedShortcut? = nil
+    var bundleID: String? = nil
+    var appName: String? = nil
+    static func key(_ shortcut: RecordedShortcut) -> Self { Self(kind: .keystroke, shortcut: shortcut) }
+    static func app(bundleID: String, name: String) -> Self { Self(kind: .openApp, bundleID: bundleID, appName: name) }
+    var title: String { kind == .keystroke ? shortcut?.readableCombination ?? "Missing keystroke" : "Open \(appName ?? bundleID ?? "app")" }
+    var isValid: Bool {
+        switch kind {
+        case .keystroke: return shortcut?.isPhysicalShortcut == true && bundleID == nil && appName == nil
+        case .openApp:
+            guard shortcut == nil, let bundleID, !bundleID.isEmpty, bundleID.count <= 255,
+                  bundleID != "local.rotagivan", bundleID.contains("."),
+                  bundleID.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-").contains($0) }),
+                  let appName, !appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, appName.count <= 128,
+                  !appName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return false }
+            return true
+        }
+    }
+}
+
 struct NamedHotkey: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
     var shortcut: RecordedShortcut
     var steps: [RecordedShortcut]? = nil
     var stepDelayMilliseconds: Int? = nil
+    var sequence: [MacroStep]? = nil
     var resolvedSteps: [RecordedShortcut] { steps ?? [shortcut] }
+    var resolvedSequence: [MacroStep] { sequence ?? resolvedSteps.map(MacroStep.key) }
     var resolvedDelay: Int { stepDelayMilliseconds ?? 100 }
-    var summary: String { resolvedSteps.map(\.readableCombination).joined(separator: " → ") }
+    var summary: String { resolvedSequence.map(\.title).joined(separator: " → ") }
     var isValid: Bool {
         !id.isEmpty && id.count <= 128 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isPhysicalShortcut &&
-        !resolvedSteps.isEmpty && resolvedSteps.count <= 32 && resolvedSteps.allSatisfy(\.isPhysicalShortcut) && (0...2000).contains(resolvedDelay)
+        !resolvedSequence.isEmpty && resolvedSequence.count <= 32 && resolvedSequence.allSatisfy(\.isValid) &&
+        (sequence == nil || steps == nil) && (0...2000).contains(resolvedDelay)
     }
 }
 
 extension Array where Element == NamedHotkey {
     func label(for shortcut: RecordedShortcut) -> String? {
         if let id = shortcut.macroID { return first { $0.id == id }?.name }
-        return first { $0.resolvedSteps.count == 1 && $0.shortcut.identity == shortcut.identity }?.name
+        return first { $0.resolvedSequence.count == 1 && $0.resolvedSequence.first?.shortcut?.identity == shortcut.identity }?.name
     }
     func title(for shortcut: RecordedShortcut) -> String {
         if let id = shortcut.macroID { return first { $0.id == id }.map { "\($0.name) (\($0.summary))" } ?? "Missing macro: \(shortcut.keyLabel)" }
@@ -934,7 +960,7 @@ extension Array where Element == NamedHotkey {
     }
     var isValidDictionary: Bool {
         count <= 500 && allSatisfy(\.isValid) && Set(map(\.id)).count == count &&
-        Set(filter { $0.steps == nil }.map { $0.shortcut.identity }).count == filter { $0.steps == nil }.count
+        Set(filter { $0.steps == nil && $0.sequence == nil }.map { $0.shortcut.identity }).count == filter { $0.steps == nil && $0.sequence == nil }.count
     }
 }
 

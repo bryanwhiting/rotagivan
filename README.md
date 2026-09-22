@@ -7,16 +7,28 @@ An editable, independent macOS driver and settings app for the ZSA Navigator Tra
 ### Macros and direct HUD layers
 
 The **Macros** page replaces Hotkeys. A macro is a named sequence of 1–32
-keystrokes, with a configurable 0–2000 ms delay between steps. Add, record,
-reorder, or remove steps in its editor. Playback serializes complete chords off
-the input/UI thread and stops between steps if the frontmost app changes.
+keystroke or **Open app** steps, with a configurable 0–2000 ms delay between
+steps. Add, record, reorder, or remove steps in its editor. For example:
+**Open app → Cmd+L → Cmd+V → Return**. Choose **Add open app…**, select an
+application, then use ↑ to place it before the keystrokes.
+
+Open app activates an existing instance or launches a closed app, waits for
+launch completion and stable foreground focus, and makes that app the target
+of the following keys. The step delay gives slow interfaces additional time;
+it is not an application-specific readiness check. Opening times out after
+10 seconds, and focus confirmation after 2 seconds. Failure or unexpected
+foreground changes stop playback instead of sending keys to the wrong app.
+All keyboard sequences share a serial, asynchronous playback lane; waits do
+not block the UI or trackpad input. App steps store portable bundle IDs, not
+executable paths, shell commands, or URL handlers.
 Choose **••• → Macros** in a tap/swipe action or a HUD tile's
 **Macros & keystrokes** editor. Macro references follow subsequent edits;
 existing plain-shortcut assignments retain their original keystrokes. Removing
 a referenced macro makes that action inactive, with a warning in the organizer.
 The legacy `hotkeyDictionary` YAML field is retained for import compatibility;
-entries without `steps` are one-step macros. Settings and sync include the full
-sequence and its stable ID.
+entries without `steps` or `sequence` are one-step macros, and existing
+keystroke-only `steps` are preserved. Mixed macros use typed `sequence` steps.
+Settings and sync include the full sequence and its stable ID.
 
 **HUD** is directly below **Devices**. Add/edit a top-level HUD layer to assign
 an **Open this HUD layer from anywhere** keyboard shortcut, or choose

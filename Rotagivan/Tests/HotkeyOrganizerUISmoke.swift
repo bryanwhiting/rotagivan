@@ -103,6 +103,10 @@ import SwiftUI
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
         }
         try renderEditor(NamedHotkeyEditor(entry: macro, existing: [macro], onSave: { _ in }, onCancel: {}), name: "macro-editor", size: NSSize(width: 608, height: 570))
+        var appMacro = macro
+        appMacro.steps = nil
+        appMacro.sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(shortcut), .key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]
+        try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 608, height: 570))
         try renderEditor(ExplorerHoldLayerEditor(layer: editorLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 498, height: 570))
         print("Macro and HUD layer native UI passed: editor renders, app-restricted direct launch, unknown-target rejection and sequence labels. No real events posted.")
         print("Hotkey UI rendered dictionary, audit and assignments; HUD labels follow dictionary renames/removal without rebinding. No actual shortcuts sent.")

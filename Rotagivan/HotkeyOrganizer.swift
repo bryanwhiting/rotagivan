@@ -147,7 +147,8 @@ struct HotkeyAudit {
         for row in assignments {
             if let id = row.shortcut?.macroID {
                 if let macro = dictionary.first(where: { $0.id == id }) {
-                    for (index, step) in macro.resolvedSteps.enumerated() {
+                    for (index, action) in macro.resolvedSequence.enumerated() {
+                        guard let step = action.shortcut else { continue }
                         assignments.append(Assignment(id: row.id + ".step.\(index)", scope: row.scope, trigger: "\(row.trigger) · \(macro.name) step \(index + 1)",
                             action: step.readableCombination, shortcut: step, enabled: row.enabled, precedence: row.precedence))
                     }

@@ -14,8 +14,8 @@ protocol GestureEventPosting: AnyObject {
 
 extension GestureEventPosting {
     func performMacro(_ macro: NamedHotkey) {
-        guard macro.isValid else { return }
-        for step in macro.resolvedSteps { performTap(.shortcut, shortcut: step) }
+        guard macro.isValid, macro.resolvedSequence.allSatisfy({ $0.kind == .keystroke }) else { return }
+        for step in macro.resolvedSequence { performTap(.shortcut, shortcut: step.shortcut) }
     }
     func click(count: Int) { click(button: .left, count: count) }
     func scroll(dx: Double, dy: Double) { scroll(dx: dx, dy: dy, momentum: false) }
@@ -50,7 +50,6 @@ final class EventPoster: GestureEventPosting {
 
     private var clickSequence = ClickSequence()
     private let source = CGEventSource(stateID: .hidSystemState)
-    private let shortcutQueue = DispatchQueue(label: "local.rotagivan.shortcut-output")
     private(set) var dragging = false
     // CGEvent scrolling takes integral deltas. Keep the fractional remainder
     // so low-speed kinetic scrolling does not disappear between timer ticks.
@@ -96,30 +95,19 @@ final class EventPoster: GestureEventPosting {
 
     private func postShortcut(_ shortcut: RecordedShortcut) {
         guard shortcut.isPhysicalShortcut else { return }
-        postSequence([shortcut], delay: 0)
+        postSequence([.key(shortcut)], delay: 0)
     }
 
     func performMacro(_ macro: NamedHotkey) {
         guard !dragging, macro.isValid else { return }
         clickSequence.reset()
-        postSequence(macro.resolvedSteps, delay: Double(macro.resolvedDelay) / 1000)
+        postSequence(macro.resolvedSequence, delay: Double(macro.resolvedDelay) / 1000)
     }
 
-    private func postSequence(_ steps: [RecordedShortcut], delay: TimeInterval) {
+    private func postSequence(_ steps: [MacroStep], delay: TimeInterval) {
         let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        // Serialize complete chords so rapid taps cannot interleave their modifier releases.
-        // Pace events off the main thread for listeners that track modifier transitions.
-        shortcutQueue.async {
-            for (step, shortcut) in steps.enumerated() {
-                if step > 0 { Thread.sleep(forTimeInterval: delay) }
-                guard let targetPID, targetPID == NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
-                let held = CGEventSource.flagsState(.hidSystemState)
-                let events = Self.shortcutEvents(shortcut, heldFlags: held)
-                for (index, event) in events.enumerated() {
-                    if index > 0 { Thread.sleep(forTimeInterval: event.type == .keyUp ? 0.04 : 0.012) }
-                    event.post(tap: .cghidEventTap)
-                }
-            }
+        DispatchQueue.main.async {
+            MacroPlayback.shared.enqueue(steps, delay: delay, target: targetPID)
         }
     }
 

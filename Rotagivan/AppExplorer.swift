@@ -948,9 +948,12 @@ struct AppExplorerView: View {
                 }
             }
             }
-            Text(guidance)
-                .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(3)
-                .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-7) } }
+            // Keep actionable runtime messages, but no instruction chip between
+            // the wheel and its E/S footer (including in settings previews).
+            if !isPreview, let message = model.message {
+                Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineLimit(3)
+            }
             if model.showingAppWindows {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
@@ -981,6 +984,7 @@ struct AppExplorerView: View {
             }
         }
         .transaction { if !animates { $0.animation = nil } }
+        .help(guidance)
     }
 
     private var quickActionsFooter: some View {

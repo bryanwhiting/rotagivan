@@ -123,12 +123,18 @@ without changing saved motion or gesture values. Up to 20 profiles are supported
 - **Devices:** choose Navigator, Apple actions, both, or neither for the profile.
   Apple input still requires the machine-local opt-in and permissions. This
   selection never disables macOS's own trackpad pointer or scrolling.
-- **Pointer & scrolling:** one Navigator response per top-level profile, shared
+- **Pointer & scrolling:** choose **ZSA Navigator** or **macOS Trackpad** using
+  the device picker. Navigator has one response per top-level profile, shared
   by every action layer. Changing an action layer or its default does not change
   cursor speed, scrolling, smoothing, or coasting. Use **Add Profile** for a
   different mouse setup. Existing configurations use their default layer's
   tuning until edited; old per-layer tuning remains in saved data for compatibility.
-  Dragging actions now live under **Layer actions**. Apple motion remains native.
+  **Dragging** lives here too, not in the layer columns: tap-and-hold drag,
+  re-grip timing and the keyboard-drag shortcut apply across the profile's layers.
+  Existing default-layer drag settings are the compatibility fallback; other
+  saved layer values remain intact. The macOS pane links to native Trackpad and
+  Accessibility settings. Apple's motion, scrolling and native dragging remain
+  system-managed (machine-wide), not Rotagivan profile-specific response curves.
 - **General:** complete YAML export/import and sync include all profiles and
   their shortcuts, including inactive profiles. Legacy single-configuration YAML
   imports as one Default profile. Account, permission grants, input opt-in,

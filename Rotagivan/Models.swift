@@ -25,7 +25,16 @@ struct ShortcutConfiguration: Codable {
     var actions = [ProfileShortcut(keyCode: 79), ProfileShortcut(keyCode: 80), ProfileShortcut(keyCode: 90)]
     var additional: [UInt32: ProfileShortcut] = [:]
     var profileActions: [UInt32: [ProfileShortcut]] = [:]
+    // Keyboard dragging belongs to the top-level profile. Nil preserves old
+    // configurations and resolves through the default layer's third action.
+    var dragShortcut: ProfileShortcut? = nil
     var holdToActivate = true
+
+    func resolvedDragShortcut(defaultID: UInt32) -> ProfileShortcut {
+        if let dragShortcut { return dragShortcut }
+        let legacy = profileActions[defaultID]?.count == 3 ? profileActions[defaultID]! : actions
+        return legacy.indices.contains(2) ? legacy[2] : ProfileShortcut(keyCode: 90)
+    }
 }
 
 enum GestureDevice: String, Codable, CaseIterable {
@@ -38,6 +47,26 @@ struct ProfileDevices: Codable, Equatable {
     var appleEnabled = true
     var shareTapActions = true
     var appleLayerGestures: [UInt32: ProfileGestures]? = nil
+}
+
+/// Navigator-only pointer dragging. Apple's native pointer, scrolling and
+/// dragging remain owned by macOS and are intentionally not mirrored here.
+struct DraggingSettings: Codable, Equatable {
+    var touchAndHoldDrag = true
+    var dragRegrip = true
+    var dragRegripWindow = 0.25
+
+    init(touchAndHoldDrag: Bool = true, dragRegrip: Bool = true, dragRegripWindow: Double = 0.25) {
+        self.touchAndHoldDrag = touchAndHoldDrag
+        self.dragRegrip = dragRegrip
+        self.dragRegripWindow = dragRegripWindow
+    }
+
+    init(legacy: GestureSettings) {
+        touchAndHoldDrag = legacy.touchAndHoldDrag
+        dragRegrip = legacy.dragRegrip
+        dragRegripWindow = legacy.dragRegripWindow
+    }
 }
 
 /// Learned timings belong to a top-level profile/device, never an action layer.
@@ -1176,6 +1205,10 @@ struct StoredSettings: Codable {
     // encoded for lossless old-config import, but is no longer selected by hotkeys.
     var pointerMotion: MotionProfile? = nil
     var pointerCoastBaseline: Double? = nil
+    // One Navigator drag configuration per top-level profile. Legacy layer
+    // values remain encoded and supply the migration fallback until edited.
+    var navigatorDragging: DraggingSettings? = nil
+    var navigatorRegripBaseline: Double? = nil
     var resolvedPointerMotion: MotionProfile {
         if let pointerMotion { return pointerMotion }
         let id = resolvedDefaultProfileID
@@ -1183,6 +1216,12 @@ struct StoredSettings: Codable {
     }
     var resolvedPointerCoastBaseline: Double {
         pointerCoastBaseline ?? sliderBaseline(for: resolvedDefaultProfileID).coastCoefficient
+    }
+    var resolvedNavigatorDragging: DraggingSettings {
+        navigatorDragging ?? DraggingSettings(legacy: gestures(for: resolvedDefaultProfileID).gestures)
+    }
+    var resolvedNavigatorRegripBaseline: Double {
+        navigatorRegripBaseline ?? sliderBaseline(for: resolvedDefaultProfileID).regripWindow
     }
     var devices: ProfileDevices? = nil
     var resolvedDevices: ProfileDevices { devices ?? ProfileDevices() }
@@ -1212,9 +1251,11 @@ struct StoredSettings: Codable {
         guard id == 1 || id == 2 || (additionalProfiles ?? []).contains(where: { $0.id == id }) else { return }
         guard id != resolvedDefaultProfileID else { return }
         // Changing the default action layer must not pick a different legacy
-        // mouse response, including immediately after importing an old config.
+        // mouse response or drag behavior after importing an old config.
         pointerMotion = resolvedPointerMotion
         pointerCoastBaseline = resolvedPointerCoastBaseline
+        navigatorDragging = resolvedNavigatorDragging
+        navigatorRegripBaseline = resolvedNavigatorRegripBaseline
         let currentTaps = effectiveGestures(for: id)
         var stored = profileGestures ?? [:]
         stored[id] = currentTaps
@@ -1453,6 +1494,14 @@ final class SettingsStore: ObservableObject {
         updated.pointerCoastBaseline = updated.resolvedPointerCoastBaseline
         updated.pointerMotion = motion
         settings = updated
+    }
+
+    var navigatorDragging: DraggingSettings {
+        settings.resolvedNavigatorDragging
+    }
+
+    func updateNavigatorDragging(_ value: DraggingSettings) {
+        settings.navigatorDragging = value
     }
 
     @Published var foregroundBundleID: String?

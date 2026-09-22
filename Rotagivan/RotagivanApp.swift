@@ -19,7 +19,8 @@ struct RotagivanApp: App {
         store.restoreShortcuts = { keys in
             ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
                 actions: keys.actions, additional: keys.additional, profileActions: keys.profileActions,
-                holdToActivate: keys.holdToActivate)
+                holdToActivate: keys.holdToActivate, dragShortcut: keys.dragShortcut,
+                defaultID: store.defaultProfileID)
         }
         _store = StateObject(wrappedValue: store)
         let hid = NavigatorHIDManager(store: store)
@@ -178,7 +179,7 @@ struct NavigatorPanel: View {
                         Text("Tap shortcuts inherit from \(store.profiles[0].name). Enable custom tap settings in All Settings to override.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    ShortcutEditor(showBehavior: false, actionIndex: 2, profileID: editingProfileID)
+                    ShortcutEditor(showBehavior: false, editProfileDragShortcut: true)
                 }.controlSize(.small).padding(.top, 8)
             }
             Divider()

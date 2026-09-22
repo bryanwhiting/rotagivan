@@ -112,6 +112,25 @@ struct ConfigurationTests {
         let pointerYAML = try sharedPointer.yaml()
         rejected(pointerYAML.replacingOccurrences(of: "pointerCoastBaseline: 0.83", with: "pointerCoastBaseline: 4.0"), "out-of-range shared pointer baseline")
         print("Profile-wide pointer YAML passed: legacy compatibility, shared tuning roundtrip and baseline bounds")
+        var profileDragging = factory
+        profileDragging.settings.navigatorDragging = DraggingSettings(
+            touchAndHoldDrag: false, dragRegrip: true, dragRegripWindow: 0.9)
+        profileDragging.settings.navigatorRegripBaseline = 0.4
+        profileDragging.shortcuts.dragShortcut = ProfileShortcut(
+            keyCode: 64, modifiers: 256, enabled: true, keyLabel: "F17")
+        let draggingYAML = try profileDragging.yaml()
+        let draggingRoundtrip = try AppConfiguration.parse(draggingYAML)
+        precondition(tryEqual(profileDragging, draggingRoundtrip),
+                     "Profile-wide Navigator dragging must survive YAML export/import")
+        rejected(draggingYAML.replacingOccurrences(of: "dragRegripWindow: 0.9", with: "dragRegripWindow: 9"),
+                 "out-of-range profile-wide regrip window")
+        rejected(draggingYAML.replacingOccurrences(of: "navigatorRegripBaseline: 0.4", with: "navigatorRegripBaseline: 9"),
+                 "out-of-range profile-wide regrip baseline")
+        var legacyDragShortcuts = factory.shortcuts
+        legacyDragShortcuts.dragShortcut = nil
+        legacyDragShortcuts.profileActions[factory.settings.resolvedDefaultProfileID]![2] = ProfileShortcut(keyCode: 106)
+        precondition(legacyDragShortcuts.resolvedDragShortcut(defaultID: factory.settings.resolvedDefaultProfileID).keyCode == 106)
+        print("Profile-wide dragging YAML passed: settings, shortcut, bounds and default-layer migration fallback.")
         var nested = factory
         nested.profiles = [ConfigurationProfile(id: "work", name: "Work", settings: factory.settings, shortcuts: factory.shortcuts),
             ConfigurationProfile(id: "travel", name: "Travel", settings: factory.settings, shortcuts: factory.shortcuts)]

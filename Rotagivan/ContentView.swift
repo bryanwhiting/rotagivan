@@ -43,6 +43,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "Layers"
     @State private var actionDevice: GestureDevice = .navigator
+    @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
     private let initialHUDGroup: ExplorerReservedGroup?
 
@@ -57,10 +58,11 @@ struct ContentView: View {
         _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros"].contains(initialSection) ? "Macros" : ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
+        _pointerDevice = State(initialValue: initialDevice)
     }
 
     private enum ProfileSection {
-        case tapping, dragging
+        case tapping
     }
 
     private func sectionTitle(_ section: String) -> String {
@@ -217,7 +219,7 @@ struct ContentView: View {
             ScrollViewReader { proxy in
             ScrollView(.horizontal) {
             Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 0) {
-                ForEach(editingAppleActions ? [0, 3] : [0, 3, 4], id: \.self) { section in
+                ForEach([0, 3], id: \.self) { section in
                     GridRow(alignment: .top) {
                         ForEach(store.profiles, id: \.id) { profile in
                             profileCell(profile.name, id: profile.id, section: section)
@@ -259,10 +261,8 @@ struct ContentView: View {
                 .background(store.activeProfileID == id ? Color.teal.opacity(0.09) : Color.primary.opacity(0.035))
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                 .id(id)
-        case 3:
-            columnSection("Tap & swipe actions", icon: "hand.tap", profileID: id, copySection: .tapping) { gestures(id) }
         default:
-            columnSection("Dragging · Navigator", icon: "hand.draw", profileID: id, copySection: .dragging) { dragging(id) }
+            columnSection("Tap & swipe actions", icon: "hand.tap", profileID: id, copySection: .tapping) { gestures(id) }
         }
     }
 
@@ -355,8 +355,23 @@ struct ContentView: View {
     private var pointerSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Pointer & scrolling").font(.system(size: 24, weight: .semibold))
-            Text("One response for every layer in \(store.activeConfigurationName). Use a different profile for different mouse tuning. Apple trackpads keep native macOS motion and scrolling.")
+            Text("Device controls for \(store.activeConfigurationName). Navigator tuning applies across its action layers.")
                 .font(.callout).foregroundStyle(.secondary)
+            Picker("Device", selection: $pointerDevice) {
+                Label("ZSA Navigator", systemImage: "computermouse").tag(GestureDevice.navigator)
+                Label("macOS Trackpad", systemImage: "rectangle.and.hand.point.up.left").tag(GestureDevice.apple)
+            }.pickerStyle(.segmented).frame(width: 390)
+                .accessibilityIdentifier("pointer-device-picker")
+            if pointerDevice == .navigator {
+                navigatorPointerSettings.accessibilityIdentifier("pointer-pane-navigator")
+            } else {
+                macOSPointerSettings.accessibilityIdentifier("pointer-pane-macos")
+            }
+        }.font(.system(size: 12))
+    }
+
+    private var navigatorPointerSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
                 pointerCard("Pointer", icon: "cursorarrow.motionlines") {
                     MotionCurveEditor(curve: Binding(get: { store.activeProfile.resolvedCursorResponse }, set: { curve in
@@ -379,7 +394,35 @@ struct ContentView: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
-        }.font(.system(size: 12))
+            pointerWideCard("Dragging", icon: "hand.draw") { navigatorDragging }
+        }
+    }
+
+    private var macOSPointerSettings: some View {
+        pointerWideCard("macOS Trackpad", icon: "rectangle.and.hand.point.up.left") {
+            Text("macOS owns pointer motion, scrolling and dragging for built-in and Magic Trackpads. These machine-wide settings are not stored in Rotagivan profiles.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Open Trackpad Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Trackpad-Settings.extension")!)
+                }
+                Button("Open Accessibility Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess")!)
+                }
+            }
+            Text("For native dragging: Accessibility → Pointer Control → Trackpad Options. Tap and swipe actions remain customizable in Layers for this Rotagivan profile.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func pointerWideCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: icon).font(.headline)
+            Divider()
+            content()
+        }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
     }
 
     private func pointerCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
@@ -432,15 +475,6 @@ struct ContentView: View {
                 store.settings.customTapProfiles = customProfiles
             }
             copyShortcutActions([0, 1], from: sourceID, to: targetID)
-        case .dragging:
-            let source = store.settings.gestures(for: sourceID).gestures
-            var target = store.settings.gestures(for: targetID)
-            target.gestures.touchAndHoldDrag = source.touchAndHoldDrag
-            target.gestures.dragRegrip = source.dragRegrip
-            target.gestures.dragRegripWindow = source.dragRegripWindow
-            target.gestures.secondFingerGracePeriod = source.secondFingerGracePeriod
-            store.updateGestures(target, for: targetID)
-            copyShortcutActions([2], from: sourceID, to: targetID)
         }
     }
 
@@ -584,28 +618,21 @@ struct ContentView: View {
         .frame(width: 270)
     }
 
-    private func dragging(_ id: UInt32) -> some View {
-        let primaryTap = store.settings.effectiveGestures(for: id).oneFingerTap
-        let canTapAndHoldDrag = store.settings.effectiveGestures(for: id).gestures.tapToClick && primaryTap.supportsTapAndHoldDrag
+    private var navigatorDragging: some View {
+        let dragging = Binding(get: { store.navigatorDragging }, set: { store.updateNavigatorDragging($0) })
         return VStack(alignment: .leading, spacing: 12) {
-            ShortcutEditor(showBehavior: false, actionIndex: 2, showError: false, profileID: id)
+            ShortcutEditor(showBehavior: false, showError: false, editProfileDragShortcut: true)
             Text("Hold the shortcut and move the cursor to drag. Release the key to drop. You can lift and reposition your finger while holding the shortcut.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
-            Toggle("Tap, then touch and hold to drag", isOn: gesture(id, \.touchAndHoldDrag))
-                .disabled(!canTapAndHoldDrag)
-            if canTapAndHoldDrag {
-                Text("The second touch can land anywhere on the trackpad. You have at least 400 ms to touch again, then hold or move to drag. Lift to drop.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !canTapAndHoldDrag {
-                Text("Tap-and-hold drag needs One-finger tap to be set to Left click. Your current action is \(primaryTap.title).")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Toggle("Allow re-grip while dragging", isOn: gesture(id, \.dragRegrip))
-            columnSlider("Re-grip window", value: gesture(id, \.dragRegripWindow), scale: centeredScale(id, minimum: 0, maximum: ProfileMaximum.regripWindow, keyPath: \.regripWindow))
+            Toggle("Tap, then touch and hold to drag", isOn: dragging.touchAndHoldDrag)
+            Text("The second touch can land anywhere on the trackpad. You have at least 400 ms to touch again, then hold or move to drag. Lift to drop. This works in layers whose one-finger tap is Left click.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Allow re-grip while dragging", isOn: dragging.dragRegrip)
+            columnSlider("Re-grip window", value: dragging.dragRegripWindow,
+                scale: .centered(minimum: 0, maximum: ProfileMaximum.regripWindow,
+                                 baseline: store.settings.resolvedNavigatorRegripBaseline))
+                .disabled(!store.navigatorDragging.dragRegrip)
         }
         .font(.system(size: 12))
     }
@@ -778,9 +805,12 @@ struct ShortcutEditor: View {
     var profileID: UInt32? = nil
     var editableName: Binding<String>? = nil
     var isDefaultProfile = false
+    var editProfileDragShortcut = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let index = actionIndex {
+            if editProfileDragShortcut {
+                shortcutRow("Keyboard drag", value: $shortcuts.dragShortcut)
+            } else if let index = actionIndex {
                 shortcutRow(["Click at cursor", "Double-click at cursor", "Keyboard drag"][index], value: Binding(get: {
                     shortcuts.actions(for: profileID ?? 1)[index]
                 }, set: { value in

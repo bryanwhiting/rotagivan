@@ -27,6 +27,12 @@ final class GestureEngine {
         settings.touchAndHoldDrag = false
         return ProfileGestures(gestures: settings, oneFingerTap: .leftClick, twoFingerTap: .rightClick)
     }
+    private var activeDragging: DraggingSettings {
+        guard !isEditingInterface else {
+            return DraggingSettings(touchAndHoldDrag: false, dragRegrip: false, dragRegripWindow: 0)
+        }
+        return store.navigatorDragging
+    }
     private static let tapDragHoldDelay = 0.12
     private static let tapDragMovementThreshold = 4.0
     // Repositioning for a drag takes longer than a quick double tap. This
@@ -367,7 +373,7 @@ final class GestureEngine {
             pendingDragEndAt = nil
         } else if synthesizesPointerEvents, contacts.count == 1, activeGestures.gestures.tapToClick,
                   activeGestures.oneFingerTap == .leftClick,
-                  activeGestures.gestures.touchAndHoldDrag {
+                  activeDragging.touchAndHoldDrag {
             let pickupWindow = max(Self.tapDragPickupWindow, activeGestures.gestures.resolvedDoubleTapInterval)
             let followsCompletedClick = lastTapProfileID == store.activeProfileID &&
                 now.timeIntervalSince(lastTap) <= pickupWindow
@@ -548,10 +554,11 @@ final class GestureEngine {
                 return
             }
             guard !physicalButtonDown && !keyboardDrag else { return }
-            if gestures.dragRegrip {
+            let dragging = activeDragging
+            if dragging.dragRegrip {
                 pendingDragEnd?.invalidate()
-                pendingDragEndAt = now.addingTimeInterval(gestures.dragRegripWindow)
-                pendingDragEnd = Timer.scheduledTimer(withTimeInterval: gestures.dragRegripWindow, repeats: false) { [weak self] _ in
+                pendingDragEndAt = now.addingTimeInterval(dragging.dragRegripWindow)
+                pendingDragEnd = Timer.scheduledTimer(withTimeInterval: dragging.dragRegripWindow, repeats: false) { [weak self] _ in
                     MainActor.assumeIsolated {
                         self?.pendingDragEnd = nil
                         self?.pendingDragEndAt = nil
@@ -762,7 +769,7 @@ final class GestureEngine {
         guard tapDragCandidate, !syntheticDragActive else { return }
         guard tapDragProfileID == store.activeProfileID, !hadTwoFingers,
               store.settings.enabled, activeGestures.gestures.tapToClick,
-              activeGestures.gestures.touchAndHoldDrag,
+              activeDragging.touchAndHoldDrag,
               activeGestures.oneFingerTap == .leftClick else {
             cancelTapDragCandidate()
             return

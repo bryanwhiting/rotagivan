@@ -7,10 +7,13 @@ struct ProfileActivationTests {
         let primary = [ProfileShortcut(keyCode: 0, modifiers: 256, enabled: true), defaults[1], defaults[2]]
         let custom = [ProfileShortcut(keyCode: 1, modifiers: 256, enabled: true), defaults[0], ProfileShortcut(keyCode: 64)]
         let inherited = HotKeyManager.resolvedActions(for: 100, defaults: defaults, saved: [1: primary, 100: custom], customTapProfiles: [])
-        precondition(inherited == [primary[0], primary[1], custom[2]])
-        precondition(HotKeyManager.resolvedActions(for: 100, defaults: defaults, saved: [1: primary, 100: custom], customTapProfiles: [100]) == custom)
+        precondition(inherited == primary)
+        precondition(HotKeyManager.resolvedActions(for: 100, defaults: defaults, saved: [1: primary, 100: custom], customTapProfiles: [100]) == [custom[0], custom[1], primary[2]])
         precondition(HotKeyManager.resolvedActions(for: 1, defaults: defaults, saved: [1: primary], customTapProfiles: []) == primary)
-        print("Click shortcut inheritance passed; drag shortcuts remain profile-specific.")
+        let profileDrag = ProfileShortcut(keyCode: 106, modifiers: 256, enabled: true)
+        precondition(HotKeyManager.resolvedActions(for: 1, defaults: defaults, saved: [1: primary], customTapProfiles: [], dragShortcut: profileDrag)[2] == profileDrag)
+        precondition(HotKeyManager.resolvedActions(for: 100, defaults: defaults, saved: [1: primary, 100: custom], customTapProfiles: [100], dragShortcut: profileDrag)[2] == profileDrag)
+        print("Click shortcut inheritance passed; keyboard drag is profile-wide across layers.")
         let legacy = try JSONDecoder().decode(ProfileShortcut.self, from: Data("{\"keyCode\":64,\"modifiers\":0,\"enabled\":true}".utf8))
         precondition(legacy.holdToActivate == nil)
         var state = ProfileActivationState()
@@ -46,7 +49,7 @@ struct ProfileActivationTests {
         precondition(state.handle(id: 2, down: false, hold: false) == 2)
         precondition(state.handle(id: 2, down: true, hold: false) == 100)
         let newDefaultActions = HotKeyManager.resolvedActions(for: 2, defaults: defaults, saved: [100: custom], customTapProfiles: [], defaultID: 100)
-        precondition(newDefaultActions == [custom[0], custom[1], defaults[2]])
+        precondition(newDefaultActions == custom)
         print("Selectable default passed: initial activation, hold release, tap toggle, inherited shortcuts.")
     }
 }

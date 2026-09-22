@@ -98,7 +98,7 @@ struct ProfileStorageTests {
         var inherited = gestures
         precondition(inherited.effectiveGestures(for: 100).oneFingerTap == .leftClick)
         precondition(inherited.effectiveGestures(for: 100).gestures.tapMaxDuration == 0.31)
-        precondition(!inherited.effectiveGestures(for: 100).gestures.dragRegrip) // Dragging remains independent.
+        precondition(!inherited.effectiveGestures(for: 100).gestures.dragRegrip) // Legacy layer data remains lossless.
         inherited.profileGestures?[1] = ProfileGestures(gestures: GestureSettings(), oneFingerTap: .enter, twoFingerTap: .none)
         precondition(inherited.effectiveGestures(for: 100).oneFingerTap == .enter)
         inherited.customTapProfiles = [100]
@@ -125,6 +125,26 @@ struct ProfileStorageTests {
         precondition(inherited.resolvedDefaultProfileID == 2)
         precondition(legacy.resolvedDefaultProfileID == 1)
         print("Default promotion passed: inheritance, previous-default preservation, persistence, invalid IDs, legacy migration.")
+        var legacyDragging = StoredSettings()
+        var legacyPrimary = legacyDragging.gestures(for: 1)
+        legacyPrimary.gestures.touchAndHoldDrag = false
+        legacyPrimary.gestures.dragRegrip = false
+        legacyPrimary.gestures.dragRegripWindow = 0.8
+        legacyDragging.profileGestures = [1: legacyPrimary]
+        legacyDragging.sliderBaselines = [1: ProfileSliderBaseline(cursorSpeed: 1, cursorAcceleration: 1,
+            cursorFalloff: 0, scrollSpeed: 1, scrollAcceleration: 1, coastCoefficient: 0.5,
+            tapImpactSpeed: 0.2, tapMovementRadius: 30, doubleTapDelay: 0.3, regripWindow: 0.7)]
+        precondition(legacyDragging.resolvedNavigatorDragging == DraggingSettings(
+            touchAndHoldDrag: false, dragRegrip: false, dragRegripWindow: 0.8))
+        precondition(legacyDragging.resolvedNavigatorRegripBaseline == 0.7)
+        legacyDragging.makeDefault(2)
+        precondition(legacyDragging.resolvedNavigatorDragging.dragRegripWindow == 0.8,
+                     "Changing the default layer must freeze legacy drag behavior")
+        precondition(legacyDragging.resolvedNavigatorRegripBaseline == 0.7)
+        legacyDragging.navigatorDragging = DraggingSettings(touchAndHoldDrag: true, dragRegrip: true, dragRegripWindow: 1.1)
+        let profileWideDragging = try decoder.decode(StoredSettings.self, from: encoder.encode(legacyDragging))
+        precondition(profileWideDragging.resolvedNavigatorDragging.dragRegripWindow == 1.1)
+        print("Profile-wide dragging passed: legacy default-layer fallback, default changes, baseline and persistence.")
         print("Profile gestures passed: legacy inheritance, independent tapping/dragging, persistence.")
         print("Profile naming tests passed: built-in and custom names, persistence, legacy and blank-name fallbacks.")
         print("Profile storage tests passed: legacy decoding, additional-profile round trip, independent settings.")

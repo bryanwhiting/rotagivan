@@ -6,16 +6,18 @@ extension ShortcutConfiguration {
         normal = source.normal; precision = source.precision
         actions = source.actions; additional = source.additional
         profileActions = source.profileActions
+        dragShortcut = source.dragShortcut
         holdToActivate = UserDefaults.standard.object(forKey: "shortcut.hold") as? Bool ?? true
     }
 
-    func preferences() throws -> [String: Any] {
+    func preferences(defaultID: UInt32 = 1) throws -> [String: Any] {
         let encoder = JSONEncoder()
         var result: [String: Any] = [
             "shortcut.normal": try encoder.encode(normal),
             "shortcut.precision": try encoder.encode(precision),
             "shortcut.additional": try encoder.encode(additional),
             "shortcut.profileActions": try encoder.encode(profileActions),
+            "shortcut.drag": try encoder.encode(resolvedDragShortcut(defaultID: defaultID)),
             "shortcut.hold": holdToActivate
         ]
         for (index, action) in actions.enumerated() {
@@ -143,7 +145,7 @@ struct AppConfiguration: Codable {
         if considerLegacySettings, defaults.persistentDomain(forName: "local.navigator.clone")?["settings.v1"] != nil { return }
         try validate()
         defaults.set(try JSONEncoder().encode(settings), forKey: "settings.v1")
-        for (key, value) in try shortcuts.preferences() { defaults.set(value, forKey: key) }
+        for (key, value) in try shortcuts.preferences(defaultID: settings.resolvedDefaultProfileID) { defaults.set(value, forKey: key) }
         if let profiles, let activeConfigurationID {
             defaults.set(try JSONEncoder().encode(ConfigurationLibrary(activeID: activeConfigurationID, profiles: profiles)), forKey: "configurationProfiles.v1")
         }
@@ -196,7 +198,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
             case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence"
             case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
@@ -209,7 +211,7 @@ private indirect enum ConfigurationValue: Codable {
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
             case "shortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
-            case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions holdToActivate"
+            case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions dragShortcut holdToActivate"
             case "normal", "precision", "motion", "pointerMotion":
                 allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
             case "scrollResponse":
@@ -229,12 +231,13 @@ private indirect enum ConfigurationValue: Codable {
                     throw ConfigurationError("\(path): Fine speed cannot exceed Fast speed.")
                 }
             case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval"
+            case "navigatorDragging": allowed = "touchAndHoldDrag dragRegrip dragRegripWindow"
             case "profileGestures", "appleLayerGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
             case "doubleTapSwipe", "singleTapSwipe", "twoFingerSingleTapSwipe", "twoFingerDoubleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
             case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
             case "additionalProfiles": allowed = "id name motion"
-            case "actions", "additional", "profileActions": allowed = "keyCode modifiers enabled holdToActivate keyLabel"
+            case "actions", "additional", "profileActions", "dragShortcut": allowed = "keyCode modifiers enabled holdToActivate keyLabel"
             default: throw ConfigurationError("Unexpected object at \(path).")
             }
             let known = Set(allowed.split(separator: " ").map(String.init))
@@ -275,7 +278,7 @@ private indirect enum ConfigurationValue: Codable {
                 "scrollMultiplier": 0...ProfileMaximum.scrollSpeed, "scrollSpeed": 0...ProfileMaximum.scrollSpeed,
                 "scrollAcceleration": 1...ProfileMaximum.scrollAcceleration, "kineticDecay": 0...1, "coastCoefficient": 0...1, "pointerCoastBaseline": 0...1,
                 "tapMaxDuration": 0...1, "tapImpactSpeed": 0...1, "tapMaxMovement": 0...160, "tapMovementRadius": 0...160,
-                "dragRegripWindow": 0...2, "regripWindow": 0...2, "secondFingerGracePeriod": 0...2,
+                "dragRegripWindow": 0...2, "regripWindow": 0...2, "navigatorRegripBaseline": 0...2, "secondFingerGracePeriod": 0...2,
                 "doubleTapInterval": 0.05...0.6, "doubleTapDelay": 0.05...0.6, "keyCode": 0...127,
                 "tripleTapFirstInterval": 0.05...0.6, "tripleTapSecondInterval": 0.05...0.6,
                 "singleSwipeWindow": 0.1...0.8, "doubleSwipeWindow": 0.1...0.8, "singleSwipeDuration": 0.06...0.3,

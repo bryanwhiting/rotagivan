@@ -17,17 +17,21 @@ final class ShortcutSettings: ObservableObject {
     @Published var actions: [ProfileShortcut] { didSet { save() } }
     @Published var additional: [UInt32: ProfileShortcut] { didSet { save() } }
     @Published var profileActions: [UInt32: [ProfileShortcut]] { didSet { save() } }
+    @Published var dragShortcut: ProfileShortcut { didSet { save() } }
     private var replacingConfiguration = false
 
     func replaceConfiguration(normal: ProfileShortcut, precision: ProfileShortcut,
                               actions: [ProfileShortcut], additional: [UInt32: ProfileShortcut],
-                              profileActions: [UInt32: [ProfileShortcut]], holdToActivate: Bool) {
+                              profileActions: [UInt32: [ProfileShortcut]], holdToActivate: Bool,
+                              dragShortcut: ProfileShortcut? = nil, defaultID: UInt32 = 1) {
         replacingConfiguration = true
         self.normal = normal
         self.precision = precision
         self.actions = actions
         self.additional = additional
         self.profileActions = profileActions
+        self.dragShortcut = dragShortcut ?? Self.legacyDragShortcut(
+            defaultID: defaultID, actions: actions, profileActions: profileActions)
         UserDefaults.standard.set(holdToActivate, forKey: "shortcut.hold")
         replacingConfiguration = false
         save()
@@ -36,6 +40,12 @@ final class ShortcutSettings: ObservableObject {
     func actions(for id: UInt32) -> [ProfileShortcut] {
         guard let saved = profileActions[id], saved.count == 3 else { return actions }
         return saved
+    }
+
+    private static func legacyDragShortcut(defaultID: UInt32, actions: [ProfileShortcut],
+                                           profileActions: [UInt32: [ProfileShortcut]]) -> ProfileShortcut {
+        let legacy = profileActions[defaultID]?.count == 3 ? profileActions[defaultID]! : actions
+        return legacy.indices.contains(2) ? legacy[2] : ProfileShortcut(keyCode: 90)
     }
 
     func disableActivation(for id: UInt32) {
@@ -51,9 +61,15 @@ final class ShortcutSettings: ObservableObject {
             UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(ProfileShortcut.self, from: $0) }
         }
         normal = read("shortcut.normal") ?? ProfileShortcut()
-        profileActions = UserDefaults.standard.data(forKey: "shortcut.profileActions").flatMap { try? JSONDecoder().decode([UInt32: [ProfileShortcut]].self, from: $0) } ?? [:]
+        let loadedProfileActions = UserDefaults.standard.data(forKey: "shortcut.profileActions").flatMap { try? JSONDecoder().decode([UInt32: [ProfileShortcut]].self, from: $0) } ?? [:]
+        profileActions = loadedProfileActions
         additional = UserDefaults.standard.data(forKey: "shortcut.additional").flatMap { try? JSONDecoder().decode([UInt32: ProfileShortcut].self, from: $0) } ?? [:]
-        actions = (3...5).map { read("shortcut.action.\($0)") ?? ProfileShortcut(keyCode: UInt32($0 == 3 ? 79 : $0 == 4 ? 80 : 90)) }
+        let loadedActions = (3...5).map { read("shortcut.action.\($0)") ?? ProfileShortcut(keyCode: UInt32($0 == 3 ? 79 : $0 == 4 ? 80 : 90)) }
+        actions = loadedActions
+        let defaultID = UserDefaults.standard.data(forKey: "settings.v1")
+            .flatMap { try? JSONDecoder().decode(StoredSettings.self, from: $0) }?.resolvedDefaultProfileID ?? 1
+        dragShortcut = read("shortcut.drag") ?? Self.legacyDragShortcut(
+            defaultID: defaultID, actions: loadedActions, profileActions: loadedProfileActions)
         precision = read("shortcut.precision") ?? ProfileShortcut(enabled: true)
         let legacyHold = UserDefaults.standard.object(forKey: "shortcut.hold") as? Bool ?? true
         if normal.holdToActivate == nil { normal.holdToActivate = legacyHold }
@@ -66,6 +82,7 @@ final class ShortcutSettings: ObservableObject {
         UserDefaults.standard.set(try? JSONEncoder().encode(precision), forKey: "shortcut.precision")
         UserDefaults.standard.set(try? JSONEncoder().encode(additional), forKey: "shortcut.additional")
         UserDefaults.standard.set(try? JSONEncoder().encode(profileActions), forKey: "shortcut.profileActions")
+        UserDefaults.standard.set(try? JSONEncoder().encode(dragShortcut), forKey: "shortcut.drag")
     }
 }
 
@@ -139,6 +156,7 @@ final class HotKeyManager {
     private var actionRefs: [EventHotKeyRef?] = []
     private var defaultActions: [ProfileShortcut] = []
     private var savedActions: [UInt32: [ProfileShortcut]] = [:]
+    private var profileDragShortcut = ProfileShortcut(keyCode: 90)
     private var customTapProfiles = Set<UInt32>()
     private var defaultProfileID: UInt32 = 1
 
@@ -162,11 +180,12 @@ final class HotKeyManager {
         if handler != nil { registerActions() }
     }
 
-    static func resolvedActions(for id: UInt32, defaults: [ProfileShortcut], saved: [UInt32: [ProfileShortcut]], customTapProfiles: Set<UInt32>, defaultID: UInt32 = 1) -> [ProfileShortcut] {
+    static func resolvedActions(for id: UInt32, defaults: [ProfileShortcut], saved: [UInt32: [ProfileShortcut]], customTapProfiles: Set<UInt32>, defaultID: UInt32 = 1, dragShortcut: ProfileShortcut? = nil) -> [ProfileShortcut] {
         let own = saved[id]?.count == 3 ? saved[id]! : defaults
         let primary = saved[defaultID]?.count == 3 ? saved[defaultID]! : defaults
-        guard id != defaultID, !customTapProfiles.contains(id), own.count == 3, primary.count == 3 else { return own }
-        return [primary[0], primary[1], own[2]]
+        guard own.count == 3, primary.count == 3 else { return own }
+        let taps = id != defaultID && !customTapProfiles.contains(id) ? [primary[0], primary[1]] : [own[0], own[1]]
+        return taps + [dragShortcut ?? primary[2]]
     }
     private var profileCombinations = Set<String>()
     private var profileError: String?
@@ -237,10 +256,12 @@ final class HotKeyManager {
             .sink { [weak self] normal, precision, additional in
                 self?.register(normal: normal, precision: precision, additional: additional)
             }
-        actionObservation = ShortcutSettings.shared.$actions.combineLatest(ShortcutSettings.shared.$profileActions)
-            .sink { [weak self] actions, saved in
+        actionObservation = ShortcutSettings.shared.$actions.combineLatest(
+            ShortcutSettings.shared.$profileActions, ShortcutSettings.shared.$dragShortcut)
+            .sink { [weak self] actions, saved, dragShortcut in
                 self?.defaultActions = actions
                 self?.savedActions = saved
+                self?.profileDragShortcut = dragShortcut
                 self?.registerActions()
             }
     }
@@ -299,7 +320,8 @@ final class HotKeyManager {
         ShortcutSettings.shared.error = profileError
         hudLaunchIDs.removeAll()
         hudPressed.removeAll()
-        let actions = Self.resolvedActions(for: activation.active, defaults: defaultActions, saved: savedActions, customTapProfiles: customTapProfiles, defaultID: defaultProfileID)
+        let actions = Self.resolvedActions(for: activation.active, defaults: defaultActions, saved: savedActions,
+            customTapProfiles: customTapProfiles, defaultID: defaultProfileID, dragShortcut: profileDragShortcut)
         var used = profileCombinations
         for (index, shortcut) in actions.prefix(3).enumerated() where shortcut.enabled {
             let name = ["Click at cursor", "Double-click at cursor", "Keyboard drag"][index]

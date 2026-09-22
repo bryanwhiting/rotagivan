@@ -10,20 +10,26 @@ import Foundation
         precondition(store.configurationProfiles.count == 1 && store.activeConfigurationName == "Default")
         var keys = ShortcutConfiguration()
         keys.normal.keyCode = 100
+        keys.dragShortcut = ProfileShortcut(keyCode: 64, modifiers: 256, enabled: true)
         store.captureShortcuts = { keys }
         store.restoreShortcuts = { keys = $0 }
         store.settings.normal.cursorSpeed = 0.37
         store.settings.normal.kineticDecay = 0.91
+        store.updateNavigatorDragging(DraggingSettings(touchAndHoldDrag: false, dragRegrip: true, dragRegripWindow: 0.6))
         store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "Docs", url: "https://example.com")])
         let oldMotion = store.settings.normal
         let oldExplorer = store.settings.appExplorer
+        let oldDragging = store.navigatorDragging
+        let oldDragShortcut = keys.dragShortcut
         let oldLayers = store.profiles.map(\.id)
         let id = store.addConfiguration()
         precondition(store.activeConfigurationID == id && store.configurationProfiles.count == 2)
         precondition(store.settings.normal == oldMotion && store.settings.appExplorer == oldExplorer && store.profiles.map(\.id) == oldLayers)
         store.renameConfiguration("Travel")
         keys.normal.keyCode = 101
+        keys.dragShortcut = ProfileShortcut(keyCode: 90, modifiers: 0, enabled: true)
         store.settings.normal.cursorSpeed = 0.22
+        store.updateNavigatorDragging(DraggingSettings(touchAndHoldDrag: true, dragRegrip: false, dragRegripWindow: 1.2))
         store.settings.appExplorer = AppExplorerSettings(favorites: [])
         var devices = ProfileDevices()
         devices.navigatorEnabled = false
@@ -71,12 +77,14 @@ import Foundation
         store.settings.devices = devices
         precondition(store.activeGestures(for: .apple).oneFingerTap == .appExplorer, "Sharing must preserve disabled overrides")
         store.selectConfiguration("default")
-        precondition(keys.normal.keyCode == 100)
+        precondition(keys.normal.keyCode == 100 && keys.dragShortcut == oldDragShortcut)
         precondition(store.settings.normal == oldMotion && store.settings.appExplorer == oldExplorer)
+        precondition(store.navigatorDragging == oldDragging)
         precondition(store.settings.resolvedDevices.navigatorEnabled)
         store.selectConfiguration(id)
-        precondition(keys.normal.keyCode == 101 && store.activeConfigurationName == "Travel")
+        precondition(keys.normal.keyCode == 101 && keys.dragShortcut?.keyCode == 90 && store.activeConfigurationName == "Travel")
         precondition(store.settings.normal.cursorSpeed == 0.22 && !store.settings.resolvedDevices.navigatorEnabled)
+        precondition(store.navigatorDragging.dragRegripWindow == 1.2 && !store.navigatorDragging.dragRegrip)
         let reopened = SettingsStore(defaults: defaults)
         precondition(reopened.activeConfigurationID == id && reopened.activeConfigurationName == "Travel")
         precondition(reopened.settings.normal.cursorSpeed == 0.22 && reopened.activeGestures(for: .apple).oneFingerTap == .appExplorer)

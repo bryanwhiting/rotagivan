@@ -157,7 +157,8 @@ struct ConfigurationSettingsView: View {
         let keys = config.shortcuts
         ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
             actions: keys.actions, additional: keys.additional, profileActions: keys.profileActions,
-            holdToActivate: keys.holdToActivate)
+            holdToActivate: keys.holdToActivate, dragShortcut: keys.dragShortcut,
+            defaultID: store.defaultProfileID)
         store.replaceLibrary(config.profiles, activeID: config.activeConfigurationID, shortcuts: keys)
         AppConfiguration.markCurrent(.standard)
         DispatchQueue.main.async {

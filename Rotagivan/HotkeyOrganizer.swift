@@ -98,7 +98,9 @@ struct HotkeyAudit {
         let primary = shortcuts.profileActions[settings.resolvedDefaultProfileID]?.count == 3 ? shortcuts.profileActions[settings.resolvedDefaultProfileID]! : shortcuts.actions
         let inherit = layerID != settings.resolvedDefaultProfileID && !(settings.customTapProfiles ?? []).contains(layerID)
         for (index, key) in own.prefix(3).enumerated() {
-            let effective = inherit && index < 2 && primary.indices.contains(index) ? primary[index] : key
+            let effective: ProfileShortcut
+            if index == 2 { effective = shortcuts.resolvedDragShortcut(defaultID: settings.resolvedDefaultProfileID) }
+            else { effective = inherit && primary.indices.contains(index) ? primary[index] : key }
             let shortcut = recorded(effective)
             assignments.append(Assignment(id: "mouse.\(index)", scope: "Global keyboard hotkeys", trigger: ["Single click", "Double click", "Hold to drag"][index],
                 action: dictionary.title(for: shortcut), shortcut: shortcut, enabled: settings.enabled && effective.enabled, inputScope: ""))

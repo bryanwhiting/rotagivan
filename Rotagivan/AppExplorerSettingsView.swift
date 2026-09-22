@@ -11,6 +11,7 @@ struct HUDSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            AppExplorerSettingsView(store: store)
             GroupBox("Reserved Groups") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Built-in groups, always available from any tile’s ••• → Reserved Groups menu.")
@@ -24,7 +25,6 @@ struct HUDSettingsView: View {
                     }
                 }.padding(8)
             }
-            AppExplorerSettingsView(store: store)
         }
         .sheet(item: $selectedGroup) { group in
             VStack(alignment: .leading, spacing: 16) {
@@ -121,7 +121,6 @@ struct WindowManagerSettingsView: View {
 
 struct AppExplorerSettingsView: View {
     @ObservedObject var store: SettingsStore
-    @ObservedObject private var shortcuts = ShortcutSettings.shared
     @State private var editingURLPath: [ExplorerSlot]?
     @State private var editingShortcutPath: [ExplorerSlot]?
     @State private var selectedLayerID: UUID?
@@ -142,6 +141,8 @@ struct AppExplorerSettingsView: View {
     @State private var slotDrag: ExplorerSlotDrag?
     @State private var dropTarget: ExplorerSlot?
     @State private var tileTransfer: ExplorerTileTransfer?
+    @State private var previewSelection: ExplorerSlot = .up
+    @State private var previewDrag: ExplorerSlotDrag?
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
     private let transferPrefix: [ExplorerTilePathStep]
@@ -214,31 +215,17 @@ struct AppExplorerSettingsView: View {
                 }
             }
             if !compact && selectedLayerID == nil && scopeTitle == nil {
-            Label("HUD layout & appearance", systemImage: "safari").font(.headline)
-            ExplorerThemePicker(theme: themeBinding)
-            Toggle("Animate HUD feedback", isOn: animationBinding).font(.caption)
-            Text("Appearance applies to apps, groups, window layouts, and media controls. Reduce Motion always disables animations.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
-            Text("After switching apps, move the pointer to the focused window. Off restores its original position. No window or a new mouse movement leaves the pointer alone.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Picker("Default mode", selection: Binding(get: { settings.defaultMode }, set: { mode in
-                edit { $0.defaultMode = mode }
-            })) {
-                ForEach(AppExplorerMode.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented)
-            HStack {
-                Text("Hold for \(settings.defaultMode.alternate.title.lowercased())")
-                ShortcutRecorder(title: settings.holdShortcut?.displayName ?? "Record shortcut…") { key in
-                    edit { $0.holdShortcut = key }
-                }.frame(width: 200, height: 26)
-                if settings.holdShortcut != nil {
-                    Button("Clear") { edit { $0.holdShortcut = nil } }
+                HStack {
+                    Label("HUD layout", systemImage: "safari").font(.headline)
+                    Spacer()
+                    Picker("Theme", selection: themeBinding) {
+                        ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.frame(width: 230)
+                    Menu {
+                        Toggle("Animate HUD feedback", isOn: animationBinding)
+                        Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
+                    } label: { Label("Options", systemImage: "slider.horizontal.3") }.fixedSize()
                 }
-            }
-            Text("Your App Explorer gesture opens the default mode. Hold this shortcut to open the other mode; swipe and lift to choose before releasing the key. Releasing without a selection cancels.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let error = shortcuts.error { Text(error).font(.caption).foregroundStyle(.orange) }
             }
             HStack {
                 if compact && scopeTitle == nil {
@@ -266,7 +253,7 @@ struct AppExplorerSettingsView: View {
                     Button("Remove", role: .destructive) { removingLayer = true }
                 }
             }.font(.subheadline)
-            if scopeTitle == nil {
+            if scopeTitle == nil && compact {
                 Text("For keys that apply to just one group or Window Manager, use that tile’s ••• → Tile layers…")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -307,6 +294,26 @@ struct AppExplorerSettingsView: View {
                     Text("Recent apps").tag(AppExplorerMode.recent)
                 }.pickerStyle(.segmented)
             }
+            if !compact {
+                ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
+                    dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
+                    layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name,
+                    selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
+                    onDrag: { source, target in
+                        if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
+                    }, onDrop: { _, target in
+                        defer { previewDrag = nil }
+                        guard let drag = previewDrag, let target else { return }
+                        var next = settings
+                        if drag.apply(to: target, in: groupPath, settings: &next), save(next) { previewSelection = target }
+                    })
+                    .padding(.top, -20)
+                    .frame(maxWidth: .infinity)
+                if !isRecentGroup {
+                    Text("Selected tile").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    slot(previewSelection)
+                }
+            } else {
             VStack(spacing: 6) {
                 if settings.count(at: groupPath) != 8 {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
@@ -340,9 +347,10 @@ struct AppExplorerSettingsView: View {
             }
             .coordinateSpace(name: slotSpace)
             .onPreferenceChange(ExplorerSlotFramesKey.self) { slotFrames = $0 }
+            }
             Text(isRecentGroup
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
-                : "Drag tiles to move or swap here. Use ••• → Move or copy… to send a whole group to another layer or group, including all its contents. Changes save automatically.")
+                : "Select a tile in the preview to edit it below. Drag tiles to move or swap. Use ••• → Move or copy… to move a whole group between layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .overlay(alignment: .bottomLeading) {
@@ -482,11 +490,15 @@ struct AppExplorerSettingsView: View {
         .onChange(of: settings) { _, _ in
             while !groupPath.isEmpty && settings.favorites(at: groupPath) == nil { groupPath.removeLast() }
         }
-        .onChange(of: selectedLayerID) { _, _ in groupPath = []; groupError = nil; slotDrag = nil; dropTarget = nil }
+        .onChange(of: selectedLayerID) { _, _ in groupPath = []; groupError = nil; slotDrag = nil; dropTarget = nil; previewDrag = nil }
         .onChange(of: baseSettings.holdLayers) { _, layers in
             if let selectedLayerID, layers?.contains(where: { $0.id == selectedLayerID }) != true { self.selectedLayerID = nil }
         }
-        .onChange(of: groupPath) { _, path in onGroupPathChange?(path) }
+        .onChange(of: groupPath) { _, path in previewDrag = nil; onGroupPathChange?(path) }
+        .onChange(of: settings.count(at: groupPath)) { _, count in
+            if !ExplorerSlot.slots(count).contains(previewSelection) { previewSelection = .up }
+            previewDrag = nil
+        }
         .onDisappear { slotDrag = nil; dropTarget = nil }
     }
 
@@ -901,6 +913,65 @@ private final class ExplorerSlotDragView: NSView {
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil, start != nil { start = nil; dragging = false; onCancel() }
         super.viewWillMove(toWindow: newWindow)
+    }
+}
+
+/// Uses the actual HUD view and entry mapping; only its callbacks are different.
+/// No controller, input monitor, app activation, or keyboard posting is started.
+struct ExplorerHUDSettingsPreview: View {
+    let settings: AppExplorerSettings
+    let theme: ExplorerTheme
+    let dictionary: [NamedHotkey]
+    let groupPath: [ExplorerSlot]
+    let layerName: String?
+    @Binding var selection: ExplorerSlot
+    var onBack: () -> Void
+    var onDrag: (ExplorerSlot, ExplorerSlot?) -> Void
+    var onDrop: (ExplorerSlot, ExplorerSlot?) -> Void
+    @StateObject private var model = ExplorerModel()
+
+    var body: some View {
+        AppExplorerView(model: model, onSelect: { slot in
+            if !model.showingRecents { selection = slot }
+        }, onCancel: {}, onBack: onBack, isPreview: true,
+            onPreviewDrag: { source, target in model.selected = target; onDrag(source, target) },
+            onPreviewDrop: { source, target in onDrop(source, target); model.selected = selection })
+            .accessibilityIdentifier("hud-layout-preview")
+            .onAppear(perform: refresh)
+            .onChange(of: settings) { _, _ in refresh() }
+            .onChange(of: theme) { _, _ in refresh() }
+            .onChange(of: dictionary) { _, _ in refresh() }
+            .onChange(of: groupPath) { _, _ in refresh() }
+            .onChange(of: layerName) { _, _ in refresh() }
+            .onChange(of: selection) { _, selected in model.selected = selected }
+    }
+
+    private func refresh() {
+        model.theme = theme
+        model.animationsEnabled = settings.resolvedAnimationsEnabled
+        model.mode = .favorites
+        model.slotCount = settings.count(at: groupPath)
+        model.layerName = layerName
+        model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
+        model.groupDirections = groupPath
+        model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
+        model.showingRecents = settings.favorite(at: groupPath)?.isRecentGroup == true
+        model.selected = model.showingRecents ? nil : selection
+        if model.showingRecents {
+            let order = ExplorerSlot.slots(model.slotCount).sorted {
+                ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+            }
+            model.entries = order.enumerated().map { index, slot in
+                ExplorerEntry(direction: slot, bundleID: nil, name: index == 0 ? "Most recent app" : "Recent app \(index + 1)",
+                    icon: NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil), url: nil)
+            }
+            model.message = "Recent apps fill these positions at runtime · center goes back"
+        } else {
+            model.entries = (settings.favorites(at: groupPath) ?? []).map {
+                AppExplorerController.makeEntry($0, depth: groupPath.count, dictionary: dictionary)
+            }
+            model.message = "Select a tile to edit · drag to move or swap"
+        }
     }
 }
 

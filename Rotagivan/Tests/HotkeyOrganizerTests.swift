@@ -58,6 +58,8 @@ import Foundation
         settings.appExplorer?.holdLayers = [a, b]
         precondition(audit().findings.contains { $0.id.hasPrefix("local.") })
         settings.appExplorer?.holdLayers = nil
+        settings.appExplorer?.holdShortcut = key
+        precondition(!audit().assignments.contains { $0.id == "hud.open" }, "Retired root shortcut is not an active hotkey")
         keys.precision.enabled = false
         settings.appExplorer?.favorites = [
             AppExplorerFavorite(direction: .left, name: "A", children: [], holdLayers: [a]),

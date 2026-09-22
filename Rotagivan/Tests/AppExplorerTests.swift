@@ -81,8 +81,9 @@ import Foundation
         try testSlotSwaps()
         var settings = AppExplorerSettings()
         precondition(settings.mode(holdingShortcut: false) == .favorites)
-        precondition(settings.mode(holdingShortcut: true) == .recent)
+        precondition(settings.mode(holdingShortcut: true) == .favorites)
         settings.defaultMode = .recent
+        precondition(settings.mode(holdingShortcut: false) == .favorites, "Legacy Recent root mode is inert")
         precondition(settings.mode(holdingShortcut: true) == .favorites)
         settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Safari"), at: .right)
         settings.setFavorite(AppExplorerFavorite(direction: .up, bundleID: "com.apple.finder", name: "Finder"), at: .up)

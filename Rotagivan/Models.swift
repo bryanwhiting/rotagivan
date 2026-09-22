@@ -363,9 +363,10 @@ struct AppExplorerSettings: Codable, Equatable {
     static let recentDirections: [ExplorerSlot] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
     static let maximumGroupDepth = 4
     static let maximumFavorites = 256
+    // Kept only for lossless imports of older configurations. The root HUD is Favorites.
     var defaultMode: AppExplorerMode = .favorites
     var favorites: [AppExplorerFavorite] = []
-    var holdShortcut: RecordedShortcut?
+    var holdShortcut: RecordedShortcut? // Retired root-mode shortcut; never registered.
     var holdLayers: [ExplorerHoldLayer]? = nil
     var theme: ExplorerTheme? = nil
     var animationsEnabled: Bool? = nil
@@ -443,7 +444,7 @@ struct AppExplorerSettings: Codable, Equatable {
         result.slotCount = layer.slotCount ?? slotCount
         return result
     }
-    func mode(holdingShortcut: Bool) -> AppExplorerMode { holdingShortcut ? defaultMode.alternate : defaultMode }
+    func mode(holdingShortcut: Bool) -> AppExplorerMode { .favorites }
     func favorites(at path: [ExplorerSlot]) -> [AppExplorerFavorite]? {
         var current = favorites
         for (index, direction) in path.enumerated() {
@@ -523,7 +524,6 @@ struct AppExplorerSettings: Codable, Equatable {
                       layer.name.count <= 128, layer.slotCount == nil || [4, 8, 12, 16].contains(layer.slotCount!) else { return false }
                 if let key = layer.holdShortcut {
                     guard key.isValidExplorerShortcut, key.keyCode != 53,
-                          !(key.keyCode == holdShortcut?.keyCode && key.modifiers == holdShortcut?.modifiers),
                           keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
                 }
                 guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count) else { return false }

@@ -28,7 +28,7 @@ import AppKit
         invalid.holdLayers![1].holdShortcut = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Different label")
         precondition(!invalid.hasValidFavorites)
         invalid = settings; invalid.holdShortcut = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Other Y")
-        precondition(!invalid.hasValidFavorites)
+        precondition(invalid.hasValidFavorites, "Retired root shortcut must not reserve a HUD layer key")
         invalid = settings; invalid.holdLayers![0].holdShortcut?.keyCode = 53
         precondition(!invalid.hasValidFavorites)
         invalid = settings; invalid.holdLayers![1].id = first.id

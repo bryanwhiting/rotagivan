@@ -33,7 +33,7 @@ struct RotagivanApp: App {
                 .onAppear { start() }
                 .onReceive(store.$settings) { settings in
                     hotKeys.configureProfiles(defaultID: settings.resolvedDefaultProfileID, customTaps: settings.customTapProfiles ?? [])
-                    hotKeys.configureExplorer(settings.appExplorer?.holdShortcut)
+                    hotKeys.configureExplorer(nil)
                 }
         }
         .windowResizability(.contentSize)
@@ -58,7 +58,7 @@ struct RotagivanApp: App {
         hotKeys.profileName = { id in store.profiles.first { $0.id == id }?.name }
         hotKeys.onAction = { id, down in hid.keyboardAction(id, down: down) }
         hotKeys.onExplorerHold = { down in hid.explorerHold(down) }
-        hotKeys.configureExplorer(store.settings.appExplorer?.holdShortcut)
+        hotKeys.configureExplorer(nil)
         hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [])
         hotKeys.install()
         if store.settings.enabled { hid.start() }

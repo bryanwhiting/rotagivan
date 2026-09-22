@@ -1,5 +1,49 @@
 import SwiftUI
 
+/// Preview drag targets use exactly the same sector paths as the live renderer.
+enum ExplorerPreviewGeometry {
+    static func dropTarget(at point: CGPoint, from source: ExplorerSlot, theme: ExplorerTheme, count: Int, depth: Int) -> ExplorerSlot? {
+        if theme.isRadial || count != 8 {
+            return ExplorerSlot.slots(count).first {
+                ExplorerStarburstSector(direction: $0, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth),
+                    outerRadius: 143, tip: theme.isFloating ? 2 : 11, halfAngle: 180 / Double(count) - 2)
+                    .path(in: CGRect(x: 0, y: 0, width: 418, height: 310)).contains(point)
+            }
+        }
+        let rows: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
+        for row in 0..<3 {
+            for column in 0..<3 where rows[row][column] == source {
+                let position = CGPoint(x: point.x + Double(column) * 138, y: point.y + Double(row) * 106)
+                for targetRow in 0..<3 {
+                    for targetColumn in 0..<3 {
+                        if CGRect(x: targetColumn * 138, y: targetRow * 106, width: 130, height: 98).contains(position) {
+                            return rows[targetRow][targetColumn]
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+}
+
+struct ExplorerPreviewDrag: ViewModifier {
+    let enabled: Bool
+    let source: ExplorerSlot
+    let theme: ExplorerTheme
+    let count: Int
+    let depth: Int
+    var onChanged: (ExplorerSlot, ExplorerSlot?) -> Void
+    var onEnded: (ExplorerSlot, ExplorerSlot?) -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+            content.simultaneousGesture(DragGesture(minimumDistance: 8)
+                .onChanged { value in onChanged(source, ExplorerPreviewGeometry.dropTarget(at: value.location, from: source, theme: theme, count: count, depth: depth)) }
+                .onEnded { value in onEnded(source, ExplorerPreviewGeometry.dropTarget(at: value.location, from: source, theme: theme, count: count, depth: depth)) })
+        } else { content } // Never install an editing gesture on the live HUD.
+    }
+}
+
 enum ExplorerHUDMotion {
     static func enabled(theme: ExplorerTheme, preference: Bool, reduceMotion: Bool) -> Bool {
         theme.isHUD && preference && !reduceMotion

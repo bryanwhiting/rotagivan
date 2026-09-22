@@ -359,6 +359,12 @@ extension AppExplorerPresenting {
     }
 
     private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
+        Self.makeEntry(favorite, depth: depth, dictionary: hotkeyDictionary(), applicationURL: applicationURL)
+    }
+
+    /// Shared by the live HUD and its inert settings preview.
+    static func makeEntry(_ favorite: AppExplorerFavorite, depth: Int, dictionary: [NamedHotkey],
+                          applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }) -> ExplorerEntry {
         if let placement = favorite.windowPlacement {
             return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                 icon: nil, url: nil, tilingDirection: favorite.isValidDestination ? placement.direction : nil, tilingLayout: placement.layout)
@@ -370,7 +376,6 @@ extension AppExplorerPresenting {
             return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
         }
         if let shortcut = favorite.shortcut {
-            let dictionary = hotkeyDictionary()
             let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
             return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
                 icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
@@ -390,7 +395,7 @@ extension AppExplorerPresenting {
         }
         let url = favorite.bundleID.flatMap(applicationURL)
         return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
-            name: favorite.name, icon: url.map { workspace.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
+            name: favorite.name, icon: url.map { NSWorkspace.shared.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
     }
 
     private func loadRecentEntries() {
@@ -834,6 +839,9 @@ struct AppExplorerView: View {
     // accessibility preference in the opposite direction.
     var forceReduceMotion = false
     var forceReduceTransparency = false
+    var isPreview = false
+    var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
+    var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
     private var animates: Bool {
@@ -870,7 +878,7 @@ struct AppExplorerView: View {
                         .buttonStyle(.borderless).help("Customize favorites and groups here (E)")
                 }
                 Button(action: onCancel) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
-                    .buttonStyle(.plain).accessibilityLabel("Close App Explorer")
+                    .buttonStyle(.plain).disabled(isPreview).accessibilityLabel("Close App Explorer")
             }.background {
                 if model.theme.isFloating {
                     Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-10)
@@ -1041,6 +1049,7 @@ struct AppExplorerView: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain).disabled(!available)
+        .modifier(previewDrag(direction))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -1048,6 +1057,7 @@ struct AppExplorerView: View {
     }
 
     private func isAvailable(_ entry: ExplorerEntry?) -> Bool {
+        if isPreview { return true }
         guard let entry else { return false }
         return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
             entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.command != nil || entry.windowIndex != nil
@@ -1109,7 +1119,14 @@ struct AppExplorerView: View {
             .contentShape(RoundedRectangle(cornerRadius: 15))
         }
         .buttonStyle(.plain).disabled(!available)
+        .modifier(previewDrag(direction))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
+    }
+
+    private func previewDrag(_ direction: ExplorerSlot) -> ExplorerPreviewDrag {
+        ExplorerPreviewDrag(enabled: isPreview && !model.showingRecents && model.entries.contains { $0.direction == direction },
+            source: direction, theme: model.theme, count: model.slotCount, depth: model.groupNames.count,
+            onChanged: onPreviewDrag, onEnded: onPreviewDrop)
     }
 }

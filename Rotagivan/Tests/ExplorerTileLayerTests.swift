@@ -59,7 +59,7 @@ import Foundation
         invalid = settings; invalid.favorites = [baseApp]; invalid.favorites[0].holdLayers = [thirds]
         precondition(!invalid.hasValidFavorites, "Terminal app tiles do not open layer scopes")
         invalid = settings; invalid.holdShortcut = y
-        precondition(!invalid.hasValidFavorites, "Mode hotkey cannot conflict with a nested layer")
+        precondition(invalid.hasValidFavorites, "Retired root-mode hotkey must not block a nested layer key")
         var deep = baseApp
         for index in 0..<4 { deep = AppExplorerFavorite(direction: .left, name: "Group \(index)", children: [deep]) }
         invalid = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "Owner", children: [],

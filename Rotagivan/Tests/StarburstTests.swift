@@ -7,6 +7,21 @@ import SwiftUI
         precondition(!ExplorerHUDMotion.enabled(theme: .starburst, preference: false, reduceMotion: false))
         let rect = CGRect(x: 0, y: 0, width: 418, height: 310)
         let center = CGPoint(x: rect.midX, y: rect.midY)
+        for theme in ExplorerTheme.allCases {
+            for count in [4, 8, 12, 16] where theme.isRadial || count != 8 {
+                for depth in 0...4 {
+                    for slot in ExplorerSlot.slots(count) {
+                        let point = ExplorerStarburstLayout.point(slot, radius: 116, center: center)
+                        precondition(ExplorerPreviewGeometry.dropTarget(at: point, from: .up, theme: theme, count: count, depth: depth) == slot)
+                    }
+                    precondition(ExplorerPreviewGeometry.dropTarget(at: center, from: .up, theme: theme, count: count, depth: depth) == nil)
+                    precondition(ExplorerPreviewGeometry.dropTarget(at: CGPoint(x: -20, y: 0), from: .up, theme: theme, count: count, depth: depth) == nil)
+                }
+            }
+        }
+        precondition(ExplorerPreviewGeometry.dropTarget(at: CGPoint(x: 341, y: 49), from: .left, theme: .native, count: 8, depth: 0) == .right)
+        precondition(ExplorerPreviewGeometry.dropTarget(at: CGPoint(x: 203, y: 49), from: .left, theme: .native, count: 8, depth: 0) == nil)
+        print("HUD preview drop targets passed: actual sector paths, every theme/capacity/depth, center/outside rejection and Classic layout")
         for depth in 0...5 {
             let inner = ExplorerStarburstLayout.innerRadius(depth: depth)
             if depth > 0 { precondition(ExplorerStarburstLayout.ringRadius(depth - 1) + 6 < inner) }

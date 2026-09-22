@@ -552,12 +552,16 @@ action menu under **Single tap, then quick swipe** / **Double-tap, then swipe**.
 For example, assign **Swipe Down → App Explorer** under double-tap-then-swipe.
 No keyboard shortcut is required. Existing gesture bindings are not overwritten.
 
-In **HUD**, choose the default mode (initially **Favorites**)
-and assign an application, web URL, or named group to each of the eight positions.
+In **HUD**, the root always opens **Favorites**. The settings preview uses the same
+renderer as the actual HUD: its selected theme, 4/8/12/16 positions, icons,
+shortcut names and nested Starburst rings. Select a tile in the preview to edit
+it below, or drag between tiles to move/swap. Preview clicks never launch apps,
+send keys or move windows. Theme and appearance options are above the preview;
+the compact inline editor retains its tile controls.
 Each empty/app/URL slot menu offers **App launches → Choose app…**,
 **App launches → Open URL…** (or **Edit URL…**),
 and **Create tile group…**. Create a group, give it a name, and fill its own
-eight slots. **Edit group** opens its grid; breadcrumbs and the center **Back**
+slots. **Edit group** opens its layout; breadcrumbs and the center **Back**
 button return to its parent. **Rename…** preserves all contents. Removing a
 group asks for confirmation and removes its descendants too. Groups may contain
 more groups (up to four levels and 256 total entries); names, contents, and
@@ -616,11 +620,11 @@ or `http://` URL to add a website instead, with an optional display name.
 locally for launching Chrome apps that Launch Services has not indexed; those
 path hints are not exported or synced. Only the app bundle ID and name sync.
 
-Record **Hold for recent apps** to open the alternate mode while holding a key.
-If Recent apps is your default, the shortcut instead opens Favorites. Swipe and
-lift to select before releasing the key; releasing without selection cancels.
-The hotkey also opens the HUD directly, without requiring the opening gesture.
-Shortcut conflicts are reported; recording temporarily suspends registrations.
+Recent apps remain available through **Reserved Groups → Recent Apps** on any
+tile. The old **Default mode** and **Hold for recent apps** controls are removed.
+Legacy values remain readable in old YAML for lossless compatibility, but the
+root mode always resolves to Favorites and the old global shortcut is no longer
+registered or treated as a reserved key. HUD layer keys still work normally.
 
 Finish the opening gesture and lift. A frosted HUD shows your favorites, or up
 to eight other running apps in Recent mode. Recents start at the left and continue

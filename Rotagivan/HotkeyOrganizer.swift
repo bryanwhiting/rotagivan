@@ -103,10 +103,6 @@ struct HotkeyAudit {
                 action: dictionary.title(for: shortcut), shortcut: shortcut, enabled: settings.enabled && effective.enabled, inputScope: ""))
         }
         let explorer = settings.appExplorer ?? AppExplorerSettings()
-        if let key = explorer.holdShortcut {
-            assignments.append(Assignment(id: "hud.open", scope: "Global keyboard hotkeys", trigger: "Open alternate HUD",
-                action: dictionary.title(for: key), shortcut: key, enabled: settings.enabled, inputScope: ""))
-        }
         func layers(_ values: [ExplorerHoldLayer], path: String, depth: Int, active: Bool) {
             for layer in values {
                 if let key = layer.holdShortcut {

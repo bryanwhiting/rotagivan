@@ -13,7 +13,7 @@ enum ExplorerPreviewGeometry {
         if theme.isRadial || count != 8 {
             return ExplorerSlot.slots(count).first {
                 ExplorerStarburstSector(direction: $0, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth),
-                    outerRadius: 143, tip: theme.isFloating ? 2 : 11, halfAngle: 180 / Double(count) - 2)
+                    outerRadius: 143, tip: theme.isFloating ? 2 : 11, halfAngle: 180 / Double(count) - 2, roundedRim: theme.isFloating)
                     .path(in: CGRect(x: 0, y: 0, width: 418, height: 310)).contains(point)
             }
         }
@@ -68,11 +68,12 @@ extension ExplorerTheme {
         switch self {
         case .native: return .teal
         case .starburst: return Color(red: 0.73, green: 0.65, blue: 1)
-        case .starburstAir: return Color(red: 0.76, green: 0.96, blue: 0.87)
+        case .starburstAir: return Color(red: 0.25, green: 0.91, blue: 1)
         }
     }
     var surface: Color {
         if self == .starburst { return Color(red: 0.055, green: 0.043, blue: 0.105) }
+        if self == .starburstAir { return Color(red: 0.025, green: 0.065, blue: 0.10) }
         return Color(red: 0.025, green: 0.045, blue: 0.045)
     }
 }
@@ -96,25 +97,56 @@ struct ExplorerHUDBackdrop: View {
                 .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(theme.accent.opacity(0.28)))
                 .accessibilityHidden(true).allowsHitTesting(false)
         } else {
-            // A single native material surface separates Air from busy desktops.
-            // Keep the glass static: no blur filters, drawing loop, or input work.
-            let glass = RoundedRectangle(cornerRadius: 44, style: .continuous)
-            ZStack {
-                if opaque {
-                    glass.fill(theme.surface)
-                } else {
-                    glass.fill(.ultraThinMaterial)
-                    glass.fill(theme.surface.opacity(0.16))
-                    glass.fill(LinearGradient(colors: [.white.opacity(0.12), .clear, theme.accent.opacity(0.035)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-                glass.strokeBorder(LinearGradient(colors: [.white.opacity(0.42), .white.opacity(0.07), .white.opacity(0.20)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-            .padding(10)
-            .allowsHitTesting(false).accessibilityHidden(true)
+            // Air's material belongs to the wheel, not a rectangular window.
+            Color.clear.allowsHitTesting(false).accessibilityHidden(true)
         }
+    }
+}
+
+/// One static native material surface, shared by all wheel segments. No custom
+/// blur filter, continuous animation, or rendering work in the input callback.
+struct ExplorerAirGlass: View {
+    var opaque = false
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        let accent = ExplorerTheme.starburstAir.accent
+        ZStack {
+            if opaque || reduceTransparency {
+                Circle().fill(ExplorerTheme.starburstAir.surface)
+            } else {
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(ExplorerTheme.starburstAir.surface.opacity(0.58))
+            }
+            Circle().fill(LinearGradient(colors: [.white.opacity(0.12), .clear, accent.opacity(0.07)],
+                startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.65), accent.opacity(0.36), .white.opacity(0.12)],
+                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+        }
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 7)
+        .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+struct ExplorerAirSectorChrome: View {
+    let shape: ExplorerStarburstSector
+    let selected: Bool
+    let available: Bool
+    var opaque = false
+    var body: some View {
+        let accent = ExplorerTheme.starburstAir.accent
+        ZStack {
+            shape.fill(ExplorerTheme.starburstAir.surface.opacity(opaque ? 1 : selected ? 0.20 : 0.46))
+            shape.fill(RadialGradient(colors: [accent.opacity(selected ? 0.14 : 0.025),
+                accent.opacity(selected ? 0.60 : 0.075)], center: .center,
+                startRadius: shape.innerRadius, endRadius: shape.outerRadius + shape.tip))
+            shape.fill(LinearGradient(colors: [.white.opacity(selected ? 0.14 : 0.04), .clear],
+                startPoint: .topLeading, endPoint: .bottomTrailing))
+            shape.stroke(accent.opacity(selected ? 1 : available ? 0.63 : 0.24), lineWidth: selected ? 1.7 : 0.85)
+                .shadow(color: accent.opacity(selected ? 0.7 : 0), radius: selected ? 5 : 0)
+            if selected {
+                shape.stroke(.white.opacity(0.65), lineWidth: 0.55)
+            }
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -159,13 +191,14 @@ struct ExplorerThemePicker: View {
                             ExplorerHUDBackdrop(theme: option)
                             if option.isRadial {
                                 ZStack {
+                                    if option.isFloating { ExplorerAirGlass().frame(width: 54, height: 54) }
                                     ForEach(ExplorerSlot.allCases, id: \.self) { direction in
-                                        ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
-                                            .fill(option.isFloating ? option.surface.opacity(0.75) : option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
+                                        ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3, roundedRim: option.isFloating)
+                                            .fill(option.isFloating ? (direction == .topRight ? option.accent.opacity(0.6) : option.surface.opacity(0.55)) : option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
                                             .overlay {
                                                 if option.isFloating {
-                                                    ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3)
-                                                        .stroke(direction == .topRight ? option.accent : option.accent.opacity(0.3), lineWidth: 0.75)
+                                                    ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3, roundedRim: true)
+                                                        .stroke(direction == .topRight ? option.accent : option.accent.opacity(0.65), lineWidth: 0.75)
                                                 }
                                             }
                                     }
@@ -219,6 +252,7 @@ struct ExplorerStarburstSector: Shape {
     let outerRadius: Double
     var tip: Double = 0
     var halfAngle: Double = 20.5
+    var roundedRim = false
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let middle = ExplorerStarburstLayout.angle(direction)
@@ -228,9 +262,13 @@ struct ExplorerStarburstSector: Shape {
         }
         var path = Path()
         path.move(to: point(start, innerRadius))
-        path.addLine(to: point(start, outerRadius))
-        path.addLine(to: point(.degrees(middle), outerRadius + tip))
-        path.addLine(to: point(end, outerRadius))
+        path.addLine(to: point(start, roundedRim ? outerRadius + tip : outerRadius))
+        if roundedRim {
+            path.addArc(center: center, radius: outerRadius + tip, startAngle: start, endAngle: end, clockwise: false)
+        } else {
+            path.addLine(to: point(.degrees(middle), outerRadius + tip))
+            path.addLine(to: point(end, outerRadius))
+        }
         path.addLine(to: point(end, innerRadius))
         path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
         path.closeSubpath()

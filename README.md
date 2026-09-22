@@ -64,12 +64,14 @@ separate inspector below the preview. Dragging still moves or swaps tiles.
 
 Choose **HUD → Classic / Starburst / Starburst Air**, or use the palette menu
 while editing the HUD directly. Classic retains its native material appearance;
-Starburst keeps the violet radial panel. **Starburst Air** is the new default:
-floating charcoal sectors and thin mint-white perimeter arcs over a rounded,
-frosted-glass backdrop. Native macOS material, a fine reflective rim, and a soft
-shadow separate the HUD from busy desktops without a heavy panel. The settings
-preview uses the same glass. Nested breadcrumb rings and sector hit targets
-remain stable. Reduce Transparency replaces the glass with an opaque surface.
+Starburst keeps the violet radial panel. **Starburst Air** is the default:
+a floating wheel of smoky blue-black glass, crisp cyan segment outlines and a
+luminous cyan selected wedge. An amber center and lit breadcrumb rings separate
+the current level from its ancestors. One circular native macOS material surface,
+a reflective rim and a soft shadow separate it from busy desktops; there is no
+rectangular background. Settings previews use the same renderer and curved
+segment hit targets. Reduce Transparency replaces the glass with an opaque
+surface; Reduce Motion disables the brief appearance and selection transitions.
 
 Vector HUD and Ember are retired. Saved/imported selections of either migrate
 to Starburst Air; Classic and Starburst selections are preserved. Layouts,

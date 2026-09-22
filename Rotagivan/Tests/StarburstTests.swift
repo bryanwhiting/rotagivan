@@ -57,6 +57,23 @@ import SwiftUI
             precondition(decoded == theme)
         }
         precondition(ExplorerTheme.starburstAir.isRadial && ExplorerTheme.starburstAir.isFloating)
+        for count in [4, 8, 12, 16] {
+            for depth in 0...5 {
+                for slot in ExplorerSlot.slots(count) {
+                    let halfAngle = 180 / Double(count) - 2
+                    let shape = ExplorerStarburstSector(direction: slot,
+                        innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth),
+                        outerRadius: 143, tip: 2, halfAngle: halfAngle, roundedRim: true)
+                    let angle = (slot.angle + halfAngle * 0.5) * .pi / 180
+                    let point = CGPoint(x: center.x + cos(angle) * 144, y: center.y + sin(angle) * 144)
+                    precondition(shape.path(in: rect).contains(point), "Air's curved glass rim must be selectable")
+                    precondition(ExplorerPreviewGeometry.dropTarget(at: point, from: .up, theme: .starburstAir,
+                        count: count, depth: depth) == slot, "Editor and rendered glass must use identical curved hit targets")
+                    precondition(!shape.path(in: rect).contains(center))
+                    precondition(rect.contains(shape.path(in: rect).boundingRect))
+                }
+            }
+        }
         precondition(!ExplorerHUDMotion.enabled(theme: .starburstAir, preference: true, reduceMotion: true))
         print("Starburst passed: radial geometry, hit targets, center exclusion, nested rings, three-theme catalog, retired-theme migration, persistence and reduced motion.")
     }

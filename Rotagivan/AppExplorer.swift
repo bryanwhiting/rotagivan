@@ -905,7 +905,8 @@ struct AppExplorerView: View {
                     .buttonStyle(.plain).disabled(isPreview).accessibilityLabel("Close App Explorer")
             }.background {
                 if model.theme.isFloating {
-                    Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-10)
+                    Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.94))
+                        .overlay(Capsule().strokeBorder(accent.opacity(0.3), lineWidth: 0.7)).padding(-10)
                 }
             }
             if model.showingWindowManager && model.windowFullScreen {
@@ -991,6 +992,9 @@ struct AppExplorerView: View {
         let depth = min(5, names.count)
         let center = CGPoint(x: 209, y: 155)
         return ZStack {
+            if model.theme.isFloating {
+                ExplorerAirGlass(opaque: opaqueChrome).frame(width: 304, height: 304).position(center)
+            }
             // Each completed level leaves a concentric breadcrumb. The lit
             // sector records the direction taken at that level, not a guess
             // based on a group's name (duplicate names are allowed).
@@ -1000,7 +1004,7 @@ struct AppExplorerView: View {
                 let count = model.groupSlotCounts.indices.contains(level) ? model.groupSlotCounts[level] : 8
                 ForEach(ExplorerSlot.slots(count), id: \.self) { sector in
                     ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6, halfAngle: 180 / Double(count) - 2)
-                        .fill(direction == sector ? accent.opacity(0.95 - Double(level) * 0.1) : accent.opacity(0.12))
+                        .fill(direction == sector ? (model.theme.isFloating ? Color(red: 1, green: 0.77, blue: 0.40) : accent).opacity(0.95 - Double(level) * 0.1) : accent.opacity(model.theme.isFloating ? 0.3 : 0.12))
                         .frame(width: 418, height: 310)
                         .accessibilityHidden(true)
                 }
@@ -1016,10 +1020,12 @@ struct AppExplorerView: View {
                     Text(String(format: "%02d", depth + 1))
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 }
-                .foregroundStyle(accent)
+                .foregroundStyle(model.theme.isFloating ? Color(red: 1, green: 0.83, blue: 0.54) : accent)
                 .frame(width: 54, height: 54)
                 .background(Circle().fill(model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.88 : 1)))
-                .overlay(Circle().strokeBorder(accent.opacity(0.45)))
+                .overlay(Circle().strokeBorder(model.theme.isFloating ? Color(red: 1, green: 0.78, blue: 0.43) : accent.opacity(0.45),
+                    lineWidth: model.theme.isFloating ? 1.5 : 1))
+                .shadow(color: model.theme.isFloating ? Color.orange.opacity(0.28) : .clear, radius: 4)
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -1037,13 +1043,12 @@ struct AppExplorerView: View {
         let selected = model.selected == direction && available
         let shape = ExplorerStarburstSector(direction: direction,
             innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: model.theme.isFloating ? 2 : 11,
-            halfAngle: 180 / Double(model.slotCount) - 2)
+            halfAngle: 180 / Double(model.slotCount) - 2, roundedRim: model.theme.isFloating)
         let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
         return Button { onSelect(direction) } label: {
             ZStack {
                 if model.theme.isFloating {
-                    shape.fill(model.theme.surface.opacity(opaqueChrome ? 1 : (selected ? 0.92 : 0.72)))
-                    shape.stroke(accent.opacity(selected ? 0.95 : 0.08), lineWidth: selected ? 1.25 : 0.5)
+                    ExplorerAirSectorChrome(shape: shape, selected: selected, available: available, opaque: opaqueChrome)
                     Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
                         .stroke(accent.opacity(selected ? 1 : available ? 0.5 : 0.15), style: StrokeStyle(lineWidth: selected ? 2 : 0.75, lineCap: .round))
                         .frame(width: 294, height: 294)
@@ -1058,15 +1063,16 @@ struct AppExplorerView: View {
                 VStack(spacing: 3) {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
-                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: .medium))
+                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: model.theme.isFloating ? .semibold : .medium))
                             .lineLimit(entry.shortcut == nil ? 2 : 3).multilineTextAlignment(.center)
                     } else {
                         Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
                 }
-                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 54 : 78), height: model.slotCount > 8 ? 40 : 50)
+                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: model.slotCount > 8 ? 40 : 50)
                 .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(0.85)) : Color.primary)
+                .shadow(color: model.theme.isFloating ? .black.opacity(0.8) : .clear, radius: 1, y: 1)
                 .position(point)
             }
             .frame(width: 418, height: 310)

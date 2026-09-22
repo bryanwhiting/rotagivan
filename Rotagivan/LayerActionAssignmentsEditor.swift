@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LayerActionAssignmentsEditor: View {
     @Binding var gestures: ProfileGestures
-    var distanceScale: TrackpadDistanceScale? = nil
     @State private var showingAddAction = false
 
     private var assignments: [AppGestureBinding] {
@@ -63,14 +62,11 @@ struct LayerActionAssignmentsEditor: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
 
-            DisclosureGroup {
-                LayerSwipeRecognitionEditor(gestures: $gestures, distanceScale: distanceScale)
-                    .padding(.top, 10)
-            } label: {
-                Label("Swipe recognition", systemImage: "slider.horizontal.3")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .padding(.horizontal, 2)
+            Label("Gesture timing, movement thresholds, and swipe recognition are in Calibration.",
+                  systemImage: "dial.low")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .sheet(isPresented: $showingAddAction) {
             AddLayerActionSheet(existing: Set(assignments.map(\.trigger))) { trigger, action, shortcut in
@@ -412,7 +408,7 @@ struct AddLayerActionSheet: View {
     }
 }
 
-private struct LayerSwipeRecognitionEditor: View {
+struct LayerSwipeRecognitionEditor: View {
     @Binding var gestures: ProfileGestures
     var distanceScale: TrackpadDistanceScale?
 

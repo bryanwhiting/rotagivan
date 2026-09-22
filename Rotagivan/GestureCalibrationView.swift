@@ -3,18 +3,15 @@ import SwiftUI
 struct TapCalibrationSettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
-    @State private var device: GestureDevice = .navigator
+    @Binding var device: GestureDevice
 
     private var reference: ProfileGestures { store.gestures(for: store.defaultProfileID, device: device) }
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Calibrate once for all layers in \(store.activeConfigurationName). Actions remain separate; each trackpad keeps its own timing, even when actions are shared.")
+                Text("Practice with one finger. Double- and triple-tap rhythm applies to one- and two-finger taps across every layer in \(store.activeConfigurationName). Swipe practice tunes one-finger families; tune two-finger swipe families below.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Picker("Trackpad", selection: $device) {
-                    ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented)
                 HStack {
                     calibrate("Double tap…", mode: .doubleTap)
                     calibrate("Triple tap…", mode: .tripleTap)
@@ -34,12 +31,12 @@ struct TapCalibrationSettingsView: View {
                         timing("Tap + swipe · window", key: \.singleSwipeWindow, fallback: (reference.singleTapSwipe ?? .singleTapDefaults).resolvedWindow, range: 100...800)
                         timing("Tap + swipe · duration", key: \.singleSwipeDuration, fallback: (reference.singleTapSwipe ?? .singleTapDefaults).resolvedFastDuration, range: 60...300)
                         timing("Double tap + swipe · window", key: \.doubleSwipeWindow, fallback: (reference.doubleTapSwipe ?? DoubleTapSwipeSettings()).resolvedWindow, range: 100...800)
-                        Text("Swipe calibration uses one finger. Existing layer timings are preserved until you calibrate or edit that timing here. Before then, the values shown come from the default layer.")
+                        Text("These learned timings cover double taps, triple taps, tap + swipe, and double tap + swipe. Two-finger swipe-family distance and timing remain independently adjustable below.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(.top, 10)
                 }
             }.padding(10)
-        } label: { Label("Tap calibration", systemImage: "stopwatch") }
+        } label: { Label("Shared timing practice", systemImage: "stopwatch") }
     }
 
     private func calibrate(_ title: String, mode: GestureCalibrationMode) -> some View {

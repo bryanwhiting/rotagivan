@@ -48,7 +48,7 @@ struct ContentView: View {
     private let initialHUDGroup: ExplorerReservedGroup?
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
-        ("Layers", "square.3.layers.3d"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
+        ("Layers", "square.3.layers.3d"), ("Calibration", "dial.low"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
@@ -119,7 +119,7 @@ struct ContentView: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if selection != "Layers" && selection != "Pointer & scrolling" {
+                        if selection != "Layers" && selection != "Calibration" && selection != "Pointer & scrolling" {
                             Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                             Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
                                 .font(.callout).foregroundStyle(.secondary)
@@ -129,6 +129,7 @@ struct ContentView: View {
                         case "Devices": devices
                         case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
                         case "Macros": HotkeyOrganizerView(store: store)
+                        case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
                         case "App overrides": AppOverridesView(store: store)
                         case "Pointer & scrolling": pointerSettings
                         default: profiles
@@ -512,29 +513,11 @@ struct ContentView: View {
             if editingAppleActions ? store.settings.devices?.appleLayerGestures?[id] != nil : (id == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(id)) {
             Toggle("Enable tap actions", isOn: gesture(id, \.tapToClick))
             if editableGestures(id).gestures.tapToClick {
-                LayerActionAssignmentsEditor(
-                    gestures: gestureBinding(id),
-                    distanceScale: hid.distanceScale
-                )
+                LayerActionAssignmentsEditor(gestures: gestureBinding(id))
                 Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Calibrate tap timing for every layer in General → Tap calibration.")
+                Text("Tune tap timing, movement thresholds, and all tap + swipe families in Calibration.")
                     .font(.caption).foregroundStyle(.secondary)
-                tapImpactSpeedSlider(id)
-                Toggle("Keep cursor still while tapping", isOn: Binding(get: {
-                    editableGestures(id).gestures.resolvedKeepCursorStillForTaps
-                }, set: { enabled in
-                    var taps = editableGestures(id)
-                    taps.gestures.keepCursorStillForTaps = enabled
-                    updateEditableGestures(taps, for: id)
-                }))
-                TrackpadDistanceControl(title: "Tap movement radius", units: gesture(id, \.tapMaxMovement),
-                    scale: hid.distanceScale, range: 0...ProfileMaximum.tapMovement,
-                    explanation: "How far one finger may move from its landing point and still count as a tap. Two-finger taps use accumulated movement. This does not limit the distance between separate taps.")
-                if editableGestures(id).gestures.resolvedKeepCursorStillForTaps {
-                    Text("Tap wobble within this radius won't move the cursor. Move beyond it or hold past Tap impact speed to start tracking. Lower the radius for quicker fine movement. Tap-and-hold dragging still works.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
             }
             if !editingAppleActions {
             Divider()
@@ -555,32 +538,6 @@ struct ContentView: View {
     }
 
 
-    private func tapImpactSpeedSlider(_ id: UInt32) -> some View {
-        let milliseconds = Binding<Double>(get: {
-            editableGestures(id).gestures.tapMaxDuration * 1_000
-        }, set: { value in
-            var profileGestures = editableGestures(id)
-            profileGestures.gestures.tapMaxDuration = min(1_000, max(0, value.rounded())) / 1_000
-            updateEditableGestures(profileGestures, for: id)
-        })
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Tap impact speed").foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                Slider(value: milliseconds, in: 0...min(1_000, max(10, store.settings.sliderBaseline(for: id).tapImpactSpeed * 2_000)), step: 10)
-                    .accessibilityLabel("Tap impact speed in milliseconds")
-                TextField("Milliseconds", value: milliseconds, format: .number.precision(.fractionLength(0)))
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .frame(width: 52)
-                    .accessibilityLabel("Tap impact speed in milliseconds")
-            }
-            Text("Maximum finger-down time for a tap. Lower milliseconds require a quicker tap.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(width: 270)
-    }
 
     private var navigatorDragging: some View {
         let dragging = Binding(get: { store.navigatorDragging }, set: { store.updateNavigatorDragging($0) })
@@ -603,8 +560,6 @@ struct ContentView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 22) {
-            TapCalibrationSettingsView(store: store, hid: hid)
-            Divider()
             Section("Status") {
                 LabeledContent("Navigator") { Text(statusText) }
                 Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }

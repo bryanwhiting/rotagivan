@@ -127,6 +127,29 @@ struct ExplorerAirGlass: View {
     }
 }
 
+/// Keep keyboard navigation visible without AppKit's unrelated blue focus halo.
+struct ExplorerSectorFocus: ViewModifier {
+    let theme: ExplorerTheme
+    let shape: ExplorerStarburstSector
+    @FocusState private var focused: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 14.0, *), theme.isHUD {
+            content
+                .focusEffectDisabled()
+                .focused($focused)
+                .overlay {
+                    if focused {
+                        shape.stroke(theme.accent.opacity(0.9), lineWidth: 1.5)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
 struct ExplorerAirSectorChrome: View {
     let shape: ExplorerStarburstSector
     let selected: Bool

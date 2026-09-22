@@ -1114,6 +1114,7 @@ struct AppExplorerView: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain).disabled(!available)
+        .modifier(ExplorerSectorFocus(theme: model.theme, shape: shape))
         .modifier(previewDrag(direction))
         .anchorPreference(key: ExplorerTileAnchors.self, value: .rect(CGRect(x: point.x - 26, y: point.y - 24, width: 52, height: 48))) {
             isPreview ? [direction: $0] : [:]

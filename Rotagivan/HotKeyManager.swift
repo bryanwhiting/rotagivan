@@ -1,4 +1,5 @@
 import Carbon
+import AppKit
 import Foundation
 import Combine
 
@@ -115,6 +116,15 @@ final class HotKeyManager {
     var profileName: ((UInt32) -> String?)?
     var onAction: ((UInt32, Bool) -> Void)?
     var onExplorerHold: ((Bool) -> Void)?
+    var onHUDLayer: ((UUID) -> Void)?
+    private var hudLayers: [ExplorerHoldLayer] = []
+    private var hudLaunchIDs: [UInt32: UUID] = [:]
+    private var hudPressed = Set<UInt32>()
+    func configureHUDLayers(_ layers: [ExplorerHoldLayer]) {
+        guard layers != hudLayers else { return }
+        hudLayers = layers
+        if handler != nil { registerActions() }
+    }
     private var explorerShortcut: RecordedShortcut?
     func configureExplorer(_ shortcut: RecordedShortcut?) {
         guard shortcut != explorerShortcut else { return }
@@ -209,10 +219,19 @@ final class HotKeyManager {
             guard result == noErr else { return result }
             let owner = Unmanaged<HotKeyManager>.fromOpaque(context).takeUnretainedValue()
             let down = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-            DispatchQueue.main.async { owner.handle(id: id.id, down: down) }
+            DispatchQueue.main.async {
+                if id.signature == HotKeyManager.fourCC("RHUD") {
+                    if down, !owner.recording, owner.hudPressed.insert(id.id).inserted,
+                       let layer = owner.hudLaunchIDs[id.id] { owner.onHUDLayer?(layer) }
+                    else if !down { owner.hudPressed.remove(id.id) }
+                } else { owner.handle(id: id.id, down: down) }
+            }
             return noErr
         }
         InstallEventHandler(GetApplicationEventTarget(), callback, eventTypes.count, &eventTypes, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification).sink { [weak self] _ in
+            MainActor.assumeIsolated { if self?.hudLayers.contains(where: { $0.appBundleID != nil }) == true { self?.registerActions() } }
+        }.store(in: &recordingObservers)
 
         observation = ShortcutSettings.shared.$normal.combineLatest(ShortcutSettings.shared.$precision, ShortcutSettings.shared.$additional)
             .sink { [weak self] normal, precision, additional in
@@ -278,6 +297,8 @@ final class HotKeyManager {
         actionRefs.compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
         actionRefs.removeAll()
         ShortcutSettings.shared.error = profileError
+        hudLaunchIDs.removeAll()
+        hudPressed.removeAll()
         let actions = Self.resolvedActions(for: activation.active, defaults: defaultActions, saved: savedActions, customTapProfiles: customTapProfiles, defaultID: defaultProfileID)
         var used = profileCombinations
         for (index, shortcut) in actions.prefix(3).enumerated() where shortcut.enabled {
@@ -295,6 +316,23 @@ final class HotKeyManager {
             let result = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: UInt32(index + 3)), GetApplicationEventTarget(), 0, &ref)
             if result != noErr { ShortcutSettings.shared.error = "\(name) shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
+        }
+        for (index, layer) in hudLayers.enumerated() where layer.isAvailable(in: NSWorkspace.shared.frontmostApplication?.bundleIdentifier) {
+            guard let shortcut = layer.launchShortcut, shortcut.isPhysicalShortcut else { continue }
+            let carbonFlags = UInt32((shortcut.modifiers & (1 << 18) != 0 ? 4096 : 0) |
+                (shortcut.modifiers & (1 << 19) != 0 ? 2048 : 0) |
+                (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
+                (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
+            let profileKey = ProfileShortcut(keyCode: UInt32(shortcut.keyCode), modifiers: carbonFlags, enabled: true)
+            guard shortcut.keyCode != 53, shortcut.keyCode >= 64 || profileKey.modifiers != 0,
+                  used.insert("\(profileKey.keyCode):\(profileKey.modifiers)").inserted else {
+                ShortcutSettings.shared.error = "HUD layer \(layer.name) has an invalid or conflicting launch key."; continue
+            }
+            let id = UInt32(index)
+            var ref: EventHotKeyRef?
+            let result = RegisterEventHotKey(profileKey.keyCode, profileKey.modifiers, EventHotKeyID(signature: Self.fourCC("RHUD"), id: id), GetApplicationEventTarget(), 0, &ref)
+            if result == noErr { hudLaunchIDs[id] = layer.id; actionRefs.append(ref) }
+            else { ShortcutSettings.shared.error = "HUD layer \(layer.name) launch key is unavailable." }
         }
         if let shortcut = explorerShortcut {
             let modifiers = UInt32((shortcut.modifiers & (1 << 18) != 0 ? 4096 : 0) |

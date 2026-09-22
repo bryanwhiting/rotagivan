@@ -287,6 +287,10 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var windowLayout: ExplorerWindowLayout = .halves
     var slotCount: Int? = nil
     var activation: ExplorerLayerActivation? = nil
+    var launchShortcut: RecordedShortcut? = nil
+    var appBundleID: String? = nil
+    var appName: String? = nil
+    func isAvailable(in bundleID: String?) -> Bool { appBundleID == nil || appBundleID == bundleID }
     // Old Window Manager layers generated their slots from windowLayout.
     // True distinguishes a deliberately empty custom grid from a legacy preset.
     var windowTilesConfigured: Bool? = nil
@@ -523,9 +527,11 @@ struct AppExplorerSettings: Codable, Equatable {
                 guard remainingLayers >= 0, !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       layer.name.count <= 128, layer.slotCount == nil || [4, 8, 12, 16].contains(layer.slotCount!) else { return false }
                 if let key = layer.holdShortcut {
-                    guard key.isValidExplorerShortcut, key.keyCode != 53,
+                    guard key.isPhysicalShortcut, key.keyCode != 53,
                           keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
                 }
+                if let key = layer.launchShortcut, !key.isPhysicalShortcut || key.keyCode == 53 || (key.keyCode < 64 && key.modifiers == 0) { return false }
+                if let app = layer.appBundleID, app.isEmpty || app.count > 512 { return false }
                 guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count) else { return false }
             }
             return true
@@ -552,7 +558,7 @@ struct AppExplorerSettings: Codable, Equatable {
             for binding in windowManager.shortcuts {
                 let key = binding.shortcut
                 guard AppExplorerAction.windowCommands.contains(binding.command), commands.insert(binding.command).inserted,
-                      key.isValidExplorerShortcut, key.keyCode != 53,
+                      key.isPhysicalShortcut, key.keyCode != 53,
                       keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
             }
         }
@@ -707,6 +713,11 @@ struct ExplorerScopedHeldKeys {
     private var held: [Press] = []
     var activeID: UUID? { held.last?.id }
     var activeScope: [ExplorerSlot]? { held.last?.scope }
+    @discardableResult mutating func selectRootLayer(_ id: UUID, settings: AppExplorerSettings) -> Bool {
+        guard settings.holdLayers?.contains(where: { $0.id == id }) == true else { return false }
+        held = [Press(key: UInt16.max, modifiers: 0, id: id, scope: [], toggled: true)]
+        return true
+    }
     func resolved(_ original: AppExplorerSettings) -> AppExplorerSettings {
         held.reduce(original) { settings, press in
             guard let layer = settings.layers(at: press.scope).first(where: { $0.id == press.id }) else { return settings }
@@ -723,7 +734,7 @@ struct ExplorerScopedHeldKeys {
         }
         return active
     }
-    mutating func press(key: UInt16, modifiers: UInt64, path: [ExplorerSlot], settings: AppExplorerSettings) -> Bool {
+    mutating func press(key: UInt16, modifiers: UInt64, path: [ExplorerSlot], settings: AppExplorerSettings, bundleID: String? = nil) -> Bool {
         if let existing = held.first(where: { $0.key == key }) {
             if existing.toggled { held.removeAll { $0.key == key } }
             return true
@@ -731,7 +742,7 @@ struct ExplorerScopedHeldKeys {
         let current = resolved(settings)
         let scope = current.layerScope(at: path)
         guard let layer = current.layers(at: scope).first(where: {
-            $0.holdShortcut?.keyCode == key && $0.holdShortcut?.modifiers == modifiers
+            $0.holdShortcut?.keyCode == key && $0.holdShortcut?.modifiers == modifiers && $0.isAvailable(in: bundleID)
         }) else { return false }
         held.append(Press(key: key, modifiers: modifiers, id: layer.id, scope: scope, toggled: layer.activation == .toggle))
         return true
@@ -867,15 +878,30 @@ struct RecordedShortcut: Codable, Equatable {
     var keyCode: UInt16
     var modifiers: UInt64
     var keyLabel: String
+    // Stable action references share the existing tap/swipe payload slot. They
+    // are never posted or registered as physical keyboard events.
+    var macroID: String? = nil
+    var hudLayerID: UUID? = nil
+    var isActionReference: Bool { macroID != nil || hudLayerID != nil }
+    static func macro(_ entry: NamedHotkey) -> Self { Self(keyCode: 0, modifiers: 0, keyLabel: entry.name, macroID: entry.id) }
+    static func hudLayer(_ layer: ExplorerHoldLayer) -> Self { Self(keyCode: 0, modifiers: 0, keyLabel: layer.name, hudLayerID: layer.id) }
     /// Labels do not participate in key identity (keyboard layouts can rename a key).
-    var identity: String { "\(keyCode):\(modifiers & 0x1e0000)" }
+    var identity: String { macroID.map { "macro:\($0)" } ?? hudLayerID.map { "hud:\($0)" } ?? "\(keyCode):\(modifiers & 0x1e0000)" }
     var readableCombination: String {
+        if isActionReference { return hudLayerID == nil ? "Macro: \(keyLabel)" : "HUD layer: \(keyLabel)" }
         let parts = [(UInt64(1 << 20), "Cmd"), (1 << 18, "Ctrl"), (1 << 19, "Option"), (1 << 17, "Shift")]
         return (parts.compactMap { modifiers & $0.0 != 0 ? $0.1 : nil } + [keyLabel]).joined(separator: "+")
     }
     var isValidExplorerShortcut: Bool {
+        if isActionReference {
+            return (macroID == nil || hudLayerID == nil) && keyCode == 0 && modifiers == 0 &&
+                (macroID.map { !$0.isEmpty && $0.count <= 128 } ?? true) && !keyLabel.isEmpty && keyLabel.count <= 128
+        }
+        return isPhysicalShortcut
+    }
+    var isPhysicalShortcut: Bool {
         let allowedModifiers: UInt64 = (1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)
-        return keyCode <= 127 && modifiers & ~allowedModifiers == 0 &&
+        return !isActionReference && keyCode <= 127 && modifiers & ~allowedModifiers == 0 &&
             !keyLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && keyLabel.count <= 128 &&
             !keyLabel.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
     }
@@ -885,22 +911,30 @@ struct NamedHotkey: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
     var shortcut: RecordedShortcut
+    var steps: [RecordedShortcut]? = nil
+    var stepDelayMilliseconds: Int? = nil
+    var resolvedSteps: [RecordedShortcut] { steps ?? [shortcut] }
+    var resolvedDelay: Int { stepDelayMilliseconds ?? 100 }
+    var summary: String { resolvedSteps.map(\.readableCombination).joined(separator: " → ") }
     var isValid: Bool {
         !id.isEmpty && id.count <= 128 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isValidExplorerShortcut
+        name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isPhysicalShortcut &&
+        !resolvedSteps.isEmpty && resolvedSteps.count <= 32 && resolvedSteps.allSatisfy(\.isPhysicalShortcut) && (0...2000).contains(resolvedDelay)
     }
 }
 
 extension Array where Element == NamedHotkey {
     func label(for shortcut: RecordedShortcut) -> String? {
-        first { $0.shortcut.identity == shortcut.identity }?.name
+        if let id = shortcut.macroID { return first { $0.id == id }?.name }
+        return first { $0.resolvedSteps.count == 1 && $0.shortcut.identity == shortcut.identity }?.name
     }
     func title(for shortcut: RecordedShortcut) -> String {
-        label(for: shortcut).map { "\($0) (\(shortcut.readableCombination))" } ?? shortcut.readableCombination
+        if let id = shortcut.macroID { return first { $0.id == id }.map { "\($0.name) (\($0.summary))" } ?? "Missing macro: \(shortcut.keyLabel)" }
+        return label(for: shortcut).map { "\($0) (\(shortcut.readableCombination))" } ?? shortcut.readableCombination
     }
     var isValidDictionary: Bool {
         count <= 500 && allSatisfy(\.isValid) && Set(map(\.id)).count == count &&
-        Set(map { $0.shortcut.identity }).count == count
+        Set(filter { $0.steps == nil }.map { $0.shortcut.identity }).count == filter { $0.steps == nil }.count
     }
 }
 

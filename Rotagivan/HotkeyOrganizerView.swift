@@ -19,10 +19,10 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Name reusable shortcuts and understand what wins. This organizer covers bindings configured in Rotagivan—not shortcuts privately configured in other apps or macOS.")
+            Text("Build reusable macros: key combinations sent one after another. Review conflicts and app overrides for bindings configured in Rotagivan.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("View", selection: $tab) {
-                Text("Dictionary").tag("Dictionary")
+                Text("Macros").tag("Dictionary")
                 Text("Conflicts & overrides").tag("Conflicts")
                 Text("All assignments").tag("Assignments")
             }.pickerStyle(.segmented)
@@ -54,39 +54,39 @@ struct HotkeyOrganizerView: View {
                 editing = nil
             }, onCancel: { editing = nil })
         }
-        .alert("Remove shortcut name?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+        .alert("Remove macro?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Remove", role: .destructive) {
                 store.settings.hotkeyDictionary = store.settings.resolvedHotkeyDictionary.filter { $0.id != deleting?.id }
                 deleting = nil
             }
             Button("Cancel", role: .cancel) { deleting = nil }
-        } message: { Text("Assigned actions keep their key combinations. Only the dictionary name is removed.") }
+        } message: { Text("Actions referencing this macro will stop working until reassigned. Legacy key-combination assignments keep their original keystroke.") }
         .onReceive(store.$activeConfigurationID.dropFirst()) { _ in editing = nil; deleting = nil; layer = 0 }
     }
 
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("\(store.settings.resolvedHotkeyDictionary.count) named shortcuts").foregroundStyle(.secondary)
+                Text("\(store.settings.resolvedHotkeyDictionary.count) macros").foregroundStyle(.secondary)
                 Spacer()
                 Button { editing = NamedHotkey(name: "", shortcut: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")) } label: {
-                    Label("Add hotkey", systemImage: "plus")
+                    Label("Add macro", systemImage: "plus")
                 }.disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
             }
-            Text("Names are shared across this profile’s layers, app rules and HUD tiles, and travel with YAML/sync. Adding a name does not register a new hotkey. Choose saved names from any shortcut editor’s ••• menu.")
+            Text("Assign a macro from an action’s ••• menu in layers, app overrides, or HUD tiles. Editing its sequence updates every macro assignment. Macros travel with YAML/sync; creating one does not register a global hotkey.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if store.settings.resolvedHotkeyDictionary.isEmpty {
-                Label("Your dictionary is empty. Add a shortcut and give it a meaningful name.", systemImage: "book.closed")
+                Label("No macros yet. Add a named sequence of keystrokes.", systemImage: "book.closed")
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
-            ForEach(store.settings.resolvedHotkeyDictionary.filter { matches($0.name + " " + $0.shortcut.readableCombination) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
+            ForEach(store.settings.resolvedHotkeyDictionary.filter { matches($0.name + " " + $0.summary) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
                 HStack(spacing: 12) {
                     Image(systemName: "keyboard").foregroundStyle(.secondary)
                     Text(entry.name).fontWeight(.medium)
                     Spacer()
-                    Text(entry.shortcut.readableCombination).monospaced().foregroundStyle(.secondary)
+                    Text(entry.summary).monospaced().foregroundStyle(.secondary).lineLimit(2)
                     Button("Edit") { editing = entry }
-                    Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove dictionary name")
+                    Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove macro")
                 }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
@@ -131,21 +131,40 @@ struct NamedHotkeyEditor: View {
     var onSave: (NamedHotkey) -> Void
     var onCancel: () -> Void
     @State private var action: TapAction = .shortcut
-    private var duplicate: NamedHotkey? { existing.first { $0.id != entry.id && $0.shortcut.identity == entry.shortcut.identity } }
+    private func updateSteps(_ steps: [RecordedShortcut]) {
+        entry.steps = steps
+        if let first = steps.first { entry.shortcut = first }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Named hotkey", systemImage: "book.closed").font(.headline)
-            TextField("Shortcut name", text: $entry.name).textFieldStyle(.roundedBorder)
-            TapActionEditor(title: "Key combination", action: $action, shortcut: Binding(get: { entry.shortcut }, set: { if let value = $0 { entry.shortcut = value } }), keyboardOnly: true)
-            Text("Names update matching HUD tiles automatically. Changing this combination only changes the dictionary entry—it does not rebind existing actions.")
+            Label("Macro", systemImage: "keyboard").font(.headline)
+            TextField("Macro name", text: $entry.name).textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(Array(entry.resolvedSteps.indices), id: \.self) { index in
+                        HStack {
+                            TapActionEditor(title: "Step \(index + 1)", action: $action, shortcut: Binding(get: {
+                                entry.resolvedSteps.indices.contains(index) ? entry.resolvedSteps[index] : nil
+                            }, set: { value in
+                                guard let value, value.isPhysicalShortcut, entry.resolvedSteps.indices.contains(index) else { return }
+                                var steps = entry.resolvedSteps; steps[index] = value; updateSteps(steps)
+                            }), keyboardOnly: true, physicalKeysOnly: true)
+                            Button { var steps = entry.resolvedSteps; steps.swapAt(index, index - 1); updateSteps(steps) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).help("Move step earlier")
+                            Button { var steps = entry.resolvedSteps; steps.remove(at: index); updateSteps(steps) } label: { Image(systemName: "minus.circle") }.disabled(entry.resolvedSteps.count == 1).help("Remove step")
+                        }
+                    }
+                }
+            }.frame(height: min(320, CGFloat(entry.resolvedSteps.count) * 66))
+            Button("Add keystroke") { updateSteps(entry.resolvedSteps + [RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return")]) }.disabled(entry.resolvedSteps.count >= 32)
+            Stepper("Delay between steps: \(entry.resolvedDelay) ms", value: Binding(get: { entry.resolvedDelay }, set: { entry.stepDelayMilliseconds = $0 }), in: 0...2000, step: 25)
+            Text("Up to 32 combinations, in order. Each is fully released before the next. Playback stops if the frontmost app changes. Existing plain-shortcut assignments retain their original keys; choose this macro from the action menu to link them.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let duplicate { Text("This combination is already named “\(duplicate.name)”. Edit that entry instead.").foregroundStyle(.orange).font(.caption) }
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); onSave(entry) }
-                    .keyboardShortcut(.defaultAction).disabled(!entry.isValid || duplicate != nil)
+                Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); updateSteps(entry.resolvedSteps); onSave(entry) }
+                    .keyboardShortcut(.defaultAction).disabled(!entry.isValid)
             }
-        }.padding(24).frame(width: 440)
+        }.padding(24).frame(width: 560)
     }
 }

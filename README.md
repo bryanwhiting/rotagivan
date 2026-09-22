@@ -4,6 +4,36 @@ An editable, independent macOS driver and settings app for the ZSA Navigator Tra
 
 ## HUD appearance
 
+### Macros and direct HUD layers
+
+The **Macros** page replaces Hotkeys. A macro is a named sequence of 1–32
+keystrokes, with a configurable 0–2000 ms delay between steps. Add, record,
+reorder, or remove steps in its editor. Playback serializes complete chords off
+the input/UI thread and stops between steps if the frontmost app changes.
+Choose **••• → Macros** in a tap/swipe action or a HUD tile's
+**Macros & keystrokes** editor. Macro references follow subsequent edits;
+existing plain-shortcut assignments retain their original keystrokes. Removing
+a referenced macro makes that action inactive, with a warning in the organizer.
+The legacy `hotkeyDictionary` YAML field is retained for import compatibility;
+entries without `steps` are one-step macros. Settings and sync include the full
+sequence and its stable ID.
+
+**HUD** is directly below **Devices**. Add/edit a top-level HUD layer to assign
+an **Open this HUD layer from anywhere** keyboard shortcut, or choose
+**••• → Open HUD layer** in a tap/swipe action (including two-finger double tap)
+or HUD tile. Direct launch stays on that layer after releasing the key. The
+existing in-HUD hold/toggle key remains separate. Launch keys require a modifier
+for letters and participate in shortcut conflict reporting.
+
+Use **Choose app…** in the layer editor to restrict a HUD layer to that app.
+Its launcher only registers while that app is frontmost, and direct gesture
+targets and in-HUD activation keys respect the same restriction. In **App
+overrides**, assign a gesture to that layer for app-specific workflows. Nested
+tile-group layers can also be app-restricted; direct launch targets are the
+top-level HUD layers. Missing or unavailable targets safely do nothing.
+
+### Themes
+
 Choose **HUD → Classic / Starburst / Starburst Air**, or use the palette menu
 while editing the HUD directly. Classic retains its native material appearance;
 Starburst keeps the violet radial panel. **Starburst Air** is the new default:
@@ -408,7 +438,7 @@ does not change existing settings or clipboard contents.
 **Tile actions:** the **•••** picker uses native macOS menus in both Settings
 and the HUD editor. Actions are organized into:
 
-- **Hotkeys:** assign or edit a keyboard shortcut.
+- **Macros & keystrokes:** assign a macro, individual shortcut, or HUD-layer target.
 - **App launches:** choose an app, open a URL, or show the chosen app's windows.
 - **Reserved Groups:** Window Manager, Recent Apps, and Actions.
 - **Create tile group…:** add a named group with its own tiles and layers.
@@ -594,7 +624,7 @@ shortcut is required. When opened directly, center tap closes the tiling HUD.
 The binding follows the active layer, supports tap overrides for specific apps,
 and exports/syncs with your configuration. Existing bindings are not changed.
 
-Choose **Hotkeys → Assign hotkey…** from a slot's **•••** menu to assign a keyboard shortcut
+Choose **Macros & keystrokes → Assign macro or keystroke…** from a slot's **•••** menu to assign a keyboard shortcut
 instead of an app or URL. Record the chord or use **••• → Set shortcut manually…**
 if another app intercepts it. Give it an optional name (for example, “Go back”).
 Swipe to the slot and lift: Explorer closes, then sends the shortcut using the
@@ -799,17 +829,16 @@ Existing layer timing is preserved until that timing is calibrated or edited
 there; before then, the controls display the default layer's values. Shared
 calibration overrides timing, not actions, and is included in YAML and sync.
 
-### Hotkey organizer and dictionary
+### Macro organizer and shortcut conflicts
 
-Open **Hotkeys** in the settings sidebar:
+Open **Macros** in the settings sidebar:
 
-- **Dictionary** names combinations without registering any additional hotkeys.
-  Add, edit, or remove entries; choose them from **••• → Saved hotkeys** in a
-  shortcut editor, including HUD shortcut tiles. A matching HUD tile displays
-  `Name (Cmd+Shift+…)`. Renaming updates matching tiles when the HUD next opens.
-  Removing a name or changing its dictionary combination never rebinds an
-  existing action. Names are scoped to the top-level profile and included in
-  YAML exports, profile copies, and sync. No sample bindings are preloaded.
+- **Macros** names ordered keystroke sequences without registering additional
+  hotkeys. Choose them from **••• → Macros** in an action editor, including HUD
+  tiles. Tiles show the macro name and sequence; editing a referenced macro
+  updates its assignments. Legacy plain-key assignments keep their original
+  keys. Macros are scoped to the top-level profile and included in YAML exports,
+  profile copies, and sync. No sample bindings are preloaded.
 - **Conflicts & overrides** audits the selected layer/device, its app-specific
   rules, global activation/click/drag/HUD hotkeys, and nested HUD groups. It
   distinguishes competing registered keys from harmless reuse of an outgoing
@@ -824,8 +853,9 @@ Open **Hotkeys** in the settings sidebar:
 
 This is an audit of **Rotagivan's configured bindings**, not a scanner of other
 apps' private shortcuts or macOS shortcut settings. Runtime registration errors
-are displayed when macOS rejects one of Rotagivan's global hotkeys. Dictionary
-combinations are unique by physical key and modifiers, not by their display text.
+are displayed when macOS rejects one of Rotagivan's global hotkeys. Macro steps
+are audited as outgoing combinations, not registered keys. Launchers restricted
+to different apps do not conflict with one another.
 
 ### Sharing settings
 

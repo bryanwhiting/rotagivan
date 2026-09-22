@@ -38,6 +38,25 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var macroConfig = factory
+        let firstStep = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
+        let macro = NamedHotkey(name: "Copy then paste", shortcut: firstStep,
+            steps: [firstStep, RecordedShortcut(keyCode: 9, modifiers: 1 << 20, keyLabel: "V")], stepDelayMilliseconds: 150)
+        let hudLayer = ExplorerHoldLayer(name: "Editor", holdShortcut: nil, favorites: [AppExplorerFavorite(direction: .up, name: macro.name, shortcut: .macro(macro))],
+            launchShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"), appBundleID: "test.editor", appName: "Editor")
+        macroConfig.settings.hotkeyDictionary = [macro]
+        macroConfig.settings.appExplorer = AppExplorerSettings(holdLayers: [hudLayer])
+        var macroTaps = macroConfig.settings.gestures(for: 1)
+        macroTaps.twoFingerDoubleTap = .shortcut; macroTaps.twoFingerDoubleShortcut = .hudLayer(hudLayer)
+        macroTaps.oneFingerTap = .shortcut; macroTaps.oneFingerShortcut = .macro(macro)
+        macroConfig.settings.profileGestures = [1: macroTaps]
+        let macroYAML = try macroConfig.yaml()
+        let macroRoundtrip = try AppConfiguration.parse(macroYAML)
+        precondition(tryEqual(macroConfig, macroRoundtrip))
+        rejected(macroYAML.replacingOccurrences(of: "stepDelayMilliseconds: 150", with: "stepDelayMilliseconds: 9999"), "invalid macro delay")
+        var invalidMacro = macroConfig; invalidMacro.settings.hotkeyDictionary?[0].steps = [.macro(macro)]
+        do { try invalidMacro.validate(); fatalError("Accepted recursive macro") } catch { print("Rejected recursive macro") }
+        print("Macro/HUD YAML passed: ordered steps, delays, stable action references, app-scoped layer launchers and legacy import")
         var namedConfig = factory
         let namedKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         namedConfig.settings.hotkeyDictionary = [NamedHotkey(name: "Copy selection", shortcut: namedKey)]

@@ -108,7 +108,7 @@ struct WindowManagerSettingsView: View {
                         var next = window; next.shortcuts.removeAll { $0.command == command }
                         if let shortcut { next.shortcuts.append(ExplorerWindowShortcut(command: command, shortcut: shortcut)) }
                         save(next)
-                    }), keyboardOnly: true)
+                    }), keyboardOnly: true, physicalKeysOnly: true)
                     if window.shortcuts.contains(where: { $0.command == command }) {
                         Button("Clear") { var next = window; next.shortcuts.removeAll { $0.command == command }; save(next) }
                     }
@@ -404,7 +404,7 @@ struct AppExplorerSettingsView: View {
                 guard next.hasValidFavorites else { groupError = "Use unique hold keys and stay within the 16-layer / 256-slot limits."; return }
                 guard saveBase(next) else { return }
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
-            }, onCancel: { editingLayer = nil })
+            }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly)
         }
         .confirmationDialog("Remove this Explorer layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
             Button("Remove layer", role: .destructive) {
@@ -610,10 +610,10 @@ struct AppExplorerSettingsView: View {
     /// Shared by Settings and the HUD's inline editor.
     @ViewBuilder private func assignmentMenu(_ direction: ExplorerSlot, favorite: AppExplorerFavorite?) -> some View {
         Menu {
-            Button(favorite?.shortcut != nil ? "Edit hotkey…" : "Assign hotkey…", systemImage: "keyboard") {
+            Button(favorite?.shortcut != nil ? "Edit action…" : "Assign macro or keystroke…", systemImage: "keyboard") {
                 editingShortcutPath = groupPath + [direction]
             }
-        } label: { Label("Hotkeys", systemImage: "keyboard") }
+        } label: { Label("Macros & keystrokes", systemImage: "keyboard") }
         Menu {
             Button("Choose app…", systemImage: "app") { editingApplicationPath = groupPath + [direction] }
             Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") { editingURLPath = groupPath + [direction] }
@@ -996,6 +996,7 @@ struct ExplorerInlineEditor: View {
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(26).frame(width: 680)
             .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
+            .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
     }
 }
@@ -1033,7 +1034,7 @@ struct ExplorerShortcutEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("\(direction.title) · Keyboard shortcut", systemImage: "keyboard").font(.headline)
+            Label("\(direction.title) · Macro, keystroke or HUD layer", systemImage: "keyboard").font(.headline)
             TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
             TapActionEditor(title: "Shortcut to send", action: $action, shortcut: $shortcut, keyboardOnly: true)
             if let shortcut, dictionary.label(for: shortcut) != nil {

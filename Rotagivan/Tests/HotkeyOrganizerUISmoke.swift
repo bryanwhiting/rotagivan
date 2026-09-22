@@ -20,7 +20,7 @@ import SwiftUI
         store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Old label", shortcut: shortcut)])
         let hid = NavigatorHIDManager(store: store) // Never start live input or sync.
         let sync = SettingsSync(store: store, hid: hid)
-        let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "Hotkeys"))
+        let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "Macros"))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 940, height: 740), styleMask: [.titled], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host
         panel.makeKeyAndOrderFront(nil); NSApp.activate()
@@ -64,6 +64,47 @@ import SwiftUI
         precondition(controller.displayedEntries.first?.name == "Old label", "Removing a dictionary entry must preserve the assigned shortcut and original tile name")
         precondition(controller.displayedEntries.first?.shortcut == shortcut)
         controller.dismiss()
+        let macro = NamedHotkey(name: "Copy and paste", shortcut: shortcut,
+            steps: [shortcut, RecordedShortcut(keyCode: 9, modifiers: 1 << 20, keyLabel: "V")], stepDelayMilliseconds: 100)
+        store.settings.hotkeyDictionary = [macro]
+        let editorLayer = ExplorerHoldLayer(name: "Editor commands", holdShortcut: nil,
+            favorites: [AppExplorerFavorite(direction: .left, name: macro.name, shortcut: .macro(macro))],
+            launchShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"), appBundleID: "test.editor", appName: "Editor")
+        store.settings.appExplorer = AppExplorerSettings(holdLayers: [editorLayer])
+        controller.frontmostBundleID = { "other.app" }
+        controller.showLayer(editorLayer.id, waitingForLift: false)
+        precondition(!controller.isVisible, "App-scoped direct launch must fail closed in other apps")
+        controller.frontmostBundleID = { "test.editor" }
+        controller.showLayer(editorLayer.id, waitingForLift: false)
+        precondition(controller.isVisible && controller.displayedEntries.first?.shortcut?.macroID == macro.id)
+        precondition(controller.displayedEntries.first?.name == "Copy and paste (Cmd+Shift+C → Cmd+V)")
+        controller.dismiss()
+        store.settings.appExplorer?.favorites = [AppExplorerFavorite(direction: .right, name: "Editor layer", shortcut: .hudLayer(editorLayer))]
+        controller.show(waitingForLift: false)
+        for x in [500.0, 650.0] {
+            controller.process(TrackpadReport(contacts: [FingerContact(id: 0, x: x, y: 500, touching: true, confident: true)], buttonDown: false, scanTime: 0))
+        }
+        controller.process(TrackpadReport(contacts: [], buttonDown: false, scanTime: 0))
+        precondition(controller.isVisible && controller.displayedEntries.first?.shortcut?.macroID == macro.id,
+            "A HUD-layer tile switches in place without dismissing the HUD or releasing its pointer lock")
+        controller.dismiss()
+        controller.showLayer(UUID(), waitingForLift: false)
+        precondition(!controller.isVisible, "Removed layers must not fall back to unrelated tiles")
+        func renderEditor<V: View>(_ view: V, name: String, size: NSSize) throws {
+            let editorHost = NSHostingView(rootView: view)
+            let window = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = editorHost
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil); window.close() }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+            editorHost.layoutSubtreeIfNeeded()
+            let bitmap = editorHost.bitmapImageRepForCachingDisplay(in: editorHost.bounds)!
+            editorHost.cacheDisplay(in: editorHost.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
+        }
+        try renderEditor(NamedHotkeyEditor(entry: macro, existing: [macro], onSave: { _ in }, onCancel: {}), name: "macro-editor", size: NSSize(width: 608, height: 570))
+        try renderEditor(ExplorerHoldLayerEditor(layer: editorLayer, settings: store.settings.appExplorer!, onSave: { _ in }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 498, height: 570))
+        print("Macro and HUD layer native UI passed: editor renders, app-restricted direct launch, unknown-target rejection and sequence labels. No real events posted.")
         print("Hotkey UI rendered dictionary, audit and assignments; HUD labels follow dictionary renames/removal without rebinding. No actual shortcuts sent.")
     }
 }

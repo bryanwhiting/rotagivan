@@ -12,6 +12,7 @@ struct HotkeyAudit {
         var precedence: String = ""
         // nil: output action; empty string: globally registered input; otherwise HUD-local input.
         var inputScope: String? = nil
+        var application: String? = nil
         var searchText: String { "\(scope) \(trigger) \(action) \(precedence)" }
     }
     enum Kind: String, CaseIterable { case conflict = "Conflicts", override = "App overrides", reuse = "Reused outputs", caution = "Potential overlaps" }
@@ -103,6 +104,13 @@ struct HotkeyAudit {
                 action: dictionary.title(for: shortcut), shortcut: shortcut, enabled: settings.enabled && effective.enabled, inputScope: ""))
         }
         let explorer = settings.appExplorer ?? AppExplorerSettings()
+        for layer in explorer.holdLayers ?? [] {
+            if let key = layer.launchShortcut {
+                assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: layer.appName ?? "All apps", trigger: "Open HUD layer: \(layer.name)",
+                    action: dictionary.title(for: key), shortcut: key, enabled: settings.enabled,
+                    precedence: layer.appBundleID.map { "Registered only while \($0) is frontmost" } ?? "Global HUD launcher", inputScope: "", application: layer.appBundleID))
+            }
+        }
         func layers(_ values: [ExplorerHoldLayer], path: String, depth: Int, active: Bool) {
             for layer in values {
                 if let key = layer.holdShortcut {
@@ -136,15 +144,33 @@ struct HotkeyAudit {
                     action: dictionary.title(for: binding.shortcut), shortcut: binding.shortcut, enabled: settings.enabled, inputScope: "Window Manager"))
             }
         }
-        let keyed = assignments.filter { $0.enabled && $0.shortcut != nil }
+        for row in assignments {
+            if let id = row.shortcut?.macroID {
+                if let macro = dictionary.first(where: { $0.id == id }) {
+                    for (index, step) in macro.resolvedSteps.enumerated() {
+                        assignments.append(Assignment(id: row.id + ".step.\(index)", scope: row.scope, trigger: "\(row.trigger) · \(macro.name) step \(index + 1)",
+                            action: step.readableCombination, shortcut: step, enabled: row.enabled, precedence: row.precedence))
+                    }
+                } else {
+                    findings.append(Finding(id: row.id + ".missing", kind: .caution, title: "Missing macro", detail: "\(row.scope) / \(row.trigger): reassign this action; its macro was removed."))
+                }
+            }
+            if let id = row.shortcut?.hudLayerID, !(explorer.holdLayers ?? []).contains(where: { $0.id == id }) {
+                findings.append(Finding(id: row.id + ".missing", kind: .caution, title: "Missing HUD layer", detail: "\(row.scope) / \(row.trigger): the target layer was removed."))
+            }
+        }
+        let keyed = assignments.filter { $0.enabled && $0.shortcut?.isPhysicalShortcut == true }
         for (identity, rows) in Dictionary(grouping: keyed, by: { $0.shortcut!.identity }).sorted(by: { $0.key < $1.key }) {
             let title = dictionary.title(for: rows[0].shortcut!)
             let inputs = rows.filter { $0.inputScope != nil }
             let outputs = rows.filter { $0.inputScope == nil }
             let globals = inputs.filter { $0.inputScope == "" }
-            if globals.count > 1 {
+            let competing = globals.filter { row in globals.contains { other in
+                other.id != row.id && (row.application == nil || other.application == nil || row.application == other.application)
+            } }
+            if !competing.isEmpty {
                 findings.append(Finding(id: "conflict." + identity, kind: .conflict, title: title,
-                    detail: "Competing global hotkeys: " + globals.map(\.trigger).joined(separator: ", ") + ". These cannot all register together."))
+                    detail: "Competing global hotkeys: " + competing.map(\.trigger).joined(separator: ", ") + ". These cannot all register together in the same app."))
             }
             let localGroups = Dictionary(grouping: inputs.filter { $0.inputScope != "" }, by: { $0.inputScope! })
             for (scope, local) in localGroups.sorted(by: { $0.key < $1.key }) where local.count > 1 || !globals.isEmpty {

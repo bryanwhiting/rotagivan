@@ -10,15 +10,15 @@ struct ContentView: View {
     @State private var actionDevice: GestureDevice = .navigator
     private let initialHUDGroup: ExplorerReservedGroup?
 
-    private let sections = [("Devices", "computermouse"), ("Layers", "square.3.layers.3d"),
-        ("HUD", "safari"), ("Hotkeys", "keyboard"), ("App overrides", "app.badge"),
+    private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
+        ("Layers", "square.3.layers.3d"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "Layers", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
+        _selection = State(initialValue: initialSection == "Hotkeys" ? "Macros" : ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
     }
@@ -77,7 +77,7 @@ struct ContentView: View {
                         case "General": general
                         case "Devices": devices
                         case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
-                        case "Hotkeys": HotkeyOrganizerView(store: store)
+                        case "Macros": HotkeyOrganizerView(store: store)
                         case "App overrides": AppOverridesView(store: store)
                         case "Pointer & scrolling": pointerSettings
                         default: profiles
@@ -102,6 +102,7 @@ struct ContentView: View {
         .toggleStyle(.checkbox)
         .tint(.primary)
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
+        .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
         .frame(width: 940, height: 740)
         .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
             if value == nil { hid.endCalibration() }

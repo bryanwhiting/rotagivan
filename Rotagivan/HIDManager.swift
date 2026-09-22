@@ -144,6 +144,8 @@ final class NavigatorHIDManager: ObservableObject {
             self.gestures.onWindowManager = { [weak self] in self?.openAppExplorer(windowManager: true) }
             self.appleGestures.onAppExplorer = { [weak self] in self?.scheduleAppleHUD() }
             self.appleGestures.onWindowManager = { [weak self] in self?.scheduleAppleHUD(windowManager: true) }
+            self.gestures.onHUDLayer = { [weak self] id in self?.openHUDLayer(id) }
+            self.appleGestures.onHUDLayer = { [weak self] id in self?.scheduleAppleHUD(layerID: id) }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
@@ -184,9 +186,23 @@ final class NavigatorHIDManager: ObservableObject {
         store.foregroundBundleID = bundleID
     }
 
-    private func openAppExplorer(windowManager: Bool = false) {
+    func openHUDLayer(_ id: UUID, fromKeyboard: Bool = false) {
+        guard let layer = store.settings.appExplorer?.holdLayers?.first(where: { $0.id == id }),
+              layer.isAvailable(in: store.foregroundBundleID) else { return }
+        openAppExplorer(layerID: id)
+        if fromKeyboard, explorer?.isVisible == true {
+            // A keyboard launch is not owned by whichever device last moved.
+            // Let the next touching trackpad acquire the HUD and its pointer lock.
+            explorerSource = nil
+            explorerSettings = explorerGestureSettings
+            updateExplorerPointer()
+        }
+    }
+
+    private func openAppExplorer(windowManager: Bool = false, layerID: UUID? = nil) {
         guard explorer?.isEditing != true else { return }
         guard store.settings.enabled, !calibrationCapturing else { return }
+        if layerID != nil, explorer?.isVisible == true { explorer?.dismiss() }
         cancelAppleHUD()
         gestures.reset()
         appleGestures.reset()
@@ -195,7 +211,8 @@ final class NavigatorHIDManager: ObservableObject {
         explorerSource = inputRouting.source
         explorerSettings = explorerGestureSettings
         explorerDevices = store.settings.resolvedDevices
-        if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
+        if let layerID { explorer?.showLayer(layerID, waitingForLift: contactsDown) }
+        else if windowManager { explorer?.showWindowManager(waitingForLift: contactsDown) }
         else { explorer?.show(waitingForLift: contactsDown) }
         updateExplorerPointer()
     }
@@ -211,7 +228,7 @@ final class NavigatorHIDManager: ObservableObject {
 
     // Native click events can arrive after the raw touch-lift callback. Give
     // macOS a short arbitration window before presenting a touch-triggered HUD.
-    private func scheduleAppleHUD(windowManager: Bool = false) {
+    private func scheduleAppleHUD(windowManager: Bool = false, layerID: UUID? = nil) {
         guard let source = inputRouting.source, source.isApple,
               ProcessInfo.processInfo.systemUptime >= appleClickVetoUntil else { return }
         cancelAppleHUD()
@@ -223,7 +240,7 @@ final class NavigatorHIDManager: ObservableObject {
             guard self.inputRouting.source == source, self.store.activeProfileID == profile,
                   self.store.activeGestures(for: .apple) == configuration,
                   ProcessInfo.processInfo.systemUptime >= self.appleClickVetoUntil else { return }
-            self.openAppExplorer(windowManager: windowManager)
+            self.openAppExplorer(windowManager: windowManager, layerID: layerID)
         }
         if appleHUDDelay == 0 { open(); return } // Deterministic input-fixture seam.
         let timer = Timer(timeInterval: appleHUDDelay, repeats: false) { _ in

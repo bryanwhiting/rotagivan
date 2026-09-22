@@ -12,6 +12,8 @@ for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollRespo
 done
 xcrun swiftc "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/HotkeyOrganizerTests.swift -o "$test_dir/HotkeyOrganizerTests"
 "$test_dir/HotkeyOrganizerTests"
+xcrun swiftc "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/MacroAuditTests.swift -o "$test_dir/MacroAuditTests"
+"$test_dir/MacroAuditTests"
 xcrun swiftc "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/LiveCursorPreviewTests"
 "$test_dir/LiveCursorPreviewTests" "$test_dir"
@@ -85,6 +87,10 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/TapActionTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/TapActionTests"
 "$test_dir/TapActionTests"
+xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
+  Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/MacroActionTests.swift \
+  -framework AppKit -framework CoreGraphics -o "$test_dir/MacroActionTests"
+"$test_dir/MacroActionTests"
 xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/StationaryTapTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/StationaryTapTests"

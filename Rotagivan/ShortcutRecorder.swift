@@ -2,7 +2,12 @@ import AppKit
 import SwiftUI
 
 private struct HotkeyDictionaryKey: EnvironmentKey { static let defaultValue: [NamedHotkey] = [] }
+private struct HUDActionLayersKey: EnvironmentKey { static let defaultValue: [ExplorerHoldLayer] = [] }
 extension EnvironmentValues {
+    var hudActionLayers: [ExplorerHoldLayer] {
+        get { self[HUDActionLayersKey.self] }
+        set { self[HUDActionLayersKey.self] = newValue }
+    }
     var hotkeyDictionary: [NamedHotkey] {
         get { self[HotkeyDictionaryKey.self] }
         set { self[HotkeyDictionaryKey.self] = newValue }
@@ -51,11 +56,13 @@ extension RecordedShortcut {
 
 struct TapActionEditor: View {
     @Environment(\.hotkeyDictionary) private var dictionary
+    @Environment(\.hudActionLayers) private var hudLayers
     var title: String
     @Binding var action: TapAction
     @Binding var shortcut: RecordedShortcut?
     var shortcutsOnly = false
     var keyboardOnly = false
+    var physicalKeysOnly = false
     @State private var showManual = false
     @State private var draft = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
 
@@ -74,16 +81,23 @@ struct TapActionEditor: View {
                     action = .shortcut
                 }.frame(maxWidth: .infinity).frame(height: 26)
                 Menu {
-                    if !dictionary.isEmpty {
-                        Menu("Saved hotkeys") {
+                    if !physicalKeysOnly && !dictionary.isEmpty {
+                        Menu("Macros") {
                             ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
-                                Button(dictionary.title(for: entry.shortcut)) { shortcut = entry.shortcut; action = .shortcut }
+                                Button("\(entry.name) (\(entry.summary))") { shortcut = .macro(entry); action = .shortcut }
                             }
                         }
                         Divider()
                     }
+                    if !physicalKeysOnly && !hudLayers.isEmpty {
+                        Menu("Open HUD layer") {
+                            ForEach(hudLayers) { layer in
+                                Button(layer.name + (layer.appName.map { " · \($0)" } ?? "")) { shortcut = .hudLayer(layer); action = .shortcut }
+                            }
+                        }
+                    }
                     Button("Set shortcut manually…") {
-                        if action == .shortcut, let shortcut { draft = shortcut }
+                        if action == .shortcut, let shortcut, shortcut.isPhysicalShortcut { draft = shortcut }
                         else if action == .optionF19 { draft = RecordedShortcut(keyCode: 80, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), keyLabel: "F19") }
                         else if action == .enter { draft = RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return") }
                         showManual = true

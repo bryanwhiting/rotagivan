@@ -69,7 +69,7 @@ struct AppConfiguration: Codable {
 
     func validate() throws {
         guard settings.resolvedHotkeyDictionary.isValidDictionary else {
-            throw ConfigurationError("Hotkey dictionary entries need unique IDs and key combinations, valid shortcuts, and nonempty names (maximum 500 entries).")
+            throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 physical keystrokes, and a 0–2000 ms step delay (maximum 500 macros).")
         }
         if let profiles {
             guard !profiles.isEmpty, profiles.count <= 20, Set(profiles.map(\.id)).count == profiles.count,
@@ -197,17 +197,17 @@ private indirect enum ConfigurationValue: Codable {
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
             case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline gestures oneFingerTap twoFingerTap additionalProfiles profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
-            case "hotkeyDictionary": allowed = "id name shortcut"
+            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "layout layers shortcuts favorites slotCount"
-            case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured"
+            case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
             case "favorites", "children": allowed = "direction bundleID name url children groupMode action shortcut holdLayers slotCount showsWindows windowPlacement"
             case "windowPlacement": allowed = "direction layout"
-            case "holdShortcut": allowed = "keyCode modifiers keyLabel"
+            case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
-            case "shortcut": allowed = "keyCode modifiers keyLabel"
+            case "shortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
             case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions holdToActivate"
             case "normal", "precision", "motion", "pointerMotion":
                 allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
@@ -230,7 +230,7 @@ private indirect enum ConfigurationValue: Codable {
             case "gestures": allowed = "tapToClick tapMaxDuration tapMaxMovement keepCursorStillForTaps touchAndHoldDrag dragRegrip dragRegripWindow secondFingerGracePeriod doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval"
             case "profileGestures", "appleLayerGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
             case "doubleTapSwipe", "singleTapSwipe", "twoFingerSingleTapSwipe", "twoFingerDoubleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
-            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel"
+            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
             case "additionalProfiles": allowed = "id name motion"
             case "actions", "additional", "profileActions": allowed = "keyCode modifiers enabled holdToActivate keyLabel"
@@ -241,6 +241,10 @@ private indirect enum ConfigurationValue: Codable {
                 throw ConfigurationError("Unknown setting: \(path).\(unknown)")
             }
             for (name, value) in values { try value.validate(key: name, path: path + "." + name) }
+            if values["macroID"] != nil || values["hudLayerID"] != nil {
+                let reference = try JSONDecoder().decode(RecordedShortcut.self, from: JSONEncoder().encode(self))
+                guard reference.isValidExplorerShortcut else { throw ConfigurationError("Invalid macro or HUD-layer reference at \(path).") }
+            }
         case .array(let values):
             if path.hasSuffix("." + key), ["profileNames", "profileGestures", "appleLayerGestures", "sliderBaselines", "additional", "profileActions"].contains(key) {
                 guard values.count % 2 == 0 else { throw ConfigurationError("\(path) must contain alternating layer IDs and values.") }
@@ -253,6 +257,7 @@ private indirect enum ConfigurationValue: Codable {
             for (i, value) in values.enumerated() { try value.validate(key: key, path: path + "[\(i)]") }
         case .number(let number):
             let ranges: [String: ClosedRange<Double>] = [
+                "stepDelayMilliseconds": 0...2000,
                 "swipeWindow": 0.1...0.8, "swipeDistance": 20...240,
                 "fastSwipeDuration": 0.06...0.3,
                 "slowMultiplier": 0...ScrollResponse.maximumMultiplier, "fastMultiplier": 0...ScrollResponse.maximumMultiplier,

@@ -4,6 +4,7 @@ import CoreGraphics
 protocol GestureEventPosting: AnyObject {
     var dragging: Bool { get }
     func performTap(_ action: TapAction, shortcut: RecordedShortcut?)
+    func performMacro(_ macro: NamedHotkey)
     func click(button: CGMouseButton, count: Int)
     func move(dx: Double, dy: Double)
     func scroll(dx: Double, dy: Double, momentum: Bool)
@@ -12,6 +13,10 @@ protocol GestureEventPosting: AnyObject {
 }
 
 extension GestureEventPosting {
+    func performMacro(_ macro: NamedHotkey) {
+        guard macro.isValid else { return }
+        for step in macro.resolvedSteps { performTap(.shortcut, shortcut: step) }
+    }
     func click(count: Int) { click(button: .left, count: count) }
     func scroll(dx: Double, dy: Double) { scroll(dx: dx, dy: dy, momentum: false) }
 }
@@ -62,6 +67,7 @@ final class EventPoster: GestureEventPosting {
     }
 
     static func shortcutEvents(_ shortcut: RecordedShortcut, heldFlags: CGEventFlags = []) -> [CGEvent] {
+        guard shortcut.isPhysicalShortcut else { return [] }
         let allowed: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
         let requested = CGEventFlags(rawValue: shortcut.modifiers).intersection(allowed)
         let modifiers: [(CGKeyCode, CGEventFlags)] = [(59, .maskControl), (58, .maskAlternate), (56, .maskShift), (55, .maskCommand)]
@@ -89,16 +95,30 @@ final class EventPoster: GestureEventPosting {
     }
 
     private func postShortcut(_ shortcut: RecordedShortcut) {
+        guard shortcut.isPhysicalShortcut else { return }
+        postSequence([shortcut], delay: 0)
+    }
+
+    func performMacro(_ macro: NamedHotkey) {
+        guard !dragging, macro.isValid else { return }
+        clickSequence.reset()
+        postSequence(macro.resolvedSteps, delay: Double(macro.resolvedDelay) / 1000)
+    }
+
+    private func postSequence(_ steps: [RecordedShortcut], delay: TimeInterval) {
         let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Serialize complete chords so rapid taps cannot interleave their modifier releases.
         // Pace events off the main thread for listeners that track modifier transitions.
         shortcutQueue.async {
-            guard targetPID == NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
-            let held = CGEventSource.flagsState(.hidSystemState)
-            let events = Self.shortcutEvents(shortcut, heldFlags: held)
-            for (index, event) in events.enumerated() {
-                if index > 0 { Thread.sleep(forTimeInterval: event.type == .keyUp ? 0.04 : 0.012) }
-                event.post(tap: .cghidEventTap)
+            for (step, shortcut) in steps.enumerated() {
+                if step > 0 { Thread.sleep(forTimeInterval: delay) }
+                guard let targetPID, targetPID == NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+                let held = CGEventSource.flagsState(.hidSystemState)
+                let events = Self.shortcutEvents(shortcut, heldFlags: held)
+                for (index, event) in events.enumerated() {
+                    if index > 0 { Thread.sleep(forTimeInterval: event.type == .keyUp ? 0.04 : 0.012) }
+                    event.post(tap: .cghidEventTap)
+                }
             }
         }
     }

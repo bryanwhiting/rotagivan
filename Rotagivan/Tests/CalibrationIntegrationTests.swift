@@ -12,6 +12,10 @@ import Combine
     var selections: [ExplorerSlot] = []
     var alternateHeld = false
     var windowManagerShows = 0
+    var layerShows: [UUID] = []
+    func showLayer(_ id: UUID, waitingForLift: Bool) {
+        layerShows.append(id); show(waitingForLift: waitingForLift)
+    }
     func showWindowManager(waitingForLift: Bool) {
         windowManagerShows += 1
         show(waitingForLift: waitingForLift)
@@ -364,6 +368,20 @@ private final class CalibrationPoster: GestureEventPosting {
             precondition(f.applePoster.actions == 0 && f.poster.actions == 0)
         }
         print("Apple HID integration passed: action HUDs, source isolation, hotkey entry, and calibration.")
+        check { f in
+            let layer = ExplorerHoldLayer(name: "Direct", holdShortcut: nil)
+            f.store.settings.appExplorer = AppExplorerSettings(holdLayers: [layer])
+            f.send(0.1, x: 500); f.send(0.15)
+            f.hid.openHUDLayer(layer.id, fromKeyboard: true)
+            precondition(f.explorer.layerShows == [layer.id])
+            f.sendApple(1, x: 500); f.sendApple(1.05, x: 600); f.sendApple(1.1)
+            precondition(f.explorer.selections == [.right], "Direct keyboard layer launch must hand off from Navigator to Apple")
+            f.store.settings.appExplorer?.holdLayers?[0].appBundleID = "restricted.editor"
+            f.hid.foregroundAppChanged("other.app")
+            f.hid.openHUDLayer(layer.id, fromKeyboard: true)
+            precondition(!f.explorer.isVisible && f.explorer.layerShows.count == 1)
+        }
+        print("Direct HUD-layer HID handoff and app restriction passed")
         check { f in
             var taps = f.store.activeGestures
             taps.oneFingerTap = .appExplorer

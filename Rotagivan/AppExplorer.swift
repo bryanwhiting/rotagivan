@@ -10,11 +10,13 @@ import OSLog
     var onPresentationChanged: (() -> Void)? { get set }
     func show(waitingForLift: Bool)
     func showWindowManager(waitingForLift: Bool)
+    func showLayer(_ id: UUID, waitingForLift: Bool)
     func process(_ report: TrackpadReport)
     func dismiss()
     func setAlternateHeld(_ held: Bool)
 }
 extension AppExplorerPresenting {
+    func showLayer(_ id: UUID, waitingForLift: Bool) {}
     var onPresentationChanged: (() -> Void)? { get { nil } set {} }
     var isEditing: Bool { false }
     func setAlternateHeld(_ held: Bool) {}
@@ -34,6 +36,8 @@ extension AppExplorerPresenting {
     private let shortcutPoster = EventPoster()
     var sendShortcut: ((RecordedShortcut) -> Void)?
     var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    var frontmostBundleID: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+    private var sourceBundleID: String?
     private var deadline = Date.distantPast
     private var alternateHeld = false
     private var heldKeys = ExplorerScopedHeldKeys()
@@ -118,16 +122,24 @@ extension AppExplorerPresenting {
         show(waitingForLift: waitingForLift, windowManager: false)
     }
 
+    func showLayer(_ id: UUID, waitingForLift: Bool) {
+        guard let layer = configuration().holdLayers?.first(where: { $0.id == id }), layer.isAvailable(in: frontmostBundleID()) else { return }
+        if isVisible { dismiss() }
+        show(waitingForLift: waitingForLift, windowManager: false, layerID: id)
+    }
+
     func showWindowManager(waitingForLift: Bool) {
         show(waitingForLift: waitingForLift, windowManager: true)
     }
 
-    private func show(waitingForLift: Bool, windowManager: Bool) {
+    private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil) {
         guard !isVisible else { return }
         cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
         heldKeys = ExplorerScopedHeldKeys()
+        sourceBundleID = frontmostBundleID()
+        if let layerID { heldKeys.selectRootLayer(layerID, settings: configuration()) }
         windowKeys = ExplorerScopedHeldKeys()
         windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         windowList = []; windowPage = 0; model.showingAppWindows = false
@@ -240,7 +252,7 @@ extension AppExplorerPresenting {
             let previousSettings = windowKeys.resolved(windowConfiguration)
             var handled = false
             switch event.type {
-            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: windowGroupPath, settings: windowConfiguration)
+            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: windowGroupPath, settings: windowConfiguration, bundleID: sourceBundleID)
             case .keyUp: windowKeys.release(key: event.keyCode)
             case .flagsChanged: windowKeys.updateModifiers(flags)
             default: return false
@@ -262,7 +274,7 @@ extension AppExplorerPresenting {
         case .keyDown:
             // A held key must not activate a different tile after navigating back.
             if event.isARepeat { return true }
-            handled = heldKeys.press(key: event.keyCode, modifiers: flags, path: layerScopePath, settings: configuration())
+            handled = heldKeys.press(key: event.keyCode, modifiers: flags, path: layerScopePath, settings: configuration(), bundleID: sourceBundleID)
         case .keyUp: heldKeys.release(key: event.keyCode); handled = previous != heldKeys.activeID
         case .flagsChanged: heldKeys.updateModifiers(flags)
         default: return false
@@ -287,6 +299,7 @@ extension AppExplorerPresenting {
         model.layerName = layer?.name
         model.windowLayout = layer?.windowLayout ?? .halves
         model.layerHint = settings.layers(at: settings.layerScope(at: layerScopePath))
+            .filter { $0.isAvailable(in: sourceBundleID) }
             .compactMap { layer in layer.holdShortcut.map { "\($0.displayName): \(layer.name)" } }.joined(separator: " · ")
         model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
@@ -334,7 +347,7 @@ extension AppExplorerPresenting {
             model.windowFullScreen = tilingTarget?.isFullScreen() == true
             if wasFullScreen && !model.windowFullScreen { model.message = nil }
             model.layerHint = model.windowFullScreen ? "" : window.layers(at: window.layerScope(at: windowGroupPath)).compactMap {
-                guard let key = $0.holdShortcut else { return nil }
+                guard $0.isAvailable(in: sourceBundleID), let key = $0.holdShortcut else { return nil }
                 return "\(key.displayName): \($0.name) (\($0.activation == .toggle ? "toggle" : "hold"))"
             }.joined(separator: " · ")
             model.groupNames.append("Window Manager")
@@ -498,6 +511,15 @@ extension AppExplorerPresenting {
             refreshGroup()
             return
         }
+        if let shortcut = entry?.shortcut, let id = shortcut.hudLayerID {
+            guard shortcut.isValidExplorerShortcut, let layer = configuration().holdLayers?.first(where: { $0.id == id }),
+                  layer.isAvailable(in: sourceBundleID) else { refreshGroup(); return }
+            heldKeys.selectRootLayer(id, settings: configuration())
+            groupPath = []; baseGroupPath = []
+            model.showingMediaControls = false; model.showingWindowManager = false; model.showingAppWindows = false
+            refreshGroup()
+            return
+        }
         dismiss()
         guard let entry else { return }
         if let shortcut = entry.shortcut {
@@ -509,7 +531,9 @@ extension AppExplorerPresenting {
                 guard let self, self.selectionGeneration == generation,
                       self.contextIsValid?() != false, self.frontmostPID() == targetPID else { return }
                 if let sendShortcut = self.sendShortcut { sendShortcut(shortcut) }
-                else { self.shortcutPoster.performTap(.shortcut, shortcut: shortcut) }
+                else if let id = shortcut.macroID {
+                    if let macro = self.hotkeyDictionary().first(where: { $0.id == id }) { self.shortcutPoster.performMacro(macro) }
+                } else { self.shortcutPoster.performTap(.shortcut, shortcut: shortcut) }
                 }
             }
             return

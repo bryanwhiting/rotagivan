@@ -667,7 +667,7 @@ struct AppExplorerSettingsView: View {
             Button(favorite?.shortcut != nil ? "Edit action…" : "Assign macro or keystroke…", systemImage: "keyboard") {
                 editingShortcutPath = groupPath + [direction]
             }
-        } label: { Label("Macros & keystrokes", systemImage: "keyboard") }
+        } label: { Label("Keybindings and Macros", systemImage: "keyboard") }
         Menu {
             Button("Choose app…", systemImage: "app") { editingApplicationPath = groupPath + [direction] }
             Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") { editingURLPath = groupPath + [direction] }

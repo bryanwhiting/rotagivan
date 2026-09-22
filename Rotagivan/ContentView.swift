@@ -54,13 +54,21 @@ struct ContentView: View {
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "Layers", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: initialSection == "Hotkeys" ? "Macros" : ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
+        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros"].contains(initialSection) ? "Macros" : ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
     }
 
     private enum ProfileSection {
         case tapping, dragging
+    }
+
+    private func sectionTitle(_ section: String) -> String {
+        switch section {
+        case "Layers": return "Layer actions"
+        case "Macros": return "Keybindings and Macros"
+        default: return section
+        }
     }
 
     var body: some View {
@@ -93,8 +101,9 @@ struct ContentView: View {
                         .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
                     ForEach(sections, id: \.0) { title, icon in
                         Button { selection = title } label: {
-                            Label(title == "Layers" ? "Layer actions" : title, systemImage: icon)
+                            Label(sectionTitle(title), systemImage: icon)
                                 .font(.system(size: 12, weight: selection == title ? .semibold : .regular))
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 10)
                                 .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                                 .contentShape(Rectangle())
@@ -109,7 +118,7 @@ struct ContentView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         if selection != "Layers" && selection != "Pointer & scrolling" {
-                            Text(selection).font(.system(size: 24, weight: .semibold))
+                            Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                             Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
                                 .font(.callout).foregroundStyle(.secondary)
                         }

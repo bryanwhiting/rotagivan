@@ -20,10 +20,10 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Build reusable macros: open apps and send key combinations in order. Review conflicts and app overrides for bindings configured in Rotagivan.")
+            Text("Create reusable keybindings and macros: send a key combination or a sequence of app and keystroke steps. Review conflicts and app overrides in Rotagivan.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("View", selection: $tab) {
-                Text("Macros").tag("Dictionary")
+                Text("Keybindings and Macros").tag("Dictionary")
                 Text("Conflicts & overrides").tag("Conflicts")
                 Text("All assignments").tag("Assignments")
             }.pickerStyle(.segmented)
@@ -55,7 +55,7 @@ struct HotkeyOrganizerView: View {
                 editing = nil
             }, onCancel: { editing = nil })
         }
-        .alert("Remove macro?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+        .alert("Remove keybinding or macro?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Remove", role: .destructive) {
                 store.settings.hotkeyDictionary = store.settings.resolvedHotkeyDictionary.filter { $0.id != deleting?.id }
                 deleting = nil
@@ -68,16 +68,16 @@ struct HotkeyOrganizerView: View {
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("\(store.settings.resolvedHotkeyDictionary.count) macros").foregroundStyle(.secondary)
+                Text("Saved entries: \(store.settings.resolvedHotkeyDictionary.count)").foregroundStyle(.secondary)
                 Spacer()
                 Button { editing = NamedHotkey(name: "", shortcut: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")) } label: {
-                    Label("Add macro", systemImage: "plus")
+                    Label("Add keybinding or macro", systemImage: "plus")
                 }.disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
             }
             Text("Assign a macro from an action’s ••• menu in layers, app overrides, or HUD tiles. Editing its sequence updates every macro assignment. Macros travel with YAML/sync; creating one does not register a global hotkey.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if store.settings.resolvedHotkeyDictionary.isEmpty {
-                Label("No macros yet. Add a named sequence of app and keystroke steps.", systemImage: "book.closed")
+                Label("No keybindings or macros yet. Add a named keybinding or a sequence of steps.", systemImage: "book.closed")
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             ForEach(store.settings.resolvedHotkeyDictionary.filter { matches($0.name + " " + $0.summary) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
@@ -87,7 +87,7 @@ struct HotkeyOrganizerView: View {
                     Spacer()
                     Text(entry.summary).monospaced().foregroundStyle(.secondary).lineLimit(2)
                     Button("Edit") { editing = entry }
-                    Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove macro")
+                    Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove keybinding or macro")
                 }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
@@ -148,8 +148,8 @@ struct NamedHotkeyEditor: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Macro", systemImage: "keyboard").font(.headline)
-            TextField("Macro name", text: $entry.name).textFieldStyle(.roundedBorder)
+            Label("Keybinding or macro", systemImage: "keyboard").font(.headline)
+            TextField("Name", text: $entry.name).textFieldStyle(.roundedBorder)
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(Array(entry.resolvedSequence.indices), id: \.self) { index in

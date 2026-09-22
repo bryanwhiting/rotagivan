@@ -11,9 +11,9 @@ the profile's identity, devices, layers, HUD, shortcuts and pointer settings.
 
 ## HUD appearance
 
-### Macros and direct HUD layers
+### Keybindings, macros and direct HUD layers
 
-The **Macros** page replaces Hotkeys. A macro is a named sequence of 1–32
+The **Keybindings and Macros** page replaces Hotkeys. A macro is a named sequence of 1–32
 keystroke or **Open app** steps, with a configurable 0–2000 ms delay between
 steps. Add, record, reorder, or remove steps in its editor. For example:
 **Open app → Cmd+L → Cmd+V → Return**. Choose **Add open app…**, select an
@@ -28,8 +28,8 @@ foreground changes stop playback instead of sending keys to the wrong app.
 All keyboard sequences share a serial, asynchronous playback lane; waits do
 not block the UI or trackpad input. App steps store portable bundle IDs, not
 executable paths, shell commands, or URL handlers.
-Choose **••• → Macros** in a tap/swipe action or a HUD tile's
-**Macros & keystrokes** editor. Macro references follow subsequent edits;
+Choose **••• → Keybindings and Macros** in a tap/swipe action or a HUD tile's
+**Keybindings and Macros** editor. Macro references follow subsequent edits;
 existing plain-shortcut assignments retain their original keystrokes. Removing
 a referenced macro makes that action inactive, with a warning in the organizer.
 The legacy `hotkeyDictionary` YAML field is retained for import compatibility;
@@ -466,7 +466,7 @@ does not change existing settings or clipboard contents.
 **Tile actions:** the **•••** picker uses native macOS menus in both Settings
 and the HUD editor. Actions are organized into:
 
-- **Macros & keystrokes:** assign a macro, individual shortcut, or HUD-layer target.
+- **Keybindings and Macros:** assign a macro, individual shortcut, or HUD-layer target.
 - **App launches:** choose an app, open a URL, or show the chosen app's windows.
 - **Reserved Groups:** Window Manager, Recent Apps, and Actions.
 - **Create tile group…:** add a named group with its own tiles and layers.
@@ -652,7 +652,7 @@ shortcut is required. When opened directly, center tap closes the tiling HUD.
 The binding follows the active layer, supports tap overrides for specific apps,
 and exports/syncs with your configuration. Existing bindings are not changed.
 
-Choose **Macros & keystrokes → Assign macro or keystroke…** from a slot's **•••** menu to assign a keyboard shortcut
+Choose **Keybindings and Macros → Assign macro or keystroke…** from a slot's **•••** menu to assign a keyboard shortcut
 instead of an app or URL. Record the chord or use **••• → Set shortcut manually…**
 if another app intercepts it. Give it an optional name (for example, “Go back”).
 Swipe to the slot and lift: Explorer closes, then sends the shortcut using the
@@ -859,10 +859,10 @@ calibration overrides timing, not actions, and is included in YAML and sync.
 
 ### Macro organizer and shortcut conflicts
 
-Open **Macros** in the settings sidebar:
+Open **Keybindings and Macros** in the settings sidebar:
 
-- **Macros** names ordered keystroke sequences without registering additional
-  hotkeys. Choose them from **••• → Macros** in an action editor, including HUD
+- **Keybindings and Macros** names ordered keystroke sequences without registering additional
+  hotkeys. Choose them from **••• → Keybindings and Macros** in an action editor, including HUD
   tiles. Tiles show the macro name and sequence; editing a referenced macro
   updates its assignments. Legacy plain-key assignments keep their original
   keys. Macros are scoped to the top-level profile and included in YAML exports,

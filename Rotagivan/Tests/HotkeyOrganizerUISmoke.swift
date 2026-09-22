@@ -20,7 +20,7 @@ import SwiftUI
         store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Old label", shortcut: shortcut)])
         let hid = NavigatorHIDManager(store: store) // Never start live input or sync.
         let sync = SettingsSync(store: store, hid: hid)
-        let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "Macros"))
+        let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "Keybindings and Macros"))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 940, height: 740), styleMask: [.titled], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host
         panel.makeKeyAndOrderFront(nil); NSApp.activate()

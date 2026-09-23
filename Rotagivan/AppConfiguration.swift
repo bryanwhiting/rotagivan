@@ -70,6 +70,9 @@ struct AppConfiguration: Codable {
     }
 
     func validate() throws {
+        guard (settings.actionBindings ?? []).isValidBindings(global: true) else {
+            throw ConfigurationError("Bindings need unique triggers and valid actions. Global letter hotkeys need a modifier.")
+        }
         guard settings.resolvedHotkeyDictionary.isValidDictionary else {
             throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 keystroke or open-app steps, and a 0–2000 ms step delay (maximum 500 macros).")
         }
@@ -208,19 +211,23 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "settings": allowed = "actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
             case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
             case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
-            case "appExplorer": allowed = "defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
-            case "windowManager": allowed = "layout layers shortcuts favorites slotCount"
-            case "layers", "holdLayers": allowed = "id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
-            case "favorites", "children": allowed = "direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
+            case "appExplorer": allowed = "actionBindings defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
+            case "windowManager": allowed = "actionBindings layout layers shortcuts favorites slotCount"
+            case "layers", "holdLayers": allowed = "actionBindings id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
+            case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
+            case "actionBindings": allowed = "id trigger action"
+            case "trigger": allowed = "keyboard gesture"
+            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath bundleID name url command media windowPlacement tap"
+            case "keyboard": allowed = "keyCode modifiers keyLabel"
             case "windowPlacement": allowed = "direction layout"
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"
             case "appOverrides": allowed = "bundleID name enabled bindings"
             case "bindings": allowed = "trigger action shortcut"
-            case "shortcut", "activationShortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
+            case "shortcut", "activationShortcut": allowed = "keyCode modifiers keyLabel macroID hudLayerID assignedAction"
             case "shortcuts": allowed = path.contains("windowManager") ? "command shortcut" : "normal precision actions additional profileActions dragShortcut holdToActivate"
             case "normal", "precision", "motion", "pointerMotion":
                 allowed = path.contains(".shortcuts.") ? "keyCode modifiers enabled holdToActivate keyLabel" : "cursorResponse scrollResponse cursorSpeed cursorAcceleration scrollMultiplier invertScrollX invertScrollY kineticScroll kineticDecay scrollAcceleration cursorDeceleration fineCursorSpeed fineCursorAcceleration fineCursorFalloff cursorSpeedTransition"
@@ -244,7 +251,7 @@ private indirect enum ConfigurationValue: Codable {
             case "navigatorDragging": allowed = "touchAndHoldDrag dragRegrip dragRegripWindow"
             case "profileGestures", "appleLayerGestures": allowed = "gestures oneFingerTap twoFingerTap oneFingerShortcut twoFingerShortcut oneFingerDoubleTap twoFingerDoubleTap oneFingerDoubleShortcut twoFingerDoubleShortcut doubleTapSwipe singleTapSwipe twoFingerSingleTapSwipe twoFingerDoubleTapSwipe twoFingerSwipe oneFingerTripleTap twoFingerTripleTap oneFingerTripleShortcut twoFingerTripleShortcut"
             case "doubleTapSwipe", "singleTapSwipe", "twoFingerSingleTapSwipe", "twoFingerDoubleTapSwipe", "twoFingerSwipe": allowed = "enabled swipeWindow swipeDistance fastSwipeDuration appExplorerDirections left right up down topLeft topRight bottomLeft bottomRight"
-            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel macroID hudLayerID"
+            case "oneFingerShortcut", "twoFingerShortcut", "oneFingerDoubleShortcut", "twoFingerDoubleShortcut", "oneFingerTripleShortcut", "twoFingerTripleShortcut", "left", "right", "up", "down", "topLeft", "topRight", "bottomLeft", "bottomRight": allowed = "keyCode modifiers keyLabel macroID hudLayerID assignedAction"
             case "sliderBaselines": allowed = "cursorSpeed cursorAcceleration cursorFalloff scrollSpeed scrollAcceleration coastCoefficient tapImpactSpeed tapMovementRadius doubleTapDelay regripWindow"
             case "additionalProfiles": allowed = "id name motion"
             case "actions", "additional", "profileActions", "dragShortcut": allowed = "keyCode modifiers enabled holdToActivate keyLabel"
@@ -255,7 +262,10 @@ private indirect enum ConfigurationValue: Codable {
                 throw ConfigurationError("Unknown setting: \(path).\(unknown)")
             }
             for (name, value) in values { try value.validate(key: name, path: path + "." + name) }
-            if values["macroID"] != nil || values["hudLayerID"] != nil {
+            if key == "action" || key == "assignedAction" {
+                let action = try JSONDecoder().decode(BindingAction.self, from: JSONEncoder().encode(self))
+                guard action.isValid else { throw ConfigurationError("Invalid action at \(path).") }
+            } else if values["macroID"] != nil || values["hudLayerID"] != nil || values["assignedAction"] != nil {
                 let reference = try JSONDecoder().decode(RecordedShortcut.self, from: JSONEncoder().encode(self))
                 guard reference.isValidExplorerShortcut else { throw ConfigurationError("Invalid macro or HUD-layer reference at \(path).") }
             }

@@ -82,86 +82,23 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "safari").font(.system(size: 24, weight: .light)).foregroundStyle(.teal)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ROTAGIVAN").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
-                    Text(store.activeConfigurationName)
-                        .font(.system(size: 19, weight: .semibold)).lineLimit(1)
-                        .accessibilityLabel("Profile name")
-                }
-                Spacer()
-                Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { switchProfile($0) })) {
-                    ForEach(store.configurationProfiles) { profile in Text(profile.name).tag(profile.id) }
-                }.frame(width: 215)
-                Button("Rename…", systemImage: "pencil") {
-                    renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID }
-                }.help("Rename the selected profile without changing its settings")
-                    .accessibilityIdentifier("rename-profile")
-                Button { switchProfile(nil) } label: { Label("Add Profile", systemImage: "plus") }
-                    .disabled(store.configurationProfiles.count >= 20)
-                    .help("Copy this profile, including every action layer and HUD layer")
-            }
-            .padding(.horizontal, 22).padding(.vertical, 16)
+            header
             Divider()
             HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("THIS PROFILE").font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
-                    ForEach(sections, id: \.0) { title, icon in
-                        Button { selection = title } label: {
-                            Label(sectionTitle(title), systemImage: icon)
-                                .font(.system(size: 12, weight: selection == title ? .semibold : .regular))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 10)
-                                .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                                .contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityAddTraits(selection == title ? .isSelected : [])
-                    }
-                    Spacer()
-                    Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
-                        .font(.caption).foregroundStyle(.secondary).lineSpacing(4).padding(10)
-                }.padding(12).padding(.top, 10).frame(width: 180)
-                    .background(Color(nsColor: .underPageBackgroundColor).opacity(0.4))
+                sidebar
                 Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        if selection != "Layers" && selection != "Calibration" && selection != "Pointer & scrolling" {
-                            Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
-                            Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
-                        switch selection {
-                        case "General": general
-                        case "Devices": devices
-                        case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
-                        case "Macros": HotkeyOrganizerView(store: store)
-                        case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
-                        case "App overrides": AppOverridesView(store: store)
-                        case "Pointer & scrolling": pointerSettings
-                        default: profiles
-                        }
-                    }
-                    .frame(width: 708, alignment: .leading).padding(22)
-                    .id(store.activeConfigurationID)
-                }
+                page
             }
             Spacer(minLength: 0)
             Divider()
-            HStack {
-                Text("\(store.activeConfigurationName)  /  \(store.activeProfileName)")
-                Spacer()
-                Text(AppVersion.display)
-                Text("Changes save automatically")
-            }
-            .font(.system(size: 11)).foregroundStyle(.secondary)
-            .padding(.horizontal, 24).padding(.vertical, 12)
+            footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .toggleStyle(.checkbox)
         .tint(.primary)
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
+        .environment(\.hudActionDestinations, store.settings.appExplorer?.tileContainers() ?? [])
         .frame(width: 940, height: 740)
         .sheet(item: $renamingProfile) { profile in
             ProfileNameEditor(name: profile.name, onSave: { name in
@@ -207,6 +144,90 @@ struct ContentView: View {
                 store.recenterSliderBaselines(revision: 6)
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "safari").font(.system(size: 24, weight: .light)).foregroundStyle(.teal)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ROTAGIVAN").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
+                Text(store.activeConfigurationName)
+                    .font(.system(size: 19, weight: .semibold)).lineLimit(1)
+                    .accessibilityLabel("Profile name")
+            }
+            Spacer()
+            Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { switchProfile($0) })) {
+                ForEach(store.configurationProfiles) { profile in Text(profile.name).tag(profile.id) }
+            }.frame(width: 215)
+            Button("Rename…", systemImage: "pencil") {
+                renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID }
+            }.help("Rename the selected profile without changing its settings")
+                .accessibilityIdentifier("rename-profile")
+            Button { switchProfile(nil) } label: { Label("Add Profile", systemImage: "plus") }
+                .disabled(store.configurationProfiles.count >= 20)
+                .help("Copy this profile, including every action layer and HUD layer")
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("THIS PROFILE").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
+            ForEach(sections, id: \.0) { title, icon in
+                Button { selection = title } label: {
+                    Label(sectionTitle(title), systemImage: icon)
+                        .font(.system(size: 12, weight: selection == title ? .semibold : .regular))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 10)
+                        .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityAddTraits(selection == title ? .isSelected : [])
+            }
+            Spacer()
+            Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
+                .font(.caption).foregroundStyle(.secondary).lineSpacing(4).padding(10)
+        }.padding(12).padding(.top, 10).frame(width: 180)
+            .background(Color(nsColor: .underPageBackgroundColor).opacity(0.4))
+    }
+
+    private var page: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if selection != "Layers" && selection != "Calibration" && selection != "Pointer & scrolling" {
+                    Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
+                    Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                pageContent
+            }
+            .frame(width: 708, alignment: .leading).padding(22)
+            .id(store.activeConfigurationID)
+        }
+    }
+
+    @ViewBuilder private var pageContent: some View {
+        switch selection {
+        case "General": general
+        case "Devices": devices
+        case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
+        case "Macros": HotkeyOrganizerView(store: store)
+        case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
+        case "App overrides": AppOverridesView(store: store)
+        case "Pointer & scrolling": pointerSettings
+        default: profiles
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Text("\(store.activeConfigurationName)  /  \(store.activeProfileName)")
+            Spacer()
+            Text(AppVersion.display)
+            Text("Changes save automatically")
+        }
+        .font(.system(size: 11)).foregroundStyle(.secondary)
+        .padding(.horizontal, 24).padding(.vertical, 12)
     }
 
     private var profiles: some View {

@@ -126,6 +126,9 @@ final class NavigatorHIDManager: ObservableObject {
             self.explorer = explorer
             explorer.onPresentationChanged = { [weak self] in self?.updateExplorerPointer() }
             (explorer as? AppExplorerController)?.configuration = { [weak store] in store?.settings.appExplorer ?? AppExplorerSettings() }
+            (explorer as? AppExplorerController)?.gestureSettings = { [weak self] in
+                self?.explorerGestureSettings ?? ProfileGestures(gestures: GestureSettings(), oneFingerTap: .none, twoFingerTap: .none)
+            }
             (explorer as? AppExplorerController)?.hotkeyDictionary = { [weak store] in store?.settings.resolvedHotkeyDictionary ?? [] }
             (explorer as? AppExplorerController)?.editingStore = store
             (explorer as? AppExplorerController)?.onSettings = {
@@ -150,6 +153,9 @@ final class NavigatorHIDManager: ObservableObject {
             self.appleGestures.onWindowManager = { [weak self] in self?.scheduleAppleHUD(windowManager: true) }
             self.gestures.onHUDLayer = { [weak self] id in self?.openHUDLayer(id) }
             self.appleGestures.onHUDLayer = { [weak self] id in self?.scheduleAppleHUD(layerID: id) }
+            self.gestures.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
+            self.appleGestures.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
+            (explorer as? AppExplorerController)?.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
@@ -193,6 +199,10 @@ final class NavigatorHIDManager: ObservableObject {
     func openHUDLayer(_ id: UUID, fromKeyboard: Bool = false) {
         guard let layer = store.settings.appExplorer?.holdLayers?.first(where: { $0.id == id }),
               layer.isAvailable(in: store.foregroundBundleID) else { return }
+        if explorer?.isVisible == true, let controller = explorer as? AppExplorerController {
+            controller.switchLayer(id)
+            return
+        }
         openAppExplorer(layerID: id)
         if fromKeyboard, explorer?.isVisible == true {
             // A keyboard launch is not owned by whichever device last moved.
@@ -200,6 +210,73 @@ final class NavigatorHIDManager: ObservableObject {
             explorerSource = nil
             explorerSettings = explorerGestureSettings
             updateExplorerPointer()
+        }
+    }
+
+    /// Shared executor for keyboard and trackpad bindings, including actions
+    /// assigned inside the HUD. A single path keeps action references from
+    /// accidentally being posted as physical keystrokes.
+    func executeBindingAction(_ action: BindingAction) {
+        guard store.settings.enabled, action.isValid, !calibrationCapturing else { return }
+        switch action.kind {
+        case .keystroke:
+            guard let shortcut = action.shortcut else { return }
+            EventPoster().performTap(.shortcut, shortcut: shortcut)
+        case .macro:
+            guard let id = action.macroID,
+                  let macro = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == id }) else { return }
+            EventPoster().performMacro(macro)
+        case .hudLayer:
+            if let tokens = action.hudPath {
+                let path = tokens.compactMap(ExplorerTilePathStep.init(token:))
+                guard path.count == tokens.count else { return }
+                var target = ExplorerScopedHeldKeys()
+                guard target.selectContainer(path, settings: store.settings.appExplorer ?? AppExplorerSettings()) != nil else { return }
+                if explorer?.isVisible != true { openAppExplorer() }
+                _ = (explorer as? AppExplorerController)?.switchContainer(tokens)
+            } else if let id = action.hudLayerID { openHUDLayer(id, fromKeyboard: true) }
+            else {
+                if explorer?.isVisible == true, let controller = explorer as? AppExplorerController {
+                    controller.switchLayer(nil)
+                } else { openAppExplorer() }
+            }
+        case .openApp:
+            guard let id = action.bundleID,
+                  let url = ExplorerApplicationCatalog.applicationURL(for: id) else { return }
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error { Logger(subsystem: "local.rotagivan", category: "Bindings").error("Application open failed: \(error.localizedDescription, privacy: .public)") }
+            }
+        case .openURL:
+            guard let string = action.url, let url = AppExplorerFavorite.webURL(string) else { return }
+            _ = NSWorkspace.shared.open(url)
+        case .command:
+            guard let command = action.command else { return }
+            switch command {
+            case .windowManager:
+                if explorer?.isVisible == true { explorer?.dismiss() }
+                openAppExplorer(windowManager: true)
+            case .appWindows, .mediaControls:
+                if explorer?.isVisible != true { openAppExplorer() }
+                (explorer as? AppExplorerController)?.showBuiltIn(command)
+            default:
+                if let shortcut = command.macOSShortcut { EventPoster().performTap(.shortcut, shortcut: shortcut) }
+                else if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                        let target = WindowTiling.capture(pid: pid) { _ = target.command(command) }
+            }
+        case .media:
+            if let media = action.media { ExplorerMediaAction.perform(media) }
+        case .windowPlacement:
+            guard let placement = action.windowPlacement,
+                  let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                  let target = WindowTiling.capture(pid: pid) else { return }
+            _ = target.apply(placement.direction, placement.layout)
+        case .tap:
+            guard let tap = action.tap else { return }
+            switch tap {
+            case .appExplorer: openAppExplorer()
+            case .windowManager: openAppExplorer(windowManager: true)
+            default: EventPoster().performTap(tap)
+            }
         }
     }
 

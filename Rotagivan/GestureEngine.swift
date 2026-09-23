@@ -11,6 +11,7 @@ final class GestureEngine {
     var onAppExplorer: (() -> Void)?
     var onHUDLayer: ((UUID) -> Void)?
     var onWindowManager: (() -> Void)?
+    var onBindingAction: ((BindingAction) -> Void)?
     var isEditingInterface = false {
         didSet { if oldValue != isEditingInterface { reset() } }
     }
@@ -706,7 +707,10 @@ final class GestureEngine {
         guard action != .none else { return }
         if action == .shortcut, let shortcut, shortcut.isActionReference {
             guard shortcut.isValidExplorerShortcut else { return }
-            if let id = shortcut.hudLayerID {
+            if let assigned = shortcut.assignedAction {
+                reset()
+                onBindingAction?(assigned)
+            } else if let id = shortcut.hudLayerID {
                 reset()
                 onHUDLayer?(id)
             } else if let id = shortcut.macroID,

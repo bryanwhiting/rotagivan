@@ -81,6 +81,18 @@ import Foundation
         let decoded = try JSONDecoder().decode(StoredSettings.self, from: JSONEncoder().encode(settings))
         precondition(decoded.hotkeyDictionary == [named])
         precondition(StoredSettings().resolvedHotkeyDictionary.isEmpty, "No example shortcuts are seeded")
+        let independentTap = ActionBinding(trigger: BindingTrigger(gesture: .oneFingerTap), action: .macro(named))
+        settings.actionBindings = [independentTap]
+        settings.appExplorer?.actionBindings = [ActionBinding(trigger: BindingTrigger(keyboard: layerActionKey),
+            action: .openURL("https://example.com"))]
+        let unifiedAudit = audit()
+        precondition(unifiedAudit.assignments.contains { $0.gesture == .oneFingerTap && $0.inputScope == "" })
+        precondition(!unifiedAudit.assignments.contains { $0.id == "global.oneFingerTap" },
+            "A unified gesture replaces the inherited row, rather than appearing twice")
+        precondition(unifiedAudit.assignments.contains { $0.id.contains(independentTap.id.uuidString) && $0.kind == "Output" && $0.shortcut == key },
+            "Macros triggered by unified bindings expose physical outputs for interception analysis")
+        precondition(unifiedAudit.assignments.contains { $0.action == "https://example.com" && $0.shortcut == layerActionKey },
+            "Independent Default HUD actions appear in the assignment inventory")
         print("Hotkey organizer passed: global action triggers, tap inventory, dictionary identity/labels, inheritance/device scope, conflicts vs reuse, app precedence, nested HUDs and persistence")
     }
 }

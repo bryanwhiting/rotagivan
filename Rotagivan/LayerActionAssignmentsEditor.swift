@@ -135,7 +135,7 @@ private struct LayerActionAssignmentRow: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
 
-            LayerActionValueMenu(
+            UnifiedLayerActionPicker(
                 action: $action,
                 shortcut: $shortcut,
                 shortcutsOnly: trigger.direction != nil
@@ -349,7 +349,7 @@ struct AddLayerActionSheet: View {
                 }
                 Divider().padding(.leading, 42)
                 selectionRow(number: "3", title: "Action") {
-                    LayerActionValueMenu(
+                    UnifiedLayerActionPicker(
                         action: $action,
                         shortcut: $shortcut,
                         shortcutsOnly: direction != nil
@@ -405,6 +405,33 @@ struct AddLayerActionSheet: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+}
+
+/// Projects legacy tap/swipe storage into the shared action catalog.
+private struct UnifiedLayerActionPicker: View {
+    @Binding var action: TapAction
+    @Binding var shortcut: RecordedShortcut?
+    var shortcutsOnly = false
+
+    private var value: Binding<BindingAction> {
+        Binding(get: {
+            if action == .shortcut, let shortcut { return .from(shortcut: shortcut) }
+            return .tap(action)
+        }, set: { selected in
+            if selected.kind == .tap {
+                action = selected.tap ?? .none
+                shortcut = nil
+            } else {
+                action = .shortcut
+                shortcut = selected.kind == .keystroke ? selected.shortcut : .assigned(selected)
+            }
+        })
+    }
+
+    var body: some View {
+        BindingActionPicker(action: value, allowPointerActions: !shortcutsOnly)
+            .accessibilityIdentifier("layer-action-value-menu")
     }
 }
 

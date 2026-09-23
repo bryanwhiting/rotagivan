@@ -63,6 +63,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/WindowTiling.swift" \
   "$script_dir/ExplorerAppearance.swift" \
   "$script_dir/MediaControls.swift" \
+  "$script_dir/BindingEditor.swift" \
   "$script_dir/HUDLayerHotkeyEditor.swift" \
   "$script_dir/AppExplorer.swift" \
   "$script_dir/AppExplorerSettingsView.swift" \

@@ -31,6 +31,19 @@ extension AppExplorerPresenting {
     private var timer: Timer?
     private var escapeMonitor: Any?
     private var input = AppExplorerSelection(waitingForLift: false)
+    private var localGestureReports: [TrackpadReport] = []
+    private var localGestureStrokeStart = 0
+    private var localGestureTapCount = 0
+    private var localGestureFingerCount = 0
+    private var localGestureSequenceFingers = 0
+    private var localGestureMaxTravel = 0.0
+    private var localGesturePendingWindow = 0.0
+    private var localGestureFollowupDelay = 0.0
+    private var localGestureStarted = Date.distantPast
+    private var localGestureLastLift = Date.distantPast
+    private var localGestureOrigin: CGPoint?
+    private var localGestureLast = CGPoint.zero
+    private var localGestureTimer: Timer?
     private let model = ExplorerModel()
     private var sourcePID: pid_t?
     private let shortcutPoster = EventPoster()
@@ -64,6 +77,9 @@ extension AppExplorerPresenting {
     private var controlDirection: ExplorerSlot?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
     var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
+    var gestureSettings: () -> ProfileGestures = {
+        ProfileGestures(gestures: GestureSettings(), oneFingerTap: .none, twoFingerTap: .none)
+    }
     var hotkeyDictionary: () -> [NamedHotkey] = { [] }
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
@@ -81,6 +97,7 @@ extension AppExplorerPresenting {
     }
     var onDismiss: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onBindingAction: ((BindingAction) -> Void)?
     var onPresentationChanged: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     weak var editingStore: SettingsStore?
@@ -137,8 +154,72 @@ extension AppExplorerPresenting {
         show(waitingForLift: waitingForLift, windowManager: true)
     }
 
+    /// Switch the open panel's scope without changing its source application or
+    /// releasing the trackpad that owns its pointer lock.
+    func switchLayer(_ id: UUID?) {
+        guard isVisible, !isEditing else { return }
+        if let id {
+            guard let layer = configuration().holdLayers?.first(where: { $0.id == id }),
+                  layer.isAvailable(in: sourceBundleID) else { return }
+        }
+        heldKeys = ExplorerScopedHeldKeys()
+        if let id { heldKeys.selectRootLayer(id, settings: configuration()) }
+        windowKeys = ExplorerScopedHeldKeys()
+        groupPath = []; baseGroupPath = []
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false
+        model.showingWindowManager = false
+        model.directWindowManager = false
+        controlDirection = nil
+        model.message = nil
+        refreshGroup()
+    }
+
+    @discardableResult func switchContainer(_ tokens: [String]) -> Bool {
+        guard isVisible, !isEditing, tokens.count <= 16 else { return false }
+        let path = tokens.compactMap(ExplorerTilePathStep.init(token:))
+        guard path.count == tokens.count else { return false }
+        var keys = ExplorerScopedHeldKeys()
+        guard let groups = keys.selectContainer(path, settings: configuration()) else { return false }
+        heldKeys = keys
+        groupPath = groups; baseGroupPath = groups
+        windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false
+        model.showingWindowManager = false
+        model.directWindowManager = false
+        controlDirection = nil
+        model.message = nil
+        refreshGroup()
+        return true
+    }
+
+    func showBuiltIn(_ command: AppExplorerAction) {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        switch command {
+        case .appWindows:
+            windowList = sourcePID.map(listWindows) ?? []
+            windowPage = 0
+            model.showingAppWindows = true
+            model.showingMediaControls = false
+            controlDirection = nil
+            refreshGroup()
+        case .mediaControls:
+            model.showingMediaControls = true
+            model.showingAppWindows = false
+            controlDirection = nil
+            refreshGroup()
+        default: break
+        }
+    }
+
     private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil) {
         guard !isVisible else { return }
+        resetLocalGesture()
         cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
@@ -233,6 +314,42 @@ extension AppExplorerPresenting {
         return projected.windowEditor(at: windowOwnerPath ?? [])
     }
 
+    private var visibleActionBindings: [ActionBinding] {
+        let original = configuration()
+        if model.showingWindowManager {
+            let window = windowConfiguration
+            let resolved = windowKeys.resolved(window)
+            if !windowGroupPath.isEmpty { return resolved.favorite(at: windowGroupPath)?.actionBindings ?? [] }
+            if let layer = windowKeys.activeLayer(at: windowGroupPath, in: window) { return layer.actionBindings ?? [] }
+            return window.actionBindings ?? []
+        }
+        let resolved = heldKeys.resolved(original)
+        if !groupPath.isEmpty { return resolved.favorite(at: groupPath)?.actionBindings ?? [] }
+        if let layer = heldKeys.activeLayer(at: layerScopePath, in: original) {
+            return layer.actionBindings ?? []
+        }
+        return original.actionBindings ?? []
+    }
+
+    private func performBoundAction(_ action: BindingAction) {
+        guard action.isValid, contextIsValid?() != false else { return }
+        if action.kind == .hudLayer ||
+           (action.kind == .command && [.appWindows, .mediaControls].contains(action.command)) {
+            onBindingAction?(action)
+            return
+        }
+        let originalPID = sourcePID
+        dismiss()
+        let generation = selectionGeneration
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation,
+                      self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
+                self.onBindingAction?(action)
+            }
+        }
+    }
+
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
         guard isVisible, !isEditing, contextIsValid?() != false else { return false }
         if event.type == .keyDown && event.keyCode == 53 { return false }
@@ -243,6 +360,12 @@ extension AppExplorerPresenting {
             return false
         }
         let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
+        if event.type == .keyDown, let binding = visibleActionBindings.first(where: {
+            $0.trigger.keyboard?.keyCode == event.keyCode && $0.trigger.keyboard?.modifiers == flags
+        }) {
+            if !event.isARepeat { performBoundAction(binding.action) }
+            return true
+        }
         if event.type == .keyDown, let entry = model.entries.first(where: {
             $0.activationShortcut?.keyCode == event.keyCode && $0.activationShortcut?.modifiers == flags
         }) {
@@ -304,6 +427,7 @@ extension AppExplorerPresenting {
 
     private func loadEntries() {
         let original = configuration()
+        model.actionBindings = visibleActionBindings
         model.theme = original.resolvedTheme
         model.animationsEnabled = original.resolvedAnimationsEnabled
         let layer = heldKeys.activeLayer(at: layerScopePath, in: original)
@@ -449,6 +573,11 @@ extension AppExplorerPresenting {
         contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
         guard contextIsValid?() != false else { dismiss(); return }
         guard !isEditing else { return }
+        if !input.waitingForLift && processLocalGesture(report) { return }
+        applySelection(report)
+    }
+
+    private func applySelection(_ report: TrackpadReport) {
         switch input.process(report) {
         case .waiting: break
         case .highlight(let direction):
@@ -458,6 +587,169 @@ extension AppExplorerPresenting {
         case .back: goBack()
         case .cancel: dismiss()
         }
+    }
+
+    private func resetLocalGesture() {
+        localGestureTimer?.invalidate(); localGestureTimer = nil
+        localGestureReports.removeAll()
+        localGestureStrokeStart = 0
+        localGestureTapCount = 0
+        localGestureFingerCount = 0
+        localGestureSequenceFingers = 0
+        localGestureMaxTravel = 0
+        localGesturePendingWindow = 0
+        localGestureFollowupDelay = 0
+        localGestureOrigin = nil
+    }
+
+    private func replayLocalGesture(from index: Int = 0) {
+        let reports = Array(localGestureReports.dropFirst(index))
+        resetLocalGesture()
+        for report in reports where isVisible { applySelection(report) }
+    }
+
+    /// Recognize assigned HUD gestures before the HUD's sector-selection gate.
+    /// Unassigned strokes are replayed through the original selection path.
+    private func processLocalGesture(_ report: TrackpadReport) -> Bool {
+        let gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
+        guard !gestures.isEmpty else {
+            if !localGestureReports.isEmpty { replayLocalGesture() }
+            return false
+        }
+        let now = Date()
+        let profile = gestureSettings()
+        let contacts = report.contacts.filter(\.touching)
+        guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
+            replayLocalGesture(); return false
+        }
+        if localGestureTapCount > 0, !contacts.isEmpty,
+           (now.timeIntervalSince(localGestureLastLift) > localGesturePendingWindow ||
+            contacts.count != localGestureSequenceFingers) {
+            let prior: AppGestureTrigger = localGestureSequenceFingers == 2
+                ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
+                : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
+            if let binding = gestures.first(where: { $0.trigger.gesture == prior }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+                return true
+            }
+            replayLocalGesture()
+            if !isVisible { return true }
+        }
+        if localGestureReports.count >= 200 { replayLocalGesture(); return false }
+        localGestureReports.append(report)
+        if !contacts.isEmpty {
+            let point = CGPoint(x: contacts.map(\.x).reduce(0, +) / Double(contacts.count),
+                                y: contacts.map(\.y).reduce(0, +) / Double(contacts.count))
+            if localGestureFingerCount == 0 {
+                localGestureTimer?.invalidate(); localGestureTimer = nil
+                localGestureStrokeStart = localGestureReports.count - 1
+                localGestureFingerCount = contacts.count
+                localGestureStarted = now
+                localGestureFollowupDelay = localGestureTapCount > 0 ? now.timeIntervalSince(localGestureLastLift) : 0
+                localGestureOrigin = point
+                localGestureLast = point
+                localGestureMaxTravel = 0
+            } else if contacts.count >= localGestureFingerCount {
+                localGestureFingerCount = contacts.count
+                localGestureLast = point
+                localGestureMaxTravel = max(localGestureMaxTravel, hypot(point.x - (localGestureOrigin?.x ?? point.x),
+                    point.y - (localGestureOrigin?.y ?? point.y)))
+            }
+            return true
+        }
+        guard localGestureFingerCount > 0, let origin = localGestureOrigin else { return true }
+        let fingers = localGestureFingerCount
+        let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
+        let duration = now.timeIntervalSince(localGestureStarted)
+        let swipeSettings: DoubleTapSwipeSettings? = fingers == 2
+            ? (localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe : profile.twoFingerDoubleTapSwipe)
+            : (localGestureTapCount == 1 ? profile.singleTapSwipe : profile.doubleTapSwipe)
+        let swipeDistance = localGestureTapCount == 0 && fingers == 2 ? 80 : (swipeSettings?.resolvedDistance ?? 60)
+        let swipeDuration = localGestureTapCount == 0 ? 0.35 : (swipeSettings?.resolvedFastDuration ?? 0.18)
+        localGestureFingerCount = 0
+        localGestureOrigin = nil
+        localGestureLastLift = now
+        if duration <= swipeDuration, hypot(dx, dy) >= swipeDistance,
+           (localGestureTapCount == 0 || localGestureFollowupDelay <= (swipeSettings?.resolvedWindow ?? 0.2)),
+           let direction = SwipeDirection.classify(dx: dx, dy: dy) {
+            let trigger: AppGestureTrigger?
+            if fingers == 2 && localGestureTapCount == 0 {
+                trigger = direction == .left ? .twoFingerLeft : direction == .right ? .twoFingerRight : nil
+            } else {
+                let base: AppGestureTrigger = fingers == 2
+                    ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
+                    : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
+                trigger = localGestureTapCount > 0 ? .combining(tap: base, direction: direction) : nil
+            }
+            if let trigger, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+                return true
+            }
+            replayLocalGesture(from: localGestureStrokeStart)
+            return true
+        }
+        guard duration <= profile.gestures.tapMaxDuration,
+              localGestureMaxTravel <= profile.gestures.tapMaxMovement else {
+            replayLocalGesture(from: localGestureStrokeStart)
+            return true
+        }
+        localGestureTapCount += 1
+        if localGestureTapCount == 1 { localGestureSequenceFingers = fingers }
+        let trigger: AppGestureTrigger = fingers == 2
+            ? (localGestureTapCount == 1 ? .twoFingerTap : localGestureTapCount == 2 ? .twoFingerDoubleTap : .twoFingerTripleTap)
+            : (localGestureTapCount == 1 ? .oneFingerTap : localGestureTapCount == 2 ? .oneFingerDoubleTap : .oneFingerTripleTap)
+        let later = gestures.contains { binding in
+            guard let candidate = binding.trigger.gesture else { return false }
+            return candidate.baseTapTrigger.map { base in
+                fingers == 2 ? [.twoFingerTap, .twoFingerDoubleTap, .twoFingerTripleTap].contains(base)
+                             : [.oneFingerTap, .oneFingerDoubleTap, .oneFingerTripleTap].contains(base)
+            } == true && (candidate.direction != nil ||
+                (localGestureTapCount == 1 && [.oneFingerDoubleTap, .oneFingerTripleTap, .twoFingerDoubleTap, .twoFingerTripleTap].contains(candidate)) ||
+                (localGestureTapCount == 2 && [.oneFingerTripleTap, .twoFingerTripleTap].contains(candidate)))
+        }
+        if !later, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+            resetLocalGesture()
+            performBoundAction(binding.action)
+            return true
+        }
+        let swipeWindow = fingers == 2
+            ? (localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe?.resolvedWindow : profile.twoFingerDoubleTapSwipe?.resolvedWindow)
+            : (localGestureTapCount == 1 ? profile.singleTapSwipe?.resolvedWindow : profile.doubleTapSwipe?.resolvedWindow)
+        let hasSwipeFollowup = gestures.contains { $0.trigger.gesture?.baseTapTrigger == trigger && $0.trigger.gesture?.direction != nil }
+        let hasTapFollowup = gestures.contains { binding in
+            guard let candidate = binding.trigger.gesture else { return false }
+            if localGestureTapCount == 1 {
+                return fingers == 2 ? [.twoFingerDoubleTap, .twoFingerTripleTap].contains(candidate)
+                                    : [.oneFingerDoubleTap, .oneFingerTripleTap].contains(candidate)
+            }
+            return localGestureTapCount == 2 && (fingers == 2 ? candidate == .twoFingerTripleTap : candidate == .oneFingerTripleTap)
+        }
+        let tapWindow = localGestureTapCount == 1
+            ? (gestures.contains { $0.trigger.gesture == (fingers == 2 ? .twoFingerTripleTap : .oneFingerTripleTap) }
+                ? profile.gestures.resolvedTripleTapFirstInterval : profile.gestures.resolvedDoubleTapInterval)
+            : profile.gestures.resolvedTripleTapSecondInterval
+        localGesturePendingWindow = max(hasSwipeFollowup ? (swipeWindow ?? 0.2) : 0,
+                                        hasTapFollowup ? tapWindow : 0)
+        if localGesturePendingWindow == 0, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+            resetLocalGesture(); performBoundAction(binding.action); return true
+        }
+        if localGesturePendingWindow == 0 { replayLocalGesture(); return true }
+        localGestureTimer?.invalidate()
+        let generation = selectionGeneration
+        let timer = Timer(timeInterval: localGesturePendingWindow, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation else { return }
+                if let binding = self.visibleActionBindings.first(where: { $0.trigger.gesture == trigger && $0.isValid }) {
+                    self.resetLocalGesture()
+                    self.performBoundAction(binding.action)
+                } else { self.replayLocalGesture() }
+            }
+        }
+        localGestureTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        return true
     }
 
     private func choose(_ direction: ExplorerSlot) {
@@ -664,6 +956,7 @@ extension AppExplorerPresenting {
     }
 
     private func refreshGroup() {
+        resetLocalGesture()
         selectionGeneration &+= 1
         loadEntries()
         model.selected = nil
@@ -765,6 +1058,7 @@ extension AppExplorerPresenting {
     }
 
     func dismiss() {
+        resetLocalGesture()
         guard let panel else { return }
         selectionGeneration &+= 1
         self.panel = nil
@@ -873,6 +1167,7 @@ struct ExplorerEntry {
     // MRU starts at the left and proceeds clockwise. Positions freeze on open.
     static let directions = AppExplorerSettings.recentDirections
     @Published var entries: [ExplorerEntry] = []
+    @Published var actionBindings: [ActionBinding] = []
     @Published var selected: ExplorerSlot?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
@@ -1002,7 +1297,7 @@ struct AppExplorerView: View {
                     .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
             }
             quickActionsFooter
-            if !layerActionHotkeys.isEmpty { layerActionHotkeyFooter }
+            if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty { layerActionHotkeyFooter }
         }
         .padding(26)
         .frame(width: 470, height: 520)
@@ -1057,6 +1352,16 @@ struct AppExplorerView: View {
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundStyle(accent)
                         Text(entry.name).lineLimit(1)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.09)))
+                }
+                ForEach(model.actionBindings) { binding in
+                    HStack(spacing: 5) {
+                        Text(binding.trigger.title)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent)
+                        Text(binding.action.title).lineLimit(1)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.09)))

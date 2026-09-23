@@ -1,13 +1,12 @@
 import SwiftUI
 
-/// Edits the layer's name and its visible hotkey → tile-action pairs.
-/// Legacy layer-opening keys remain decodable for migration, but are no longer
-/// presented as the way to configure a HUD layer.
+/// Edits actions that run while this HUD layer is visible, independently of tiles.
 struct HUDLayerHotkeyEditor: View {
     @ObservedObject var store: SettingsStore
     @State private var layer: ExplorerHoldLayer
     let settings: AppExplorerSettings
     let isDefaultLayer: Bool
+    @State private var editingBinding: ActionBinding?
     var onSave: (ExplorerHoldLayer, [HUDTapAssignmentScope: Set<AppGestureTrigger>]) -> Bool
     var onCancel: () -> Void
 
@@ -29,6 +28,7 @@ struct HUDLayerHotkeyEditor: View {
         var result = settings
         if isDefaultLayer {
             result.favorites = layer.favorites
+            result.actionBindings = layer.actionBindings
             return result
         }
         var layers = result.holdLayers ?? []
@@ -48,7 +48,7 @@ struct HUDLayerHotkeyEditor: View {
                 .font(.headline).padding(.bottom, 14)
 
             if isDefaultLayer {
-                Text("This layer opens first. Assign a hotkey to any tile action just like every other HUD layer.")
+                Text("This layer opens first. Assign keyboard or trackpad triggers to actions here.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 TextField("HUD layer name", text: $layer.name)
@@ -56,17 +56,52 @@ struct HUDLayerHotkeyEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Action hotkeys").font(.headline)
-                Text("A hotkey runs the same action as its HUD tile while this layer is open. Assign apps, URLs, macros, macOS commands, media controls, window actions, or another HUD layer to a tile first.")
+                HStack {
+                    Text("Layer actions").font(.headline)
+                    Spacer()
+                    Button {
+                        editingBinding = ActionBinding(trigger: BindingTrigger(),
+                            action: .keystroke(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return")))
+                    } label: { Label("Add action", systemImage: "plus") }
+                }
+                Text("A keyboard shortcut or trackpad gesture runs any action while this layer is open.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 18).padding(.bottom, 10)
 
+            if (layer.actionBindings ?? []).isEmpty {
+                Text("No layer actions yet. Add one without creating a tile.")
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                ScrollView {
+                  LazyVStack(spacing: 0) {
+                    ForEach(layer.actionBindings ?? []) { binding in
+                        HStack(spacing: 9) {
+                            Text(binding.trigger.title).fontWeight(.medium).lineLimit(1)
+                            Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
+                            Text(binding.action.title).lineLimit(1)
+                            Spacer()
+                            Button("Edit") { editingBinding = binding }
+                            Button {
+                                layer.actionBindings?.removeAll { $0.id == binding.id }
+                            } label: { Image(systemName: "trash") }
+                                .help("Remove assignment")
+                        }
+                        .font(.system(size: 12)).padding(.horizontal, 11).frame(minHeight: 34)
+                        if binding.id != layer.actionBindings?.last?.id { Divider() }
+                    }
+                  }
+                }
+                .frame(height: min(190, CGFloat((layer.actionBindings ?? []).count) * 35))
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+            }
+
+            Text("Tile hotkeys").font(.headline).padding(.top, 15).padding(.bottom, 7)
+
             if layer.favorites.isEmpty {
-                ContentUnavailableView("No actions in this layer", systemImage: "keyboard.badge.ellipsis",
-                    description: Text(isDefaultLayer
-                        ? "Click one of the default layer’s HUD tiles to choose an action, then return here to assign a hotkey."
-                        : "Save the layer, then click one of its HUD tiles to choose an action and assign a hotkey."))
+                ContentUnavailableView("No tiles in this layer", systemImage: "keyboard.badge.ellipsis",
+                    description: Text("Tile shortcuts are optional. Layer actions above work without tiles."))
                     .frame(maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -93,18 +128,32 @@ struct HUDLayerHotkeyEditor: View {
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save") {
-                    var globalLayer = layer
-                    globalLayer.appBundleID = nil
-                    globalLayer.appName = nil
-                    _ = onSave(globalLayer, [:])
-                }
+                Button("Save") { _ = saveDraft() }
                 .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(!valid)
             }
         }
         .padding(22)
         .frame(width: 620, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(item: $editingBinding) { candidate in
+            BindingEditor(binding: candidate, existing: layer.actionBindings ?? [],
+                reservedKeys: layer.favorites.compactMap(\.activationShortcut),
+                title: "HUD layer action", onSave: { updated in
+                    var bindings = layer.actionBindings ?? []
+                    if let index = bindings.firstIndex(where: { $0.id == updated.id }) { bindings[index] = updated }
+                    else { bindings.append(updated) }
+                    layer.actionBindings = bindings
+                    editingBinding = nil
+                }, onCancel: { editingBinding = nil })
+        }
+    }
+
+    /// The button and native smoke test use the same save path.
+    @discardableResult func saveDraft() -> Bool {
+        var globalLayer = layer
+        globalLayer.appBundleID = nil
+        globalLayer.appName = nil
+        return onSave(globalLayer, [:])
     }
 
     private func actionRow(_ index: Int) -> some View {
@@ -126,6 +175,12 @@ struct HUDLayerHotkeyEditor: View {
                 Button("Clear") { layer.favorites[index].activationShortcut = nil }
                     .controlSize(.small)
             }
+            Button("Add tap/swipe…") {
+                guard let action = BindingAction.from(favorite: favorite) else { return }
+                editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
+            }
+            .controlSize(.small)
+            .disabled(BindingAction.from(favorite: favorite) == nil)
         }
         .padding(.horizontal, 12).frame(minHeight: 54)
         .accessibilityIdentifier("hud-action-hotkey-\(favorite.direction.rawValue)")

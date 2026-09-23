@@ -135,6 +135,15 @@ final class HotKeyManager {
     var onExplorerHold: ((Bool) -> Void)?
     var onHUDLayer: ((UUID) -> Void)?
     var onNamedHotkey: ((String) -> Void)?
+    var onBindingAction: ((BindingAction) -> Void)?
+    private var actionBindings: [ActionBinding] = []
+    private var bindingActions: [UInt32: BindingAction] = [:]
+    private var bindingPressed = Set<UInt32>()
+    func configureActionBindings(_ bindings: [ActionBinding]) {
+        guard bindings != actionBindings else { return }
+        actionBindings = bindings
+        if handler != nil { registerActions() }
+    }
     private var namedHotkeys: [NamedHotkey] = []
     private var namedHotkeyIDs: [UInt32: String] = [:]
     private var namedHotkeyPressed = Set<UInt32>()
@@ -258,6 +267,10 @@ final class HotKeyManager {
                     if down, !owner.recording, owner.namedHotkeyPressed.insert(id.id).inserted,
                        let action = owner.namedHotkeyIDs[id.id] { owner.onNamedHotkey?(action) }
                     else if !down { owner.namedHotkeyPressed.remove(id.id) }
+                } else if id.signature == HotKeyManager.fourCC("RBND") {
+                    if down, !owner.recording, owner.bindingPressed.insert(id.id).inserted,
+                       let action = owner.bindingActions[id.id] { owner.onBindingAction?(action) }
+                    else if !down { owner.bindingPressed.remove(id.id) }
                 } else { owner.handle(id: id.id, down: down) }
             }
             return noErr
@@ -335,6 +348,8 @@ final class HotKeyManager {
         hudPressed.removeAll()
         namedHotkeyIDs.removeAll()
         namedHotkeyPressed.removeAll()
+        bindingActions.removeAll()
+        bindingPressed.removeAll()
         let actions = Self.resolvedActions(for: activation.active, defaults: defaultActions, saved: savedActions,
             customTapProfiles: customTapProfiles, defaultID: defaultProfileID, dragShortcut: profileDragShortcut)
         var used = profileCombinations
@@ -402,6 +417,25 @@ final class HotKeyManager {
                 EventHotKeyID(signature: Self.fourCC("RMAC"), id: id), GetApplicationEventTarget(), 0, &ref)
             if result == noErr { namedHotkeyIDs[id] = entry.id; actionRefs.append(ref) }
             else { ShortcutSettings.shared.error = "\(entry.name) hotkey is unavailable." }
+        }
+        for (index, binding) in actionBindings.enumerated() {
+            guard binding.trigger.isValid, binding.action.isValid,
+                  let shortcut = binding.trigger.keyboard, shortcut.isValidGlobalHotkey else { continue }
+            let modifiers = UInt32((shortcut.modifiers & (1 << 18) != 0 ? 4096 : 0) |
+                (shortcut.modifiers & (1 << 19) != 0 ? 2048 : 0) |
+                (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
+                (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
+            guard used.insert("\(shortcut.keyCode):\(modifiers)").inserted else {
+                ShortcutSettings.shared.error = "\(binding.trigger.title) conflicts with another global hotkey."
+                continue
+            }
+            let id = UInt32(index)
+            var ref: EventHotKeyRef?
+            let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers,
+                EventHotKeyID(signature: Self.fourCC("RBND"), id: id), GetApplicationEventTarget(), 0, &ref)
+            if result == noErr { bindingActions[id] = binding.action; actionRefs.append(ref) }
+            else { ShortcutSettings.shared.error = "\(binding.trigger.title) is unavailable."
+            }
         }
     }
 

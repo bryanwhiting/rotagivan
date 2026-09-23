@@ -3,7 +3,12 @@ import SwiftUI
 
 private struct HotkeyDictionaryKey: EnvironmentKey { static let defaultValue: [NamedHotkey] = [] }
 private struct HUDActionLayersKey: EnvironmentKey { static let defaultValue: [ExplorerHoldLayer] = [] }
+private struct HUDActionDestinationsKey: EnvironmentKey { static let defaultValue: [ExplorerTileContainer] = [] }
 extension EnvironmentValues {
+    var hudActionDestinations: [ExplorerTileContainer] {
+        get { self[HUDActionDestinationsKey.self] }
+        set { self[HUDActionDestinationsKey.self] = newValue }
+    }
     var hudActionLayers: [ExplorerHoldLayer] {
         get { self[HUDActionLayersKey.self] }
         set { self[HUDActionLayersKey.self] = newValue }
@@ -64,6 +69,7 @@ struct TapActionEditor: View {
     var keyboardOnly = false
     var physicalKeysOnly = false
     @State private var showManual = false
+    @State private var showActionCatalog = false
     @State private var draft = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
 
     private var keys: [(String, UInt32)] {
@@ -84,6 +90,10 @@ struct TapActionEditor: View {
                     action = .shortcut
                 }.frame(maxWidth: .infinity).frame(height: 26)
                 Menu {
+                    if !physicalKeysOnly {
+                        Button("Choose any action…") { showActionCatalog = true }
+                        Divider()
+                    }
                     if !physicalKeysOnly && !dictionary.isEmpty {
                         Menu("Keybindings and Macros") {
                             ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
@@ -160,6 +170,25 @@ struct TapActionEditor: View {
                     }.buttonStyle(.borderedProminent)
                 }
             }.padding(18).frame(width: 300)
+        }
+        .popover(isPresented: $showActionCatalog) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Choose action").font(.headline)
+                BindingActionPicker(action: Binding(get: {
+                    if action == .shortcut, let shortcut { return .from(shortcut: shortcut) }
+                    return .tap(action)
+                }, set: { selected in
+                    if selected.kind == .tap {
+                        action = selected.tap ?? .none
+                        shortcut = nil
+                    } else {
+                        action = .shortcut
+                        shortcut = selected.kind == .keystroke ? selected.shortcut : .assigned(selected)
+                    }
+                    showActionCatalog = false
+                }), allowPointerActions: !shortcutsOnly && !keyboardOnly)
+                .frame(width: 290)
+            }.padding(16)
         }
     }
 

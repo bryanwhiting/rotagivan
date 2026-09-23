@@ -19,6 +19,7 @@ xcrun swiftc "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/Li
 "$test_dir/LiveCursorPreviewTests" "$test_dir"
 for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
   xcrun swiftc "${common[@]}" Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift \
+    Rotagivan/BindingEditor.swift Rotagivan/ExplorerApplicationCatalog.swift \
     "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
@@ -109,7 +110,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/PointerLayerIsolationTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/PointerLayerIsolationTests"
 "$test_dir/PointerLayerIsolationTests"
-xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
+ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
@@ -118,13 +119,21 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/WindowTiling.swift \
   Rotagivan/ExplorerAppearance.swift \
   Rotagivan/MediaControls.swift \
+  Rotagivan/BindingEditor.swift \
   Rotagivan/HotkeyOrganizer.swift \
   Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
-  Rotagivan/HIDManager.swift Rotagivan/Tests/CalibrationIntegrationTests.swift \
+  Rotagivan/HIDManager.swift)
+xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/CalibrationIntegrationTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"
+xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/HUDBindingUISmoke.swift \
+  -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDBindingUISmoke"
+"$test_dir/HUDBindingUISmoke" "$test_dir"
+xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/ActionBindingRuntimeTests.swift \
+  -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionBindingRuntimeTests"
+"$test_dir/ActionBindingRuntimeTests"
 xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
   Rotagivan/AppConfiguration.swift Rotagivan/Tests/ConfigurationTests.swift \

@@ -1,5 +1,160 @@
 import Foundation
 
+struct BindingTrigger: Codable, Equatable {
+    var keyboard: RecordedShortcut? = nil
+    var gesture: AppGestureTrigger? = nil
+    var identity: String { keyboard.map { "key:" + $0.identity } ?? gesture.map { "gesture:" + $0.rawValue } ?? "unassigned" }
+    var title: String { keyboard?.readableCombination ?? gesture?.title ?? "Choose trigger" }
+    var isValid: Bool { (keyboard?.isPhysicalShortcut == true && gesture == nil) || (keyboard == nil && gesture != nil) }
+}
+
+/// A destination is independent of the input that invokes it. Physical output
+/// keys are stored as scalars so references cannot recursively contain actions.
+struct BindingAction: Codable, Equatable {
+    enum Kind: String, Codable, CaseIterable {
+        case keystroke, macro, hudLayer, openApp, openURL, command, media, windowPlacement, tap
+    }
+    var kind: Kind
+    var keyCode: UInt16? = nil
+    var modifiers: UInt64? = nil
+    var keyLabel: String? = nil
+    var macroID: String? = nil
+    var hudLayerID: UUID? = nil
+    var hudPath: [String]? = nil
+    var bundleID: String? = nil
+    var name: String? = nil
+    var url: String? = nil
+    var command: AppExplorerAction? = nil
+    var media: ExplorerMediaAction? = nil
+    var windowPlacement: ExplorerWindowPlacement? = nil
+    var tap: TapAction? = nil
+    var shortcut: RecordedShortcut? {
+        guard kind == .keystroke, let keyCode, let modifiers, let keyLabel else { return nil }
+        return RecordedShortcut(keyCode: keyCode, modifiers: modifiers, keyLabel: keyLabel)
+    }
+    var title: String {
+        switch kind {
+        case .keystroke: return shortcut?.readableCombination ?? "Keystroke"
+        case .macro: return name ?? "Saved action"
+        case .hudLayer: return "Open HUD · " + (name ?? (hudLayerID == nil ? "Default" : "Layer"))
+        case .openApp: return "Open " + (name ?? bundleID ?? "app")
+        case .openURL: return name ?? url ?? "Open URL"
+        case .command: return command?.title ?? "Command"
+        case .media: return media?.title ?? "Media"
+        case .windowPlacement: return windowPlacement?.title ?? "Place window"
+        case .tap: return tap?.title ?? "Pointer action"
+        }
+    }
+    var identity: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? kind.rawValue
+    }
+    var isValid: Bool {
+        if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 512 { return false }
+        // Reject mixed destinations in imported configs, rather than silently
+        // ignoring fields belonging to a different action kind.
+        let hasKey = keyCode != nil || modifiers != nil || keyLabel != nil
+        guard !hasKey || kind == .keystroke,
+              macroID == nil || kind == .macro,
+              hudLayerID == nil || kind == .hudLayer,
+              hudPath == nil || (kind == .hudLayer && hudLayerID == nil),
+              bundleID == nil || kind == .openApp,
+              url == nil || kind == .openURL,
+              command == nil || kind == .command,
+              media == nil || kind == .media,
+              windowPlacement == nil || kind == .windowPlacement,
+              tap == nil || kind == .tap else { return false }
+        switch kind {
+        case .keystroke: return shortcut?.isPhysicalShortcut == true
+        case .macro: return macroID.map { !$0.isEmpty && $0.count <= 128 } ?? false
+        case .hudLayer: return hudPath.map { $0.count <= 16 && $0.allSatisfy { ExplorerTilePathStep(token: $0) != nil } } ?? true
+        case .openApp:
+            return bundleID.map {
+                !$0.isEmpty && $0.count <= 255 && $0 != "local.rotagivan" && $0.contains(".") &&
+                $0.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-").contains($0) }
+            } ?? false
+        case .openURL: return url.flatMap(AppExplorerFavorite.webURL) != nil
+        case .command: return command != nil
+        case .media: return media != nil
+        case .windowPlacement: return windowPlacement != nil
+        case .tap: return tap.map { $0 != .none && $0 != .shortcut } ?? false
+        }
+    }
+    static func keystroke(_ key: RecordedShortcut) -> Self {
+        Self(kind: .keystroke, keyCode: key.keyCode, modifiers: key.modifiers, keyLabel: key.keyLabel)
+    }
+    static func macro(_ entry: NamedHotkey) -> Self { Self(kind: .macro, macroID: entry.id, name: entry.name) }
+    static func hudLayer(_ layer: ExplorerHoldLayer?) -> Self { Self(kind: .hudLayer, hudLayerID: layer?.id, name: layer?.name ?? "Default") }
+    static func hudContainer(_ container: ExplorerTileContainer) -> Self {
+        Self(kind: .hudLayer, hudPath: container.id.map(\.token), name: container.title)
+    }
+    static func openApp(bundleID: String, name: String) -> Self { Self(kind: .openApp, bundleID: bundleID, name: name) }
+    static func openURL(_ url: String) -> Self { Self(kind: .openURL, url: url) }
+    static func command(_ command: AppExplorerAction) -> Self { Self(kind: .command, command: command) }
+    static func media(_ media: ExplorerMediaAction) -> Self { Self(kind: .media, media: media) }
+    static func windowPlacement(_ placement: ExplorerWindowPlacement) -> Self { Self(kind: .windowPlacement, windowPlacement: placement) }
+    static func tap(_ tap: TapAction) -> Self { Self(kind: .tap, tap: tap) }
+    static func from(shortcut: RecordedShortcut) -> Self {
+        if let action = shortcut.assignedAction { return action }
+        if let id = shortcut.macroID { return Self(kind: .macro, macroID: id, name: shortcut.keyLabel) }
+        if let id = shortcut.hudLayerID { return Self(kind: .hudLayer, hudLayerID: id, name: shortcut.keyLabel) }
+        return .keystroke(shortcut)
+    }
+    static func from(favorite: AppExplorerFavorite) -> Self? {
+        if let key = favorite.shortcut { return from(shortcut: key) }
+        if let app = favorite.bundleID { return .openApp(bundleID: app, name: favorite.name) }
+        if let url = favorite.url { return Self(kind: .openURL, name: favorite.name, url: url) }
+        if let command = favorite.action { return .command(command) }
+        if let placement = favorite.windowPlacement { return .windowPlacement(placement) }
+        return nil
+    }
+    func favorite(at slot: ExplorerSlot) -> AppExplorerFavorite? {
+        guard isValid else { return nil }
+        switch kind {
+        case .openApp: return AppExplorerFavorite(direction: slot, bundleID: bundleID, name: name ?? title)
+        case .openURL: return AppExplorerFavorite(direction: slot, name: name ?? title, url: url)
+        case .command: return AppExplorerFavorite(direction: slot, name: title, action: command)
+        case .windowPlacement: return AppExplorerFavorite(direction: slot, name: title, windowPlacement: windowPlacement)
+        default: return AppExplorerFavorite(direction: slot, name: name ?? title, shortcut: .assigned(self))
+        }
+    }
+}
+
+struct ActionBinding: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var trigger: BindingTrigger
+    var action: BindingAction
+    var isValid: Bool { trigger.isValid && action.isValid }
+}
+
+extension Array where Element == ActionBinding {
+    func isValidBindings(global: Bool = false, reservedKeys: [RecordedShortcut] = []) -> Bool {
+        guard count <= 256, Set(map(\.id)).count == count else { return false }
+        var keys = Set(reservedKeys.map { "key:" + $0.identity })
+        for binding in self {
+            guard binding.isValid, keys.insert(binding.trigger.identity).inserted else { return false }
+            if let key = binding.trigger.keyboard,
+               !(global ? key.isValidGlobalHotkey : key.isValidHUDActionHotkey) { return false }
+        }
+        return true
+    }
+}
+
+enum ExplorerMediaAction: Int, Codable, CaseIterable {
+    case volumeUp = 0, volumeDown = 1, mute = 7, playPause = 16, next = 17, previous = 18
+    var direction: SwipeDirection {
+        switch self { case .volumeUp: return .up; case .volumeDown: return .down; case .mute: return .topLeft; case .playPause: return .topRight; case .next: return .right; case .previous: return .left }
+    }
+    var title: String {
+        switch self { case .volumeUp: return "Volume up"; case .volumeDown: return "Volume down"; case .mute: return "Mute / unmute"; case .playPause: return "Play / pause"; case .next: return "Next track"; case .previous: return "Previous track" }
+    }
+    var symbol: String {
+        switch self { case .volumeUp: return "speaker.wave.3.fill"; case .volumeDown: return "speaker.wave.1.fill"; case .mute: return "speaker.slash.fill"; case .playPause: return "playpause.fill"; case .next: return "forward.end.fill"; case .previous: return "backward.end.fill" }
+    }
+}
+
+
 @MainActor enum HUDSettingsNavigation {
     static var pending = false
 }
@@ -296,6 +451,7 @@ struct ExplorerWindowShortcut: Codable, Equatable {
     var shortcut: RecordedShortcut
 }
 struct ExplorerWindowSettings: Codable, Equatable {
+    var actionBindings: [ActionBinding]? = nil
     var layout: ExplorerWindowLayout = .halves
     var layers: [ExplorerHoldLayer] = []
     var shortcuts: [ExplorerWindowShortcut] = []
@@ -361,6 +517,7 @@ enum ExplorerWindowLayout: String, Codable, CaseIterable {
 }
 
 struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
+    var actionBindings: [ActionBinding]? = nil
     static func empty(name: String = "New layer") -> Self {
         Self(name: name, holdShortcut: nil, slotCount: 8, windowTilesConfigured: true)
     }
@@ -405,6 +562,7 @@ enum WebsiteIconCatalog {
 }
 
 struct AppExplorerFavorite: Codable, Equatable {
+    var actionBindings: [ActionBinding]? = nil
     var direction: ExplorerSlot
     var bundleID: String? = nil
     var name: String
@@ -466,6 +624,7 @@ struct AppExplorerFavorite: Codable, Equatable {
 }
 
 struct AppExplorerSettings: Codable, Equatable {
+    var actionBindings: [ActionBinding]? = nil
     static let recentDirections: [ExplorerSlot] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
     static let maximumGroupDepth = 4
     static let maximumFavorites = 256
@@ -510,7 +669,8 @@ struct AppExplorerSettings: Codable, Equatable {
                 return result
             }
         }
-        return Self(favorites: editableTiles(tile?.children ?? windowManager?.favorites ?? ExplorerWindowPlacement.tiles(layout: layout)),
+        return Self(actionBindings: tile?.actionBindings ?? windowManager?.actionBindings,
+            favorites: editableTiles(tile?.children ?? windowManager?.favorites ?? ExplorerWindowPlacement.tiles(layout: layout)),
             holdShortcut: holdShortcut, holdLayers: layers.map { layer in
                 var result = layer
                 if layer.windowTilesConfigured != true && (layer.favorites.isEmpty || legacyExplorerLayers) {
@@ -531,10 +691,12 @@ struct AppExplorerSettings: Codable, Equatable {
         if let direction = path.last {
             guard var tile = favorite(at: path), tile.isWindowManager else { return false }
             tile.children = editor.favorites; tile.holdLayers = layers; tile.slotCount = editor.slotCount ?? 8
+            tile.actionBindings = editor.actionBindings
             guard next.setFavorite(tile, at: direction, in: Array(path.dropLast())) else { return false }
         } else {
             var window = windowManager ?? ExplorerWindowSettings()
             window.favorites = editor.favorites; window.layers = layers; window.slotCount = editor.slotCount ?? 8
+            window.actionBindings = editor.actionBindings
             next.windowManager = window
         }
         guard next.hasValidFavorites else { return false }
@@ -545,6 +707,7 @@ struct AppExplorerSettings: Codable, Equatable {
         guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
         var result = self
         result.favorites = layer.favorites
+        result.actionBindings = layer.actionBindings
         result.defaultMode = .favorites
         result.holdLayers = nil
         result.slotCount = layer.slotCount ?? slotCount
@@ -607,10 +770,12 @@ struct AppExplorerSettings: Codable, Equatable {
         var next = self
         if path.isEmpty {
             next.favorites = layer.favorites
+            next.actionBindings = layer.actionBindings
             next.defaultMode = .favorites
             next.slotCount = layer.slotCount ?? slotCount
         } else if var tile = favorite(at: path), tile.isGroup, let direction = path.last {
             tile.children = layer.favorites
+            tile.actionBindings = layer.actionBindings
             tile.groupMode = .favorites
             tile.slotCount = layer.slotCount ?? tile.slotCount
             next.setFavorite(tile, at: direction, in: Array(path.dropLast()))
@@ -634,11 +799,14 @@ struct AppExplorerSettings: Codable, Equatable {
                 }
                 if let key = layer.launchShortcut, !key.isPhysicalShortcut || key.keyCode == 53 || (key.keyCode < 64 && key.modifiers == 0) { return false }
                 if let app = layer.appBundleID, app.isEmpty || app.count > 512 { return false }
-                guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count) else { return false }
+                guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count,
+                    bindings: layer.actionBindings ?? []) else { return false }
             }
             return true
         }
-        func valid(_ entries: [AppExplorerFavorite], depth: Int, nesting: Int = 0, count: Int = 8) -> Bool {
+        func valid(_ entries: [AppExplorerFavorite], depth: Int, nesting: Int = 0, count: Int = 8,
+                   bindings: [ActionBinding] = []) -> Bool {
+            guard bindings.isValidBindings(reservedKeys: entries.compactMap(\.activationShortcut)) else { return false }
             guard [4, 8, 12, 16].contains(count), depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= count,
                   entries.allSatisfy({ ExplorerSlot.slots(count).contains($0.direction) }),
                   Set(entries.map(\.direction)).count == entries.count else { return false }
@@ -648,7 +816,9 @@ struct AppExplorerSettings: Codable, Equatable {
                 guard remaining >= 0, entry.isValidDestination else { return false }
                 if let key = entry.activationShortcut,
                    !actionHotkeys.insert(key.identity).inserted { return false }
-                if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1, count: entry.slotCount ?? 8) { return false }
+                if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1,
+                    count: entry.slotCount ?? 8, bindings: entry.actionBindings ?? []) { return false }
+                if entry.children == nil && !(entry.actionBindings ?? []).isValidBindings() { return false }
                 if let layers = entry.holdLayers {
                     guard validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth, count: entry.slotCount ?? 8) else { return false }
                 }
@@ -656,7 +826,8 @@ struct AppExplorerSettings: Codable, Equatable {
             return true
         }
         if let windowManager {
-            guard valid(windowManager.favorites ?? [], depth: 0, count: windowManager.slotCount ?? 8),
+            guard valid(windowManager.favorites ?? [], depth: 0, count: windowManager.slotCount ?? 8,
+                        bindings: windowManager.actionBindings ?? []),
                   validLayers(windowManager.layers, depth: 0, groupDepth: 0, count: windowManager.slotCount ?? 8) else { return false }
             var keys = Set(windowManager.layers.compactMap { $0.holdShortcut }.map { "\($0.keyCode):\($0.modifiers)" })
             var commands = Set<AppExplorerAction>()
@@ -667,7 +838,8 @@ struct AppExplorerSettings: Codable, Equatable {
                       keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
             }
         }
-        return validLayers(holdLayers ?? [], depth: 0, groupDepth: 0, count: slotCount ?? 8) && valid(favorites, depth: 0, count: slotCount ?? 8)
+        return validLayers(holdLayers ?? [], depth: 0, groupDepth: 0, count: slotCount ?? 8) &&
+            valid(favorites, depth: 0, count: slotCount ?? 8, bindings: actionBindings ?? [])
     }
     @discardableResult
     mutating func swapFavorites(from source: ExplorerSlot, to destination: ExplorerSlot,
@@ -707,6 +879,14 @@ struct AppExplorerSettings: Codable, Equatable {
 enum ExplorerTilePathStep: Hashable {
     case group(ExplorerSlot)
     case layer(UUID)
+    var token: String {
+        switch self { case .group(let slot): return "g:" + slot.rawValue; case .layer(let id): return "l:" + id.uuidString }
+    }
+    init?(token: String) {
+        if token.hasPrefix("g:"), let slot = ExplorerSlot(rawValue: String(token.dropFirst(2))) { self = .group(slot) }
+        else if token.hasPrefix("l:"), let id = UUID(uuidString: String(token.dropFirst(2))) { self = .layer(id) }
+        else { return nil }
+    }
 }
 
 struct ExplorerTileContainer: Identifiable {
@@ -822,6 +1002,28 @@ struct ExplorerScopedHeldKeys {
         guard settings.holdLayers?.contains(where: { $0.id == id }) == true else { return false }
         held = [Press(key: UInt16.max, modifiers: 0, id: id, scope: [], toggled: true)]
         return true
+    }
+    /// Select nested layer/group addresses atomically, without inventing an
+    /// activation key or overwriting the saved configuration.
+    mutating func selectContainer(_ path: [ExplorerTilePathStep], settings: AppExplorerSettings) -> [ExplorerSlot]? {
+        guard path.count <= 16 else { return nil }
+        var next = Self()
+        var current = settings
+        var groups: [ExplorerSlot] = []
+        for step in path {
+            switch step {
+            case .group(let slot):
+                let target = groups + [slot]
+                guard current.favorite(at: target)?.isGroup == true else { return nil }
+                groups = target
+            case .layer(let id):
+                guard let layer = current.layers(at: groups).first(where: { $0.id == id }) else { return nil }
+                next.held.append(Press(key: UInt16.max, modifiers: 0, id: id, scope: groups, toggled: true))
+                current = current.applying(layer, at: groups)
+            }
+        }
+        self = next
+        return groups
     }
     func resolved(_ original: AppExplorerSettings) -> AppExplorerSettings {
         held.reduce(original) { settings, press in
@@ -987,17 +1189,26 @@ struct RecordedShortcut: Codable, Equatable {
     // are never posted or registered as physical keyboard events.
     var macroID: String? = nil
     var hudLayerID: UUID? = nil
-    var isActionReference: Bool { macroID != nil || hudLayerID != nil }
+    var assignedAction: BindingAction? = nil
+    static func assigned(_ action: BindingAction) -> Self {
+        Self(keyCode: 0, modifiers: 0, keyLabel: String(action.title.prefix(128)), assignedAction: action)
+    }
+    var isActionReference: Bool { macroID != nil || hudLayerID != nil || assignedAction != nil }
     static func macro(_ entry: NamedHotkey) -> Self { Self(keyCode: 0, modifiers: 0, keyLabel: entry.name, macroID: entry.id) }
     static func hudLayer(_ layer: ExplorerHoldLayer) -> Self { Self(keyCode: 0, modifiers: 0, keyLabel: layer.name, hudLayerID: layer.id) }
     /// Labels do not participate in key identity (keyboard layouts can rename a key).
-    var identity: String { macroID.map { "macro:\($0)" } ?? hudLayerID.map { "hud:\($0)" } ?? "\(keyCode):\(modifiers & 0x1e0000)" }
+    var identity: String { assignedAction.map { "action:\($0.identity)" } ?? macroID.map { "macro:\($0)" } ?? hudLayerID.map { "hud:\($0)" } ?? "\(keyCode):\(modifiers & 0x1e0000)" }
     var readableCombination: String {
+        if let assignedAction { return assignedAction.title }
         if isActionReference { return hudLayerID == nil ? "Macro: \(keyLabel)" : "HUD layer: \(keyLabel)" }
         let parts = [(UInt64(1 << 20), "Cmd"), (1 << 18, "Ctrl"), (1 << 19, "Option"), (1 << 17, "Shift")]
         return (parts.compactMap { modifiers & $0.0 != 0 ? $0.1 : nil } + [keyLabel]).joined(separator: "+")
     }
     var isValidExplorerShortcut: Bool {
+        if let assignedAction {
+            return macroID == nil && hudLayerID == nil && keyCode == 0 && modifiers == 0 &&
+                !keyLabel.isEmpty && keyLabel.count <= 128 && assignedAction.isValid
+        }
         if isActionReference {
             return (macroID == nil || hudLayerID == nil) && keyCode == 0 && modifiers == 0 &&
                 (macroID.map { !$0.isEmpty && $0.count <= 128 } ?? true) && !keyLabel.isEmpty && keyLabel.count <= 128
@@ -1318,6 +1529,23 @@ struct ProfileSliderBaseline: Codable {
 }
 
 struct StoredSettings: Codable {
+    var actionBindings: [ActionBinding]? = nil
+    func applyingActionBindings(to gestures: ProfileGestures) -> ProfileGestures {
+        var result = gestures
+        for binding in actionBindings ?? [] where binding.isValid {
+            guard let trigger = binding.trigger.gesture else { continue }
+            if trigger == .twoFingerLeft || trigger == .twoFingerRight {
+                var swipe = result.twoFingerSwipe ?? DoubleTapSwipeSettings()
+                if let direction = trigger.direction {
+                    swipe.setAction(.shortcut, for: direction)
+                    swipe[direction] = .assigned(binding.action)
+                    swipe.enabled = true
+                    result.twoFingerSwipe = swipe
+                }
+            } else { _ = result.setLayerAction(.shortcut, shortcut: .assigned(binding.action), for: trigger) }
+        }
+        return result
+    }
     var hotkeyDictionary: [NamedHotkey]? = nil
     var resolvedHotkeyDictionary: [NamedHotkey] { hotkeyDictionary ?? [] }
     var navigatorTapCalibration: TapCalibrationSettings? = nil
@@ -1641,7 +1869,7 @@ final class SettingsStore: ObservableObject {
     }
 
     func activeGestures(for device: GestureDevice) -> ProfileGestures {
-        let base = gestures(for: activeProfileID, device: device)
+        let base = settings.applyingActionBindings(to: gestures(for: activeProfileID, device: device))
         return settings.resolvedAppOverrides.first { $0.enabled && $0.bundleID == foregroundBundleID }?.applying(to: base) ?? base
     }
 

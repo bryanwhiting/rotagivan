@@ -69,6 +69,61 @@ struct ConfigurationTests {
         badAppMacro.settings.hotkeyDictionary?[0].sequence?[0].bundleID = "file:///tmp/script"
         do { try badAppMacro.validate(); fatalError("Accepted executable path as app step") } catch { print("Rejected non-app macro target") }
         print("Open-app macro YAML passed: typed sequence, global trigger, portable bundle ID, validation and roundtrip")
+
+        // Unified actions travel through independent bindings, HUD tiles, and
+        // legacy gesture payloads without depending on a tile slot.
+        var unified = factory
+        let actions: [BindingAction] = [
+            .keystroke(firstStep), .macro(macro), .hudLayer(nil), .hudLayer(hudLayer),
+            BindingAction(kind: .hudLayer, hudPath: [ExplorerTilePathStep.group(.left).token], name: "Nested"),
+            .openApp(bundleID: "com.apple.Safari", name: "Safari"), .openURL("https://example.com/docs"),
+            .command(.missionControl), .media(.playPause),
+            .windowPlacement(ExplorerWindowPlacement(direction: .left)), .tap(.rightClick)
+        ]
+        let independent = actions.enumerated().map { index, action in
+            ActionBinding(trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: UInt16(64 + index),
+                modifiers: 1 << 20, keyLabel: "Test \(index)")), action: action)
+        }
+        unified.settings.hotkeyDictionary = [macro]
+        unified.settings.actionBindings = independent
+        unified.settings.appExplorer = AppExplorerSettings(actionBindings: independent, favorites: [
+            AppExplorerFavorite(actionBindings: independent, direction: .left, name: "Nested", children: [])
+        ], holdLayers: [ExplorerHoldLayer(actionBindings: independent, name: "Independent", holdShortcut: nil)],
+        windowManager: ExplorerWindowSettings(actionBindings: independent))
+        var unifiedTaps = unified.settings.gestures(for: 1)
+        precondition(unifiedTaps.setLayerAction(.shortcut, shortcut: .assigned(.openURL("https://example.com/tap")),
+            for: .oneFingerTap))
+        precondition(unifiedTaps.setLayerAction(.shortcut, shortcut: .assigned(.media(.next)),
+            for: .twoDoubleUp))
+        unified.settings.profileGestures = [1: unifiedTaps]
+        let unifiedYAML = try unified.yaml()
+        let unifiedRoundtrip = try AppConfiguration.parse(unifiedYAML)
+        precondition(tryEqual(unified, unifiedRoundtrip), "Every action and binding scope must survive YAML/sync")
+        let projected = unified.settings.appExplorer!.projected(layerID: unified.settings.appExplorer!.holdLayers![0].id)
+        precondition(projected.actionBindings == independent && projected.favorites.isEmpty,
+            "Empty alternate layers own their bindings independently of root tiles")
+        var windows = unified.settings.appExplorer!
+        var windowEditor = windows.windowEditor()
+        precondition(windowEditor.actionBindings == independent)
+        windowEditor.actionBindings = []
+        precondition(windows.saveWindowEditor(windowEditor) && windows.windowManager?.actionBindings == [],
+            "Window editor can clear its own bindings without changing root bindings")
+        precondition(windows.actionBindings == independent)
+        var duplicate = unified
+        duplicate.settings.actionBindings?.append(independent[0])
+        do { try duplicate.validate(); fatalError("Accepted duplicate binding") } catch {}
+        var duplicateHUD = unified.settings.appExplorer!
+        duplicateHUD.favorites.append(AppExplorerFavorite(direction: .right, name: "Conflict",
+            url: "https://example.com", activationShortcut: independent[0].trigger.keyboard))
+        precondition(!duplicateHUD.hasValidFavorites, "Tile and independent binding cannot consume the same local key")
+        precondition(!BindingAction(kind: .openURL, url: "file:///tmp/private").isValid)
+        precondition(!BindingAction(kind: .openURL, url: "https://example.com", tap: .rightClick).isValid)
+        precondition(!RecordedShortcut(keyCode: 0, modifiers: 0, keyLabel: "Mixed",
+            macroID: macro.id, assignedAction: .tap(.rightClick)).isValidExplorerShortcut)
+        precondition(![ActionBinding(trigger: BindingTrigger(keyboard: firstStep, gesture: .oneFingerTap),
+            action: .tap(.leftClick))].isValidBindings())
+        rejected(unifiedYAML.replacingOccurrences(of: "kind: openURL", with: "kind: shell"), "unknown unified action")
+        print("Unified bindings passed: every action, scope, YAML/sync roundtrip, empty layer projection, window isolation, duplicate and malformed rejection")
         var namedConfig = factory
         let namedKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         namedConfig.settings.hotkeyDictionary = [NamedHotkey(name: "Copy selection", shortcut: namedKey)]

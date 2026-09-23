@@ -111,7 +111,12 @@ import SwiftUI
         try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], requiresGlobalHotkey: true, onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
         try renderEditor(HUDLayerHotkeyEditor(store: store, layer: editorLayer, settings: store.settings.appExplorer!,
             onSave: { _, _ in true }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 560, height: 720))
-        print("Macro and HUD layer native UI passed: action-hotkey pairs render, legacy global launch remains compatible, unknown-target rejection and sequence labels. No real events posted.")
+        let defaultLayer = ExplorerHoldLayer(name: "Default", holdShortcut: nil,
+            favorites: editorLayer.favorites, slotCount: 8)
+        try renderEditor(HUDLayerHotkeyEditor(store: store, layer: defaultLayer,
+            settings: store.settings.appExplorer!, onSave: { _, _ in true }, onCancel: {},
+            isDefaultLayer: true), name: "default-hud-hotkeys", size: NSSize(width: 620, height: 560))
+        print("Macro and HUD layer native UI passed: custom and default action-hotkey pairs render, legacy global launch remains compatible, unknown-target rejection and sequence labels. No real events posted.")
         print("Hotkey UI rendered saved actions, tap assignments, audit, exact-hotkey search and keyboard map; no actual shortcuts sent.")
     }
 }

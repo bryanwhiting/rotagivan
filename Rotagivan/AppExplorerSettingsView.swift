@@ -131,6 +131,7 @@ struct AppExplorerSettingsView: View {
     @State private var editingShortcutPath: [ExplorerSlot]?
     @State private var selectedLayerID: UUID?
     @State private var editingLayer: ExplorerHoldLayer?
+    @State private var editingDefaultLayer = false
     @State private var creatingLayer = false
     @State private var removingLayer = false
     @State private var editingTileLayers: [ExplorerSlot]?
@@ -247,7 +248,7 @@ struct AppExplorerSettingsView: View {
             if let layer {
                 Divider()
                 HStack(spacing: 12) {
-                    Button("Rename & hotkeys") {
+                    Button("Edit hotkeys") {
                         creatingLayer = false
                         editingLayer = layer
                     }
@@ -257,9 +258,11 @@ struct AppExplorerSettingsView: View {
             } else {
                 Divider()
                 HStack {
-                    Label("Base layer", systemImage: "pin.fill")
+                    Label("Default layer", systemImage: "pin.fill")
                     Spacer(minLength: 0)
-                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 13).frame(height: 32)
+                    Button("Edit hotkeys") { editingDefaultLayer = true }
+                        .buttonStyle(.link)
+                }.font(.caption).padding(.horizontal, 13).frame(height: 32)
             }
         }
         .frame(width: 220)
@@ -394,8 +397,10 @@ struct AppExplorerSettingsView: View {
                     .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
                         "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
                     if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
-                        Button("Rename & hotkeys…") { creatingLayer = false; editingLayer = layer }
+                        Button("Edit hotkeys…") { creatingLayer = false; editingLayer = layer }
                         Button("Remove", role: .destructive) { removingLayer = true }
+                    } else {
+                        Button("Edit hotkeys…") { editingDefaultLayer = true }
                     }
                 }.font(.subheadline)
             } else {
@@ -581,6 +586,21 @@ struct AppExplorerSettingsView: View {
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
                 return true
             }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly)
+        }
+        .sheet(isPresented: $editingDefaultLayer) {
+            HUDLayerHotkeyEditor(store: store,
+                layer: ExplorerHoldLayer(name: "Default", holdShortcut: nil,
+                    favorites: baseSettings.favorites, slotCount: baseSettings.slotCount),
+                settings: baseSettings, onSave: { updated, _ in
+                    var next = baseSettings
+                    next.favorites = mergingActionHotkeys(from: updated.favorites, into: next.favorites)
+                    guard next.hasValidFavorites, saveBase(next) else { return false }
+                    editingDefaultLayer = false
+                    groupError = nil
+                    return true
+                }, onCancel: { editingDefaultLayer = false },
+                supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly,
+                isDefaultLayer: true)
         }
         .confirmationDialog("Remove this HUD layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
             Button("Remove HUD layer", role: .destructive) {

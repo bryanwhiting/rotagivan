@@ -7,24 +7,30 @@ struct HUDLayerHotkeyEditor: View {
     @ObservedObject var store: SettingsStore
     @State private var layer: ExplorerHoldLayer
     let settings: AppExplorerSettings
+    let isDefaultLayer: Bool
     var onSave: (ExplorerHoldLayer, [HUDTapAssignmentScope: Set<AppGestureTrigger>]) -> Bool
     var onCancel: () -> Void
 
     init(store: SettingsStore, layer: ExplorerHoldLayer, settings: AppExplorerSettings,
          onSave: @escaping (ExplorerHoldLayer, [HUDTapAssignmentScope: Set<AppGestureTrigger>]) -> Bool,
-         onCancel: @escaping () -> Void, supportsDirectLaunch _: Bool = true) {
+         onCancel: @escaping () -> Void, supportsDirectLaunch _: Bool = true, isDefaultLayer: Bool = false) {
         self.store = store
         var globalLayer = layer
         globalLayer.appBundleID = nil
         globalLayer.appName = nil
         _layer = State(initialValue: globalLayer)
         self.settings = settings
+        self.isDefaultLayer = isDefaultLayer
         self.onSave = onSave
         self.onCancel = onCancel
     }
 
     private var draftExplorer: AppExplorerSettings {
         var result = settings
+        if isDefaultLayer {
+            result.favorites = layer.favorites
+            return result
+        }
         var layers = result.holdLayers ?? []
         if let index = layers.firstIndex(where: { $0.id == layer.id }) { layers[index] = layer }
         else { layers.append(layer) }
@@ -38,11 +44,16 @@ struct HUDLayerHotkeyEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Label("HUD layer", systemImage: "square.3.layers.3d")
+            Label(isDefaultLayer ? "Default HUD layer" : "HUD layer", systemImage: "square.3.layers.3d")
                 .font(.headline).padding(.bottom, 14)
 
-            TextField("HUD layer name", text: $layer.name)
-                .textFieldStyle(.roundedBorder)
+            if isDefaultLayer {
+                Text("This layer opens first. Assign a hotkey to any tile action just like every other HUD layer.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                TextField("HUD layer name", text: $layer.name)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Action hotkeys").font(.headline)
@@ -53,7 +64,9 @@ struct HUDLayerHotkeyEditor: View {
 
             if layer.favorites.isEmpty {
                 ContentUnavailableView("No actions in this layer", systemImage: "keyboard.badge.ellipsis",
-                    description: Text("Save the layer, then click one of its HUD tiles to choose an action and assign a hotkey."))
+                    description: Text(isDefaultLayer
+                        ? "Click one of the default layer’s HUD tiles to choose an action, then return here to assign a hotkey."
+                        : "Save the layer, then click one of its HUD tiles to choose an action and assign a hotkey."))
                     .frame(maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -69,7 +82,9 @@ struct HUDLayerHotkeyEditor: View {
             }
 
             if !valid {
-                Label("Use a layer name and unique hotkeys. Escape and bare E/S are reserved for HUD controls.",
+                Label(isDefaultLayer
+                      ? "Use unique hotkeys. Escape and bare E/S are reserved for HUD controls."
+                      : "Use a layer name and unique hotkeys. Escape and bare E/S are reserved for HUD controls.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).padding(.top, 10)
             }

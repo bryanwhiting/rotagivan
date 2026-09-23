@@ -181,68 +181,17 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
         })
     }
-    private var canAssignDirectTap: Bool {
-        configurationOverride == nil && !windowManagerOnly
-    }
-
     private func activationSources(for layer: ExplorerHoldLayer?) -> [HUDLayerActivationSource] {
-        guard let layer else {
-            return [HUDLayerActivationSource(symbol: "sparkles", title: "Opens first",
-                detail: "The default App Explorer layer")]
+        let favorites = layer?.favorites ?? baseSettings.favorites
+        let sources = favorites.compactMap { tile -> HUDLayerActivationSource? in
+            guard let shortcut = tile.activationShortcut else { return nil }
+            return HUDLayerActivationSource(symbol: "keyboard",
+                title: shortcut.readableCombination, detail: tile.name)
         }
-        var sources: [HUDLayerActivationSource] = []
-        if let shortcut = layer.holdShortcut {
-            let behavior = (layer.activation ?? .hold) == .hold ? "Hold" : "Tap to toggle"
-            sources.append(HUDLayerActivationSource(symbol: "keyboard",
-                title: "\(behavior) \(shortcut.readableCombination)",
-                detail: "While this HUD is open"))
-        }
-        if let shortcut = layer.launchShortcut {
-            sources.append(HUDLayerActivationSource(symbol: "command",
-                title: shortcut.readableCombination,
-                detail: "Global hotkey"))
-        }
-        if canAssignDirectTap {
-            let customProfiles = store.settings.customTapProfiles ?? []
-            for profile in store.profiles where
-                profile.id == store.defaultProfileID || customProfiles.contains(profile.id) {
-                let shared = store.settings.gestures(for: profile.id)
-                let appleOverride = store.settings.devices?.appleLayerGestures?[profile.id]
-                if store.settings.resolvedDevices.shareTapActions || appleOverride == nil {
-                    for trigger in shared.tapTriggers(targetingHUDLayer: layer.id) {
-                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
-                            title: trigger.title, detail: "\(profile.name) · both trackpads"))
-                    }
-                } else {
-                    for trigger in shared.tapTriggers(targetingHUDLayer: layer.id) {
-                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
-                            title: trigger.title, detail: "\(profile.name) · ZSA Navigator"))
-                    }
-                    for trigger in appleOverride!.tapTriggers(targetingHUDLayer: layer.id) {
-                        sources.append(HUDLayerActivationSource(symbol: "hand.tap",
-                            title: trigger.title, detail: "\(profile.name) · Apple trackpad override"))
-                    }
-                }
-            }
-            for app in store.settings.resolvedAppOverrides where app.enabled {
-                for binding in app.bindings where binding.shortcut?.hudLayerID == layer.id {
-                    sources.append(HUDLayerActivationSource(symbol: "app.badge",
-                        title: binding.trigger.title, detail: "\(app.name) app override"))
-                }
-            }
-            for container in baseSettings.tileContainers(rootTitle: "Default HUD layer") {
-                for tile in container.favorites where tile.shortcut?.hudLayerID == layer.id {
-                    sources.append(HUDLayerActivationSource(symbol: "arrow.turn.down.right",
-                        title: "\(tile.direction.title) · \(tile.name)", detail: container.title))
-                }
-            }
-        }
-        var seen = Set<HUDLayerActivationSource>()
-        let unique = sources.filter { seen.insert($0).inserted }
-        return unique.isEmpty
-            ? [HUDLayerActivationSource(symbol: "exclamationmark.circle", title: "No activation assigned",
-                detail: "Add a hotkey or tap action")]
-            : unique
+        return sources.isEmpty
+            ? [HUDLayerActivationSource(symbol: "keyboard.badge.ellipsis", title: "No action hotkeys",
+                detail: "Click a tile to assign one")]
+            : sources
     }
 
     private func hudLayerCard(_ layer: ExplorerHoldLayer?, index: Int) -> some View {
@@ -290,7 +239,7 @@ struct AppExplorerSettingsView: View {
             if let layer {
                 Divider()
                 HStack(spacing: 12) {
-                    Button("Edit hotkeys") {
+                    Button("Rename & hotkeys") {
                         creatingLayer = false
                         editingLayer = layer
                     }
@@ -322,7 +271,7 @@ struct AppExplorerSettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("HUD layers").font(.headline)
-                    Text("Select a layer to edit its tiles. Each card shows exactly what opens it and where that assignment comes from.")
+                    Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -421,7 +370,7 @@ struct AppExplorerSettingsView: View {
                     }.disabled((baseSettings.holdLayers ?? []).count >= 16 ||
                         (scopeTitle != nil && baseSettings.holdLayers == nil))
                     if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
-                        Button("Edit hotkeys…") { creatingLayer = false; editingLayer = layer }
+                        Button("Rename & hotkeys…") { creatingLayer = false; editingLayer = layer }
                         Button("Remove", role: .destructive) { removingLayer = true }
                     }
                 }.font(.subheadline)
@@ -429,7 +378,7 @@ struct AppExplorerSettingsView: View {
                 hudLayerRail
             }
             if scopeTitle == nil && compact {
-                Text("For activation keys limited to one HUD layer or Window Manager, open that tile’s editor and choose Edit HUD layers.")
+                Text("Assign a hotkey on any occupied tile. It runs that tile’s action only while the selected HUD layer is visible.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if windowManagerOnly {
@@ -566,8 +515,12 @@ struct AppExplorerSettingsView: View {
                 var next = baseSettings
                 var layers = next.holdLayers ?? []
                 if let index = layers.firstIndex(where: { $0.id == updated.id }) {
-                    // Preserve slot edits that may have arrived via sync while the sheet was open.
-                    var merged = updated; merged.favorites = layers[index].favorites; layers[index] = merged
+                    // Keep destinations that may have arrived via sync while the sheet was
+                    // open. A hotkey is merged only when that exact tile stayed unchanged.
+                    var merged = layers[index]
+                    merged.name = updated.name
+                    merged.favorites = mergingActionHotkeys(from: updated.favorites, into: merged.favorites)
+                    layers[index] = merged
                 } else {
                     guard creatingLayer else {
                         groupError = "This layer was removed while editing."; editingLayer = nil
@@ -600,7 +553,7 @@ struct AppExplorerSettingsView: View {
             if let path = editingApplicationPath, let direction = path.last {
                 ExplorerDestinationPicker(direction: direction, onSave: { favorite, application in
                     var next = settings
-                    guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
+                    guard next.setFavorite(preservingHotkey(favorite, at: path), at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
                         groupError = "The destination HUD layer changed. Reopen the picker and try again."
                         editingApplicationPath = nil
                         return
@@ -618,7 +571,7 @@ struct AppExplorerSettingsView: View {
                     name: favorite?.shortcut != nil ? (favorite?.name ?? "") : "",
                     shortcut: favorite?.shortcut, onSave: { favorite in
                         var next = settings
-                        guard next.setFavorite(favorite, at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
+                        guard next.setFavorite(preservingHotkey(favorite, at: path), at: direction, in: Array(path.dropLast())), next.hasValidFavorites else {
                             groupError = "The destination HUD layer changed. Reopen the shortcut editor and try again."
                             editingShortcutPath = nil
                             return
@@ -635,7 +588,7 @@ struct AppExplorerSettingsView: View {
                     name: favorite?.url != nil ? (favorite?.name ?? "") : "",
                     address: favorite?.url ?? "", iconSymbol: favorite?.url != nil ? favorite?.iconSymbol : nil,
                     onSave: { favorite in
-                        edit { $0.setFavorite(favorite, at: direction, in: Array(path.dropLast())) }
+                        edit { $0.setFavorite(preservingHotkey(favorite, at: path), at: direction, in: Array(path.dropLast())) }
                         editingURLPath = nil
                     }, onCancel: { editingURLPath = nil })
             }
@@ -725,6 +678,28 @@ struct AppExplorerSettingsView: View {
                     }
                     .padding(10)
                     .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("HOTKEY FOR THIS ACTION")
+                            .font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            ShortcutRecorder(title: favorite.activationShortcut?.readableCombination ?? "Assign hotkey…") { shortcut in
+                                var updated = favorite
+                                updated.activationShortcut = shortcut
+                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                            if favorite.activationShortcut != nil {
+                                Button("Clear") {
+                                    var updated = favorite
+                                    updated.activationShortcut = nil
+                                    edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                                }
+                            }
+                        }
+                        Text("Works while this HUD layer is open. Escape and bare E/S stay reserved for HUD controls.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Text("ACTIONS")
@@ -769,7 +744,8 @@ struct AppExplorerSettingsView: View {
                     Menu {
                         ForEach(ExplorerReservedGroup.allCases) { group in
                             Button(group.title, systemImage: group.symbol) {
-                                let tile = group.tile(at: direction, insideWindowManager: windowManagerOnly)
+                                let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
+                                    at: groupPath + [direction])
                                 edit { $0.setFavorite(tile, at: direction, in: groupPath) }
                                 previewEditing = nil
                             }
@@ -797,8 +773,8 @@ struct AppExplorerSettingsView: View {
                                         let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
                                         Button(placement.title) {
                                             edit {
-                                                $0.setFavorite(AppExplorerFavorite(direction: direction, name: placement.title,
-                                                    windowPlacement: placement), at: direction, in: groupPath)
+                                                $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: placement.title,
+                                                    windowPlacement: placement), at: groupPath + [direction]), at: direction, in: groupPath)
                                             }
                                             previewEditing = nil
                                         }
@@ -834,8 +810,8 @@ struct AppExplorerSettingsView: View {
 
                     Button {
                         edit {
-                            $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls",
-                                action: .mediaControls), at: direction, in: groupPath)
+                            $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: "Media Controls",
+                                action: .mediaControls), at: groupPath + [direction]), at: direction, in: groupPath)
                         }
                         previewEditing = nil
                     } label: {
@@ -1049,7 +1025,8 @@ struct AppExplorerSettingsView: View {
         Menu {
             ForEach(ExplorerReservedGroup.allCases) { group in
                 Button(group.title, systemImage: group.symbol) {
-                    let tile = group.tile(at: direction, insideWindowManager: windowManagerOnly)
+                    let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
+                        at: groupPath + [direction])
                     edit { $0.setFavorite(tile, at: direction, in: groupPath) }
                 }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth && (group != .windowManager || windowManagerOnly))
             }
@@ -1066,8 +1043,8 @@ struct AppExplorerSettingsView: View {
                         ForEach(SwipeDirection.allCases, id: \.self) { placementDirection in
                             let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
                             Button(placement.title) {
-                                edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: placement.title,
-                                    windowPlacement: placement), at: direction, in: groupPath) }
+                                edit { $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: placement.title,
+                                    windowPlacement: placement), at: groupPath + [direction]), at: direction, in: groupPath) }
                             }
                         }
                     }
@@ -1087,13 +1064,15 @@ struct AppExplorerSettingsView: View {
             }
         } label: { Label("Mac commands", systemImage: "macbook") }
         Button("Media controls", systemImage: "speaker.wave.2.fill") {
-            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls), at: direction, in: groupPath) }
+            edit { $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls),
+                at: groupPath + [direction]), at: direction, in: groupPath) }
         }
     }
 
     private func windowActionButton(_ action: AppExplorerAction, at direction: ExplorerSlot, closeEditor: Bool = false) -> some View {
         Button(action.title, systemImage: action.symbol) {
-            edit { $0.setFavorite(AppExplorerFavorite(direction: direction, name: action.title, action: action), at: direction, in: groupPath) }
+            edit { $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: action.title, action: action),
+                at: groupPath + [direction]), at: direction, in: groupPath) }
             if closeEditor { previewEditing = nil }
         }
     }
@@ -1178,6 +1157,29 @@ struct AppExplorerSettingsView: View {
         var next = settings; update(&next)
         guard next.hasValidFavorites else { groupError = "Use the selected slot count, at most four nested HUD layers, and 256 total tiles."; return }
         _ = save(next)
+    }
+
+    private func preservingHotkey(_ replacement: AppExplorerFavorite, at path: [ExplorerSlot]) -> AppExplorerFavorite {
+        var replacement = replacement
+        if replacement.activationShortcut == nil {
+            replacement.activationShortcut = settings.favorite(at: path)?.activationShortcut
+        }
+        return replacement
+    }
+
+    private func mergingActionHotkeys(from edited: [AppExplorerFavorite],
+                                      into live: [AppExplorerFavorite]) -> [AppExplorerFavorite] {
+        live.map { liveTile in
+            guard let editedTile = edited.first(where: { $0.direction == liveTile.direction }) else { return liveTile }
+            var liveDestination = liveTile
+            var editedDestination = editedTile
+            liveDestination.activationShortcut = nil
+            editedDestination.activationShortcut = nil
+            guard liveDestination == editedDestination else { return liveTile }
+            var result = liveTile
+            result.activationShortcut = editedTile.activationShortcut
+            return result
+        }
     }
 
     @discardableResult private func save(_ settings: AppExplorerSettings) -> Bool {

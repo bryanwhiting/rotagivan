@@ -25,8 +25,10 @@ import Foundation
         taps.oneFingerTap = .shortcut; taps.oneFingerShortcut = key
         taps.twoFingerTap = .shortcut; taps.twoFingerShortcut = key
         settings.profileGestures = [1: taps]
+        let layerActionKey = RecordedShortcut(keyCode: 15, modifiers: 1 << 20, keyLabel: "R")
         settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Group", children: [
-            AppExplorerFavorite(direction: .up, name: "Existing name", shortcut: key)
+            AppExplorerFavorite(direction: .up, name: "Existing name", shortcut: key,
+                activationShortcut: layerActionKey)
         ])])
         func audit(_ layer: UInt32 = 1, _ device: GestureDevice = .navigator) -> HotkeyAudit {
             HotkeyAudit(settings: settings, shortcuts: keys, layerID: layer, device: device)
@@ -36,6 +38,9 @@ import Foundation
         precondition(audit().findings.contains { $0.kind == .reuse })
         precondition(!audit().findings.contains { $0.kind == .conflict }, "Repeated outgoing shortcuts are not registration conflicts")
         precondition(audit().assignments.contains { $0.scope.contains("Group") && $0.action == "Capture selection (Cmd+Shift+C)" })
+        precondition(audit().assignments.contains {
+            $0.kind == "Hotkey" && $0.shortcut == layerActionKey && $0.action == "Run Existing name" && $0.inputScope?.contains("Group") == true
+        })
         settings.appOverrides = [AppGestureOverride(bundleID: "test.app", name: "Editor", bindings: [AppGestureBinding(trigger: .oneFingerTap, action: .none)])]
         let rule = audit().findings.first { $0.kind == .override }!
         precondition(rule.detail.contains("Capture selection") && rule.detail.contains("Nothing"))

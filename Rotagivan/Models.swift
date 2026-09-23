@@ -417,6 +417,9 @@ struct AppExplorerFavorite: Codable, Equatable {
     var groupMode: AppExplorerMode? = nil
     var action: AppExplorerAction? = nil
     var shortcut: RecordedShortcut? = nil
+    // A layer-local input that runs this tile's action while the tile is visible.
+    // Unlike `shortcut`, this is an input trigger rather than the tile's output.
+    var activationShortcut: RecordedShortcut? = nil
     // Nil inherits the enclosing Explorer's keys; [] explicitly has no layers.
     // Stored on the tile so layers follow renames, moves, swaps and copies.
     var holdLayers: [ExplorerHoldLayer]? = nil
@@ -431,6 +434,7 @@ struct AppExplorerFavorite: Codable, Equatable {
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 512 else { return false }
+        guard activationShortcut == nil || activationShortcut!.isValidHUDActionHotkey else { return false }
         guard iconSymbol == nil || (url != nil && WebsiteIconCatalog.symbols.contains(iconSymbol!)) else { return false }
         guard holdLayers == nil || supportsHoldLayers else { return false }
         guard slotCount == nil || ((isGroup || isWindowManager) && [4, 8, 12, 16].contains(slotCount!)) else { return false }
@@ -638,9 +642,12 @@ struct AppExplorerSettings: Codable, Equatable {
             guard [4, 8, 12, 16].contains(count), depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= count,
                   entries.allSatisfy({ ExplorerSlot.slots(count).contains($0.direction) }),
                   Set(entries.map(\.direction)).count == entries.count else { return false }
+            var actionHotkeys = Set<String>()
             for entry in entries {
                 remaining -= 1
                 guard remaining >= 0, entry.isValidDestination else { return false }
+                if let key = entry.activationShortcut,
+                   !actionHotkeys.insert(key.identity).inserted { return false }
                 if let children = entry.children, !valid(children, depth: depth + 1, nesting: nesting + 1, count: entry.slotCount ?? 8) { return false }
                 if let layers = entry.holdLayers {
                     guard validLayers(layers, depth: nesting + 1, groupDepth: entry.isGroup ? depth + 1 : depth, count: entry.slotCount ?? 8) else { return false }
@@ -1007,6 +1014,10 @@ struct RecordedShortcut: Codable, Equatable {
     /// need a modifier so normal typing is never captured globally.
     var isValidGlobalHotkey: Bool {
         isPhysicalShortcut && keyCode != 53 && (keyCode >= 64 || modifiers & 0x1e0000 != 0)
+    }
+    /// Escape closes the HUD; bare E and S are its persistent edit/settings controls.
+    var isValidHUDActionHotkey: Bool {
+        isPhysicalShortcut && keyCode != 53 && !(modifiers & 0x1e0000 == 0 && [1, 14].contains(keyCode))
     }
 }
 

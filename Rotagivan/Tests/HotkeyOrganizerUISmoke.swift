@@ -70,7 +70,8 @@ import SwiftUI
             steps: [shortcut, RecordedShortcut(keyCode: 9, modifiers: 1 << 20, keyLabel: "V")], stepDelayMilliseconds: 100)
         store.settings.hotkeyDictionary = [macro]
         let editorLayer = ExplorerHoldLayer(name: "Editor commands", holdShortcut: nil,
-            favorites: [AppExplorerFavorite(direction: .left, name: macro.name, shortcut: .macro(macro))],
+            favorites: [AppExplorerFavorite(direction: .left, name: macro.name, shortcut: .macro(macro),
+                activationShortcut: RecordedShortcut(keyCode: 3, modifiers: 1 << 20, keyLabel: "F"))],
             launchShortcut: RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17"), appBundleID: "test.editor", appName: "Editor")
         store.settings.appExplorer = AppExplorerSettings(holdLayers: [editorLayer])
         controller.frontmostBundleID = { "other.app" }
@@ -110,7 +111,7 @@ import SwiftUI
         try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], requiresGlobalHotkey: true, onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
         try renderEditor(HUDLayerHotkeyEditor(store: store, layer: editorLayer, settings: store.settings.appExplorer!,
             onSave: { _, _ in true }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 560, height: 720))
-        print("Macro and HUD layer native UI passed: unified keyboard/tap editor renders, global direct launch, unknown-target rejection and sequence labels. No real events posted.")
+        print("Macro and HUD layer native UI passed: action-hotkey pairs render, legacy global launch remains compatible, unknown-target rejection and sequence labels. No real events posted.")
         print("Hotkey UI rendered saved actions, tap assignments, audit, exact-hotkey search and keyboard map; no actual shortcuts sent.")
     }
 }

@@ -242,9 +242,15 @@ extension AppExplorerPresenting {
             }
             return false
         }
+        let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
+        if event.type == .keyDown, let entry = model.entries.first(where: {
+            $0.activationShortcut?.keyCode == event.keyCode && $0.activationShortcut?.modifiers == flags
+        }) {
+            if !event.isARepeat { choose(entry.direction) }
+            return true
+        }
         if model.showingWindowManager {
             if event.type == .keyDown && event.isARepeat { return true }
-            let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
             let fullScreen = tilingTarget?.isFullScreen() == true
             if event.type == .keyDown, let binding = configuration().windowManager?.shortcuts.first(where: {
                 $0.shortcut.keyCode == event.keyCode && $0.shortcut.modifiers == flags
@@ -275,7 +281,6 @@ extension AppExplorerPresenting {
         }
         let previous = heldKeys.activeID
         let previousSettings = heldKeys.resolved(configuration())
-        let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
         var handled = false
         switch event.type {
         case .keyDown:
@@ -385,38 +390,43 @@ extension AppExplorerPresenting {
     /// Shared by the live HUD and its inert settings preview.
     static func makeEntry(_ favorite: AppExplorerFavorite, depth: Int, dictionary: [NamedHotkey],
                           applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }) -> ExplorerEntry {
+        func activated(_ entry: ExplorerEntry) -> ExplorerEntry {
+            var entry = entry
+            entry.activationShortcut = favorite.activationShortcut
+            return entry
+        }
         if let placement = favorite.windowPlacement {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                icon: nil, url: nil, tilingDirection: favorite.isValidDestination ? placement.direction : nil, tilingLayout: placement.layout)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, tilingDirection: favorite.isValidDestination ? placement.direction : nil, tilingLayout: placement.layout))
         }
         if let action = favorite.action, action != .windowManager && action != .mediaControls {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action))
         }
         if favorite.action == .mediaControls {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination))
         }
         if let shortcut = favorite.shortcut {
             let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
-                icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
+                icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil))
         }
         if favorite.isWindowManager {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
-                icon: nil, url: nil, isWindowManager: favorite.isValidDestination)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, isWindowManager: favorite.isValidDestination))
         }
         if favorite.isGroup {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                 icon: nil, url: nil, isGroup: favorite.isValidDestination && depth < AppExplorerSettings.maximumGroupDepth,
-                isRecentGroup: favorite.isRecentGroup)
+                isRecentGroup: favorite.isRecentGroup))
         }
         if favorite.url != nil {
-            return ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                 icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true,
-                webIconSymbol: favorite.iconSymbol)
+                webIconSymbol: favorite.iconSymbol))
         }
         let url = favorite.bundleID.flatMap(applicationURL)
-        return ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
-            name: favorite.name, icon: url.map { NSWorkspace.shared.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true)
+        return activated(ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
+            name: favorite.name, icon: url.map { NSWorkspace.shared.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true))
     }
 
     private func loadRecentEntries() {
@@ -833,12 +843,13 @@ struct ExplorerEntry {
     var tilingDirection: SwipeDirection?
     var tilingLayout: ExplorerWindowLayout?
     var shortcut: RecordedShortcut?
+    var activationShortcut: RecordedShortcut?
     var isMediaControls: Bool
     var mediaAction: ExplorerMediaAction?
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
-    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, activationShortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.webIconSymbol = webIconSymbol
@@ -848,6 +859,7 @@ struct ExplorerEntry {
         self.tilingDirection = tilingDirection
         self.tilingLayout = tilingLayout
         self.shortcut = shortcut
+        self.activationShortcut = activationShortcut
         self.isMediaControls = isMediaControls
         self.mediaAction = mediaAction
         self.command = command; self.showsWindows = showsWindows; self.windowIndex = windowIndex
@@ -990,6 +1002,7 @@ struct AppExplorerView: View {
                     .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
             }
             quickActionsFooter
+            if !layerActionHotkeys.isEmpty { layerActionHotkeyFooter }
         }
         .padding(26)
         .frame(width: 470, height: 520)
@@ -1029,6 +1042,32 @@ struct AppExplorerView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Press E to quick edit, or S for settings")
+    }
+
+    private var layerActionHotkeys: [ExplorerEntry] {
+        model.entries.filter { $0.activationShortcut != nil }
+    }
+
+    private var layerActionHotkeyFooter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(layerActionHotkeys, id: \.direction) { entry in
+                    HStack(spacing: 5) {
+                        Text(entry.activationShortcut!.displayName)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent)
+                        Text(entry.name).lineLimit(1)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.09)))
+                }
+            }
+        }
+        .frame(maxWidth: 390)
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Hotkeys for actions in this HUD layer")
     }
 
     private func footerKey(_ key: String, help: String, identifier: String, action: @escaping () -> Void) -> some View {

@@ -138,6 +138,12 @@ struct HotkeyAudit {
             for tile in values {
                 let enabled = active && visible.contains(tile.direction)
                 let location = path + " / " + tile.direction.title + " · " + tile.name
+                if let key = tile.activationShortcut {
+                    assignments.append(Assignment(id: location + ".activation", scope: path,
+                        trigger: key.readableCombination, action: "Run \(tile.name)", shortcut: key,
+                        enabled: enabled, precedence: "Available while this HUD layer is visible",
+                        inputScope: path, kind: "Hotkey"))
+                }
                 if let key = tile.shortcut {
                     assignments.append(Assignment(id: location, scope: path, trigger: tile.direction.title + " · " + tile.name,
                         action: dictionary.title(for: key), shortcut: key, enabled: enabled))

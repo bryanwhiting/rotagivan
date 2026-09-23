@@ -77,6 +77,15 @@ import Foundation
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", children: [], shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", action: .windowManager, shortcut: chord).isValidDestination)
+        let actionKey = RecordedShortcut(keyCode: 15, modifiers: 1 << 20, keyLabel: "R")
+        let keyedAction = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com",
+            activationShortcut: actionKey)
+        precondition(keyedAction.isValidDestination)
+        precondition(!AppExplorerFavorite(direction: .right, name: "Reserved", url: "https://example.com",
+            activationShortcut: RecordedShortcut(keyCode: 14, modifiers: 0, keyLabel: "E")).isValidDestination)
+        precondition(!AppExplorerSettings(favorites: [keyedAction,
+            AppExplorerFavorite(direction: .left, name: "Duplicate", url: "https://example.com/other",
+                activationShortcut: actionKey)]).hasValidFavorites)
         precondition(AppExplorerAction.macOSCommands == [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop])
         precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: nil) == RecordedShortcut(keyCode: 126,
             modifiers: UInt64(1 << 18), keyLabel: "Up Arrow"))

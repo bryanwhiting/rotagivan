@@ -51,6 +51,18 @@ import SwiftUI
                 precondition(!controller.isVisible && opened.last?.path == "/\(count)/\(index)")
             }
         }
+        let actionKey = RecordedShortcut(keyCode: 15, modifiers: 1 << 20, keyLabel: "R")
+        store.settings.appExplorer = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .right, name: "Hotkey docs", url: "https://example.com/hotkey",
+                activationShortcut: actionKey)
+        ])
+        controller.show(waitingForLift: false)
+        let hotkeyEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+            characters: "r", charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15)!
+        precondition(controller.processLayerKey(hotkeyEvent))
+        precondition(!controller.isVisible && opened.last?.path == "/hotkey",
+            "Layer-local hotkey runs the same URL action as its tile")
         let y = RecordedShortcut(keyCode: 16, modifiers: 0, keyLabel: "Y")
         let toggleLayer = ExplorerHoldLayer(name: "Second", holdShortcut: y,
             favorites: ExplorerSlot.slots(16).map { AppExplorerFavorite(direction: $0, name: "Alternate", url: "https://example.com/alternate") }, slotCount: 16, activation: .toggle)

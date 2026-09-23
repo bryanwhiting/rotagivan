@@ -450,14 +450,14 @@ final class HotKeyManager {
                 (shortcut.modifiers & (1 << 17) != 0 ? 512 : 0) |
                 (shortcut.modifiers & (1 << 20) != 0 ? 256 : 0))
             guard used.insert("\(shortcut.keyCode):\(modifiers)").inserted else {
-                ShortcutSettings.shared.error = "App Explorer conflicts with a layer or mouse shortcut."; return
+                ShortcutSettings.shared.error = "HUD conflicts with a pointer layer or mouse shortcut."; return
             }
             guard shortcut.keyCode >= 64 || modifiers != 0 else {
-                ShortcutSettings.shared.error = "App Explorer letter shortcuts need a modifier."; return
+                ShortcutSettings.shared.error = "HUD letter shortcuts need a modifier."; return
             }
             var ref: EventHotKeyRef?
             let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: 6), GetApplicationEventTarget(), 0, &ref)
-            if result != noErr { ShortcutSettings.shared.error = "App Explorer shortcut is unavailable. Choose another combination." }
+            if result != noErr { ShortcutSettings.shared.error = "HUD shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
             if result == noErr { remember(Self.fourCC("NZCL"), 6, UInt32(shortcut.keyCode), modifiers) }
         }

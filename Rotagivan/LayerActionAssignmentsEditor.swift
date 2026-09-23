@@ -95,10 +95,22 @@ struct LayerActionAssignmentsEditor: View {
         }
         .sheet(isPresented: $showingAddAction) {
             AddLayerActionSheet(existing: Set(assignments.map(\.trigger))) { trigger, action, shortcut in
+                let bindingAction: BindingAction = action == .shortcut && shortcut != nil
+                    ? .from(shortcut: shortcut!) : .tap(action)
+                if trigger == .twoFingerLeft || trigger == .twoFingerRight {
+                    if let existing = globalBinding(for: trigger) {
+                        var updated = existing
+                        updated.action = bindingAction
+                        saveGlobalDraft(updated)
+                    } else {
+                        globalBindings.append(ActionBinding(trigger: BindingTrigger(gesture: trigger), action: bindingAction))
+                    }
+                    showingAddAction = false
+                    return
+                }
                 if let existing = globalBinding(for: trigger) {
                     var updated = existing
-                    updated.action = action == .shortcut && shortcut != nil
-                        ? .from(shortcut: shortcut!) : .tap(action)
+                    updated.action = bindingAction
                     saveGlobalDraft(updated)
                     showingAddAction = false
                     return
@@ -290,7 +302,7 @@ private struct LayerActionValueMenu: View {
             }
 
             Section("Rotagivan") {
-                Button("App Explorer") { choose(.appExplorer) }
+                Button("HUD") { choose(.appExplorer) }
                 if !shortcutsOnly {
                     Button("Window Manager") { choose(.windowManager) }
                 }
@@ -362,6 +374,9 @@ struct AddLayerActionSheet: View {
     @State private var action = TapAction.none
     @State private var shortcut: RecordedShortcut?
 
+    private var standaloneSwipe: Bool {
+        tap == .twoFingerLeft || tap == .twoFingerRight
+    }
     private var trigger: AppGestureTrigger {
         direction.flatMap { AppGestureTrigger.combining(tap: tap, direction: $0) } ?? tap
     }
@@ -383,16 +398,24 @@ struct AddLayerActionSheet: View {
             }
 
             VStack(spacing: 0) {
-                selectionRow(number: "1", title: "Tap") {
-                    Picker("Tap", selection: $tap) {
-                        ForEach(AppGestureTrigger.baseTapTriggers) { trigger in
-                            Text(trigger.title).tag(trigger)
+                selectionRow(number: "1", title: "Gesture") {
+                    Picker("Gesture", selection: $tap) {
+                        Section("Tap") {
+                            ForEach(AppGestureTrigger.baseTapTriggers) { trigger in
+                                Text(trigger.title).tag(trigger)
+                            }
+                        }
+                        Section("Two-finger swipe") {
+                            Text(AppGestureTrigger.twoFingerLeft.title).tag(AppGestureTrigger.twoFingerLeft)
+                            Text(AppGestureTrigger.twoFingerRight.title).tag(AppGestureTrigger.twoFingerRight)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 220)
                     .onChange(of: tap) { _, value in
-                        if !AppGestureTrigger.swipeCapableTapTriggers.contains(value) { direction = nil }
+                        if !AppGestureTrigger.swipeCapableTapTriggers.contains(value) {
+                            direction = nil
+                        }
                     }
                 }
                 Divider().padding(.leading, 42)
@@ -406,7 +429,7 @@ struct AddLayerActionSheet: View {
                     }
                     .labelsHidden()
                     .frame(width: 220)
-                    .disabled(!canSwipe)
+                    .disabled(!canSwipe || standaloneSwipe)
                     .onChange(of: direction) { _, value in
                         guard value != nil, action != .none, action != .shortcut, action != .appExplorer else { return }
                         shortcut = .assigned(.tap(action))
@@ -433,7 +456,7 @@ struct AddLayerActionSheet: View {
                 Label("This gesture is already assigned. Saving will replace its action.", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            } else if !canSwipe {
+            } else if !canSwipe && !standaloneSwipe {
                 Text("Triple taps run on the tap itself; swipe directions are available for single and double taps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

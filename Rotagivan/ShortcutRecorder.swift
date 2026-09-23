@@ -126,7 +126,7 @@ struct TapActionEditor: View {
                         Button("Right click") { choose(.rightClick) }
                     }
                     if !keyboardOnly {
-                    Button("App Explorer") { choose(.appExplorer) }
+                    Button("HUD") { choose(.appExplorer) }
                     Button("Window Manager") { choose(.windowManager) }
                     Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                     }

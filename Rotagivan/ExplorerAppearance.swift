@@ -103,6 +103,21 @@ struct ExplorerHUDBackdrop: View {
     }
 }
 
+/// Carries the HUD's atmospheric color into its one canonical editor without
+/// reducing contrast in light appearance.
+struct ExplorerSettingsBackdrop: View {
+    let theme: ExplorerTheme
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        let base = Color(nsColor: .windowBackgroundColor)
+        LinearGradient(colors: colorScheme == .dark
+            ? [theme.surface.opacity(0.98), Color(red: 0.22, green: 0.08, blue: 0.23), theme.surface.opacity(0.92)]
+            : [base, theme.accent.opacity(0.10), Color.purple.opacity(0.08), base],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
 /// One static native material surface, shared by all wheel segments. No custom
 /// blur filter, continuous animation, or rendering work in the input callback.
 struct ExplorerAirGlass: View {

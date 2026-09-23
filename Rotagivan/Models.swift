@@ -971,7 +971,7 @@ extension AppExplorerSettings {
     }
 
     func hudActionDestinations() -> [HUDActionDestination] {
-        let explorer = tileContainers(rootTitle: "Default", includeRecent: true)
+        let explorer = tileContainers(rootTitle: "Main HUD", includeRecent: true)
         var result = explorer.map { HUDActionDestination(path: $0.id, windowOwnerPath: nil, title: $0.title) }
         func appendWindow(owner: [ExplorerTilePathStep], title: String) {
             guard let window = windowActionSettings(ownerPath: owner) else { return }
@@ -1253,7 +1253,7 @@ enum TapAction: String, Codable, CaseIterable {
         case .rightClick: return "Right click"
         case .none: return "Nothing"
         case .shortcut: return "Keyboard shortcut"
-        case .appExplorer: return "App Explorer"
+        case .appExplorer: return "HUD"
         case .windowManager: return "Window Manager"
         }
     }
@@ -1967,7 +1967,9 @@ final class SettingsStore: ObservableObject {
     }
 
     func activeGestures(for device: GestureDevice) -> ProfileGestures {
-        let base = settings.applyingActionBindings(to: gestures(for: activeProfileID, device: device))
+        // Tap assignments belong to the single default HUD base layer. The
+        // selected pointer-motion layer no longer changes tap behavior.
+        let base = settings.applyingActionBindings(to: gestures(for: settings.resolvedDefaultProfileID, device: device))
         return settings.resolvedAppOverrides.first { $0.enabled && $0.bundleID == foregroundBundleID }?.applying(to: base) ?? base
     }
 

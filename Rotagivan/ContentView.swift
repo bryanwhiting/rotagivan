@@ -46,7 +46,7 @@ struct ContentView: View {
     @ObservedObject var hid: NavigatorHIDManager
     @ObservedObject var sync: SettingsSync
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selection = "Layers"
+    @State private var selection = "HUD"
     @State private var actionDevice: GestureDevice = .navigator
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
@@ -55,26 +55,22 @@ struct ContentView: View {
     private let layerColumnWidth: CGFloat = 468
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
-        ("Layers", "square.3.layers.3d"), ("Calibration", "dial.low"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
+        ("Calibration", "dial.low"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
-    private var editingAppleActions: Bool { selection == "Layers" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
+    private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
-         initialSection: String = "Layers", initialDevice: GestureDevice = .navigator) {
+         initialSection: String = "HUD", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros"].contains(initialSection) ? "Macros" : ["App Explorer", "Window Manager"].contains(initialSection) ? "HUD" : initialSection)
+        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros"].contains(initialSection) ? "Macros" :
+            ["App Explorer", "Window Manager", "Layers", "Layer actions", "Tap actions"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
         _pointerDevice = State(initialValue: initialDevice)
     }
 
-    private enum ProfileSection {
-        case tapping
-    }
-
     private func sectionTitle(_ section: String) -> String {
         switch section {
-        case "Layers": return "Layer actions"
         case "Macros": return "Keybindings and Macros"
         default: return section
         }
@@ -118,7 +114,7 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) { pendingLayerDeletion = nil }
         } message: {
-            Text("This removes the layer's tap actions, device overrides, and activation shortcut.")
+            Text("This removes the pointer layer and its activation shortcut.")
         }
         .sheet(item: Binding(get: { hid.calibrationSession }, set: { value in
             if value == nil { hid.endCalibration() }
@@ -194,7 +190,7 @@ struct ContentView: View {
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if selection != "Layers" && selection != "Calibration" && selection != "Pointer & scrolling" {
+                if selection != "HUD" && selection != "Calibration" && selection != "Pointer & scrolling" {
                     Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                     Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
                         .font(.callout).foregroundStyle(.secondary)
@@ -204,18 +200,56 @@ struct ContentView: View {
             .frame(width: 708, alignment: .leading).padding(22)
             .id(store.activeConfigurationID)
         }
+        .background {
+            if selection == "HUD" {
+                ExplorerSettingsBackdrop(theme: store.settings.appExplorer?.resolvedTheme ?? .starburstAir)
+            }
+        }
     }
 
     @ViewBuilder private var pageContent: some View {
         switch selection {
         case "General": general
         case "Devices": devices
-        case "HUD": HUDSettingsView(store: store, initialGroup: initialHUDGroup)
+        case "HUD": hudAndTapSettings
         case "Macros": HotkeyOrganizerView(store: store)
         case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
         case "App overrides": AppOverridesView(store: store)
         case "Pointer & scrolling": pointerSettings
         default: profiles
+        }
+    }
+
+    private var hudAndTapSettings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("HUD and tap actions").font(.system(size: 24, weight: .semibold))
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Default").font(.headline)
+                            Text("Used whenever no HUD layer is active. This base layer has no on-screen HUD.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Label("Tap layer", systemImage: "hand.tap")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.teal)
+                    }
+                    Divider()
+                    Toggle("Share tap and swipe actions across devices", isOn: deviceBinding(\.shareTapActions))
+                    if !store.settings.resolvedDevices.shareTapActions {
+                        Picker("Edit actions for", selection: $actionDevice) {
+                            ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented).frame(width: 340)
+                    } else {
+                        Label("One set of actions for Navigator and Apple trackpads", systemImage: "link")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    gestures(store.defaultProfileID)
+                }
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HUDSettingsView(store: store, initialGroup: initialHUDGroup)
         }
     }
 
@@ -234,8 +268,8 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Layer actions").font(.system(size: 24, weight: .semibold))
-                    Text("Choose what a gesture does. Layers share this profile’s pointer and scrolling response.")
+                    Text("Pointer layers").font(.system(size: 24, weight: .semibold))
+                    Text("Choose a pointer profile and its activation and cursor-click shortcuts. Tap actions live in HUD.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -245,17 +279,6 @@ struct ContentView: View {
                     ShortcutSettings.shared.profileActions[id] = ShortcutSettings.shared.actions(for: store.defaultProfileID)
                 } label: {
                     Label("Add layer", systemImage: "plus")
-                }
-            }
-            if selection == "Layers" {
-                Toggle("Share tap and swipe actions across devices", isOn: deviceBinding(\.shareTapActions))
-                if !store.settings.resolvedDevices.shareTapActions {
-                    Picker("Edit actions for", selection: $actionDevice) {
-                        ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }.pickerStyle(.segmented).frame(width: 340)
-                } else {
-                    Label("One set of actions for Navigator and Apple trackpads", systemImage: "link")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             ScrollViewReader { proxy in
@@ -287,7 +310,7 @@ struct ContentView: View {
             }
             }
             Divider()
-            Text("New layers copy \(store.profiles[0].name). Hold temporarily overrides the selected layer; tap again to return to the previous layer.")
+            Text("New pointer layers copy \(store.profiles[0].name). Hold temporarily overrides the selected pointer profile; tap again to return to the previous one.")
                 .font(.caption).foregroundStyle(.secondary)
             ShortcutEditor(errorsOnly: true)
         }
@@ -304,29 +327,19 @@ struct ContentView: View {
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                 .id(id)
         default:
-            columnSection("Tap & swipe actions", icon: "hand.tap", profileID: id, copySection: .tapping) { gestures(id) }
+            columnSection("Pointer shortcuts", icon: "cursorarrow.click") {
+                ShortcutEditor(showBehavior: false, actionIndex: 0, showError: false, profileID: id)
+                ShortcutEditor(showBehavior: false, actionIndex: 1, showError: false, profileID: id)
+                Text("Click at cursor and double-click at cursor are keyboard shortcuts for this pointer layer.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
-    private func columnSection<Content: View>(_ title: String, icon: String, profileID: UInt32, copySection: ProfileSection, @ViewBuilder content: () -> Content) -> some View {
+    private func columnSection<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
-            HStack {
-                Label(title, systemImage: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer()
-                if store.profiles.count > 1 {
-                    Menu {
-                        ForEach(store.profiles.filter { $0.id != profileID }, id: \.id) { source in
-                            Button(source.name) { copy(copySection, from: source.id, to: profileID) }
-                        }
-                    } label: {
-                        Label("Copy from", systemImage: "doc.on.doc")
-                    }
-                    .font(.caption)
-                    .menuStyle(.borderlessButton)
-                    .help("Copy this section from another layer")
-                }
-            }
+            Label(title, systemImage: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             content()
         }
         .padding(.horizontal, 16).padding(.bottom, 18)
@@ -432,6 +445,8 @@ struct ContentView: View {
             } else {
                 macOSPointerSettings.accessibilityIdentifier("pointer-pane-macos")
             }
+            Divider()
+            profiles
         }.font(.system(size: 12))
     }
 
@@ -475,7 +490,7 @@ struct ContentView: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess")!)
                 }
             }
-            Text("For native dragging: Accessibility → Pointer Control → Trackpad Options. Tap and swipe actions remain customizable in Layers for this Rotagivan profile.")
+            Text("For native dragging: Accessibility → Pointer Control → Trackpad Options. Tap and swipe actions are configured in HUD.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -500,59 +515,6 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
     }
 
-    private func copy(_ section: ProfileSection, from sourceID: UInt32, to targetID: UInt32) {
-        switch section {
-        case .tapping:
-            if editingAppleActions {
-                store.updateAppleGestures(store.gestures(for: sourceID, device: .apple), for: targetID)
-                return
-            }
-            let source = store.settings.effectiveGestures(for: sourceID)
-            var target = store.settings.gestures(for: targetID)
-            target.oneFingerTap = source.oneFingerTap
-            target.twoFingerTap = source.twoFingerTap
-            target.oneFingerShortcut = source.oneFingerShortcut
-            target.twoFingerShortcut = source.twoFingerShortcut
-            target.oneFingerDoubleTap = source.oneFingerDoubleTap
-            target.twoFingerDoubleTap = source.twoFingerDoubleTap
-            target.oneFingerDoubleShortcut = source.oneFingerDoubleShortcut
-            target.twoFingerDoubleShortcut = source.twoFingerDoubleShortcut
-            target.doubleTapSwipe = source.doubleTapSwipe
-            target.singleTapSwipe = source.singleTapSwipe
-            target.twoFingerSingleTapSwipe = source.twoFingerSingleTapSwipe
-            target.twoFingerDoubleTapSwipe = source.twoFingerDoubleTapSwipe
-            target.twoFingerSwipe = source.twoFingerSwipe
-            target.oneFingerTripleTap = source.oneFingerTripleTap
-            target.twoFingerTripleTap = source.twoFingerTripleTap
-            target.oneFingerTripleShortcut = source.oneFingerTripleShortcut
-            target.twoFingerTripleShortcut = source.twoFingerTripleShortcut
-            target.gestures.tapToClick = source.gestures.tapToClick
-            target.gestures.tapMaxDuration = source.gestures.tapMaxDuration
-            target.gestures.tapMaxMovement = source.gestures.tapMaxMovement
-            target.gestures.keepCursorStillForTaps = source.gestures.keepCursorStillForTaps
-            target.gestures.doubleTapInterval = source.gestures.doubleTapInterval
-            target.gestures.tripleTapFirstInterval = source.gestures.tripleTapFirstInterval
-            target.gestures.tripleTapSecondInterval = source.gestures.tripleTapSecondInterval
-            store.updateGestures(target, for: targetID)
-            if targetID != store.defaultProfileID {
-                var customProfiles = store.settings.customTapProfiles ?? []
-                customProfiles.insert(targetID)
-                store.settings.customTapProfiles = customProfiles
-            }
-            copyShortcutActions([0, 1], from: sourceID, to: targetID)
-        }
-    }
-
-    private func copyShortcutActions(_ indexes: [Int], from sourceID: UInt32, to targetID: UInt32) {
-        let shortcuts = ShortcutSettings.shared
-        let source = shortcuts.actions(for: sourceID)
-        var target = shortcuts.actions(for: targetID)
-        for index in indexes where source.indices.contains(index) && target.indices.contains(index) {
-            target[index] = source[index]
-        }
-        shortcuts.profileActions[targetID] = target
-    }
-
     private func gestures(_ id: UInt32) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if editingAppleActions {
@@ -565,21 +527,9 @@ struct ContentView: View {
                     Text("Uses this layer’s shared actions. Enable customization to override them on Apple trackpads.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } else if id != store.defaultProfileID {
-                Toggle("Set Custom Tap settings", isOn: Binding(get: {
-                    (store.settings.customTapProfiles ?? []).contains(id)
-                }, set: { enabled in
-                    var ids = store.settings.customTapProfiles ?? []
-                    if enabled { ids.insert(id) } else { ids.remove(id) }
-                    store.settings.customTapProfiles = ids
-                }))
             }
-            if editingAppleActions ? store.settings.devices?.appleLayerGestures?[id] != nil : (id == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(id)) {
-            Toggle("Enable tap actions", isOn: gesture(id, \.tapToClick))
-            if store.settings.applyingActionBindings(to: editableGestures(id)).gestures.tapToClick ||
-               (store.settings.actionBindings ?? []).contains(where: {
-                   $0.trigger.gesture == .twoFingerLeft || $0.trigger.gesture == .twoFingerRight
-               }) {
+            if !editingAppleActions || store.settings.devices?.appleLayerGestures?[id] != nil {
+                Toggle("Enable tap actions", isOn: gesture(id, \.tapToClick))
                 LayerActionAssignmentsEditor(gestures: gestureBinding(id),
                     globalBindings: Binding(get: { store.settings.actionBindings ?? [] }, set: { updated in
                         guard updated.isValidBindings(global: true) else { return }
@@ -589,20 +539,6 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Tune tap timing, movement thresholds, and all tap + swipe families in Calibration.")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-            if !editingAppleActions {
-            Divider()
-            ShortcutEditor(showBehavior: false, actionIndex: 0, showError: false, profileID: id)
-            ShortcutEditor(showBehavior: false, actionIndex: 1, showError: false, profileID: id)
-            Text("These are separate keyboard shortcuts that click at the cursor; they do not change what a trackpad tap does.")
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            } else if !editingAppleActions {
-                Text("Inherit from default")
-                    .foregroundStyle(.secondary)
-                Text("Uses tapping settings from \(store.profiles[0].name). Enable custom settings to override them while this layer is active.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .font(.system(size: 12))
@@ -706,7 +642,7 @@ struct ContentView: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Use Apple trackpad actions", isOn: deviceBinding(\.appleEnabled))
-                    Text("Built-in and Magic Trackpads. Native pointer and scrolling remain controlled by macOS; Rotagivan adds gesture actions.")
+                    Text("Built-in and Magic Trackpads. Native pointer and scrolling remain controlled by macOS; Rotagivan adds HUD actions.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Allow Apple input on this Mac", isOn: Binding(get: { hid.appleTrackpadEnabled }, set: { hid.setAppleTrackpadEnabled($0) }))
                     Text(hid.appleTrackpadStatus).font(.caption).foregroundStyle(.secondary)
@@ -715,7 +651,7 @@ struct ContentView: View {
                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             }
             Toggle("Share tap and swipe actions across devices", isOn: deviceBinding(\.shareTapActions))
-            Text("Shared actions follow the active layer. Turn sharing off to customize Apple actions in Layer actions. Existing overrides are preserved when sharing is turned back on.")
+            Text("The Default tap layer drives the same gestures across pointer profiles. Turn sharing off to customize Apple actions in HUD. Existing overrides are preserved when sharing is turned back on.")
                 .font(.callout).foregroundStyle(.secondary)
         }
     }

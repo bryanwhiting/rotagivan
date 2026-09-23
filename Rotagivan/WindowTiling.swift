@@ -109,18 +109,36 @@ enum WindowTile {
             guard let index = WindowTile.screenIndex(for: current, frames: frames) else { return "No display is available." }
             let area = WindowTile.accessibilityFrame(screens[index].visibleFrame, primaryTop: primary.frame.maxY)
             let desired = WindowTile.frame(direction, in: area, layout: layout)
-            // Resize first so a large window can move into an edge/corner, then
-            // repeat size after moving for apps that constrain by current position.
+            // Resize first so a large window can move into an edge/corner. Some
+            // apps apply AX size changes asynchronously and discard a position
+            // written in the same turn, so finish with position, verify the
+            // complete frame, and retry briefly when only the resize stuck.
             var size = desired.size, point = desired.origin
             guard let sizeValue = AXValueCreate(.cgSize, &size), let pointValue = AXValueCreate(.cgPoint, &point) else { return "Could not calculate the window placement." }
-            let firstSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-            let position = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, pointValue)
-            let finalSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-            guard position == .success, firstSize == .success || finalSize == .success else { return "The app could not apply this layout. Try a larger tile or another window." }
-            if let actual = frame(window), abs(actual.width - desired.width) > 8 || abs(actual.height - desired.height) > 8 {
+            var setPosition = false, setSize = false
+            var actual: CGRect?
+            for attempt in 0..<4 {
+                let firstSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+                let firstPosition = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, pointValue)
+                let finalSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+                let finalPosition = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, pointValue)
+                setSize = setSize || firstSize == .success || finalSize == .success
+                setPosition = setPosition || firstPosition == .success || finalPosition == .success
+                Thread.sleep(forTimeInterval: 0.018)
+                actual = frame(window)
+                if let actual,
+                   abs(actual.minX - desired.minX) <= 8, abs(actual.minY - desired.minY) <= 8,
+                   abs(actual.width - desired.width) <= 8, abs(actual.height - desired.height) <= 8 {
+                    return nil
+                }
+                if attempt < 3 { Thread.sleep(forTimeInterval: 0.018) }
+            }
+            guard setPosition, setSize else { return "The app could not apply this layout. Try a larger tile or another window." }
+            guard let actual else { return "The original window is no longer available." }
+            if abs(actual.width - desired.width) > 8 || abs(actual.height - desired.height) > 8 {
                 return "This app limits its window size. Try a larger tile."
             }
-            return nil
+            return "This app did not move the window to the requested position. Try again or use another window."
         }
         target.isFullScreen = { (attribute(window, "AXFullScreen") as? Bool) == true }
         target.command = { command in

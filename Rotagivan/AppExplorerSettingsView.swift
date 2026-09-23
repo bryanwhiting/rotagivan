@@ -88,7 +88,7 @@ struct WindowManagerSettingsView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Customize this HUD layer like App Explorer. Each tile can place the window, run a command, or open another HUD layer. Drag tiles to rearrange them; use the layer rail for alternate layouts.")
+            Text("Customize this HUD layer like the main HUD. Each tile can place the window, run a command, or open another HUD layer. Drag tiles to rearrange them; use the layer rail for alternate layouts.")
                 .font(.callout).foregroundStyle(.secondary)
             AppExplorerSettingsView(store: store, configurationOverride: Binding(get: {
                 explorer.windowEditor()
@@ -278,7 +278,7 @@ struct AppExplorerSettingsView: View {
                         Text(String(format: "%02d", index + 1))
                             .font(.caption2.monospacedDigit().weight(.bold))
                             .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                        Text(layer?.name ?? "Default")
+                        Text(layer?.name ?? "Main HUD")
                             .font(.headline).lineLimit(1)
                         Spacer(minLength: 4)
                         if selected {
@@ -319,7 +319,7 @@ struct AppExplorerSettingsView: View {
             } else {
                 Divider()
                 HStack {
-                    Label("Default layer", systemImage: "pin.fill")
+                    Label("Main HUD actions", systemImage: "safari")
                     Spacer(minLength: 0)
                     Button("Edit hotkeys") {
                         if !groupPath.isEmpty { openGroupHotkeys() }
@@ -474,7 +474,7 @@ struct AppExplorerSettingsView: View {
                 hudLayerRail
             }
             if scopeTitle == nil && compact {
-                Text("Assign keyboard shortcuts or trackpad gestures to this layer’s actions. Tile hotkeys are optional.")
+                Text("Assign keyboard shortcuts or trackpad gestures to this layer’s actions.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if windowManagerOnly {
@@ -657,8 +657,7 @@ struct AppExplorerSettingsView: View {
                 store.settings = stored
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
                 return true
-            }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly,
-                containerPrefix: transferPrefix, windowOwnerPath: windowOwnerPath)
+            }, onCancel: { editingLayer = nil })
         }
         .sheet(isPresented: $editingDefaultLayer) {
             HUDLayerHotkeyEditor(store: store,
@@ -673,10 +672,7 @@ struct AppExplorerSettingsView: View {
                     editingDefaultLayer = false
                     groupError = nil
                     return true
-                }, onCancel: { editingDefaultLayer = false },
-                supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly,
-                isDefaultLayer: true, containerPrefix: transferPrefix,
-                windowOwnerPath: windowOwnerPath)
+                }, onCancel: { editingDefaultLayer = false }, isDefaultLayer: true)
         }
         .sheet(isPresented: Binding(get: { editingGroupHotkeys != nil }, set: { if !$0 { editingGroupHotkeys = nil } })) {
             if let path = editingGroupHotkeys, let snapshot = groupHotkeysSnapshot {
@@ -690,9 +686,7 @@ struct AppExplorerSettingsView: View {
                         editingGroupHotkeys = nil; groupHotkeysSnapshot = nil; groupError = nil
                         return true
                     }, onCancel: { editingGroupHotkeys = nil },
-                    isDefaultLayer: true, containerPrefix: transferPrefix +
-                        (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) },
-                    windowOwnerPath: windowOwnerPath, editingGroupPath: path,
+                    isDefaultLayer: true, editingGroupPath: path,
                     layerTitle: snapshot.name + " hotkeys")
             }
         }
@@ -1716,7 +1710,7 @@ struct ExplorerInlineEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label(windowManagerOnly ? "Edit Window Manager" : "Edit App Explorer", systemImage: "pencil").font(.title3.weight(.semibold))
+                Label(windowManagerOnly ? "Edit Window Manager" : "Edit HUD", systemImage: "pencil").font(.title3.weight(.semibold))
                 Spacer()
                 Button("Done", action: onDone).keyboardShortcut(.defaultAction)
             }

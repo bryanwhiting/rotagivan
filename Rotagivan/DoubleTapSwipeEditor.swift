@@ -48,7 +48,7 @@ struct DoubleTapSwipeEditor: View {
                 }
                 Text(settings.isConfigured
                      ? (twoFingers ? "Taps wait briefly for the next touch. A qualifying swipe suppresses scrolling and the earlier tap action. Lift both fingers before starting normal scrolling again. A long hold cancels the gesture; it never starts a drag." : (singleTap ? "The first tap waits briefly for a swipe. During a qualifying second touch, the cursor stays still. A quick second tap still counts as a double tap. Holding waits for the quick-swipe duration before dragging." : "Single taps wait for double-tap recognition. Double taps then wait for this swipe window. No swipe? The usual tap action runs. Tap-and-hold on the second touch still drags as before."))
-                     : "Assign a shortcut or App Explorer to at least one direction to activate this gesture. Your existing taps are unchanged until then.")
+                     : "Assign a shortcut or HUD to at least one direction to activate this gesture. Your existing taps are unchanged until then.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

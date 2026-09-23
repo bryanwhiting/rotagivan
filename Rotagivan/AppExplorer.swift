@@ -295,12 +295,11 @@ extension AppExplorerPresenting {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onCancel = { [weak self] in self?.dismiss() }
-        panel.onEdit = { [weak self] in self?.beginEditing() }
         panel.onSettings = { [weak self] in self?.openSettings() }
         panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
-            onBack: { [weak self] in self?.goBack() }, onEdit: { [weak self] in self?.beginEditing() },
+            onBack: { [weak self] in self?.goBack() },
             onSettings: { [weak self] in self?.openSettings() },
             onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
             onWindowPage: { [weak self] in self?.changeWindowPage($0) }))
@@ -1174,7 +1173,6 @@ extension AppExplorerPresenting {
 
 final class ExplorerPanel: NSPanel {
     var onCancel: (() -> Void)?
-    var onEdit: (() -> Void)?
     var onSettings: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
     var allowsEditing = false
@@ -1191,9 +1189,6 @@ final class ExplorerPanel: NSPanel {
     override func keyDown(with event: NSEvent) {
         if allowsEditing { super.keyDown(with: event); return }
         if onKey?(event) == true { return }
-        if event.keyCode == 14, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-            onEdit?(); return
-        }
         if event.keyCode == 1, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             onSettings?(); return
         }
@@ -1286,7 +1281,6 @@ struct AppExplorerView: View {
     var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
     var onBack: () -> Void = {}
-    var onEdit: () -> Void = {}
     var onSettings: () -> Void = {}
     var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
     var onWindowPage: (Int) -> Void = { _ in }
@@ -1357,7 +1351,7 @@ struct AppExplorerView: View {
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "App Explorer")")
+                                    .accessibilityLabel(canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")
                             }
                         }
                     }
@@ -1381,7 +1375,7 @@ struct AppExplorerView: View {
                 Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
             }
-            quickActionsFooter
+            settingsFooter
             if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty { layerActionHotkeyFooter }
         }
         .padding(26)
@@ -1404,12 +1398,10 @@ struct AppExplorerView: View {
         .help(guidance)
     }
 
-    private var quickActionsFooter: some View {
+    private var settingsFooter: some View {
         HStack(spacing: 4) {
             Text("Press")
-            footerKey("E", help: "Quick edit tiles and HUD layers", identifier: "explorer-quick-edit", action: onEdit)
-            Text("to quick edit, or")
-            footerKey("S", help: "Open App Explorer settings", identifier: "explorer-settings", action: onSettings)
+            footerKey("S", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")
         }
         .font(.system(size: 11, weight: .medium))
@@ -1421,7 +1413,7 @@ struct AppExplorerView: View {
                 .overlay(Capsule().strokeBorder(accent.opacity(0.24), lineWidth: 0.7))
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Press E to quick edit, or S for settings")
+        .accessibilityLabel("Press S for settings")
     }
 
     private var layerActionHotkeys: [ExplorerEntry] {
@@ -1519,7 +1511,7 @@ struct AppExplorerView: View {
             .buttonStyle(.plain)
             .position(center)
             .help(canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")
-            .accessibilityLabel("\(canGoBack ? "Back to previous HUD layer" : "Close App Explorer"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+            .accessibilityLabel("\(canGoBack ? "Back to previous HUD layer" : "Close HUD"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
         }
         .frame(width: 418, height: 310)
         .animation(feedback, value: names)

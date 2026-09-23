@@ -5,13 +5,12 @@ struct CalibrationSettingsView: View {
     @ObservedObject var hid: NavigatorHIDManager
 
     @State private var device: GestureDevice
-    @State private var layerID: UInt32
+    private var layerID: UInt32 { store.defaultProfileID }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, initialDevice: GestureDevice = .navigator) {
         self.store = store
         self.hid = hid
         _device = State(initialValue: initialDevice)
-        _layerID = State(initialValue: store.defaultProfileID)
     }
 
     private var separatesAppleActions: Bool {
@@ -19,15 +18,11 @@ struct CalibrationSettingsView: View {
     }
 
     private var needsCustomization: Bool {
-        if separatesAppleActions {
-            return store.settings.devices?.appleLayerGestures?[layerID] == nil
-        }
-        return layerID != store.defaultProfileID &&
-            !(store.settings.customTapProfiles ?? []).contains(layerID)
+        separatesAppleActions && store.settings.devices?.appleLayerGestures?[layerID] == nil
     }
 
     private var selectedLayerName: String {
-        store.profiles.first { $0.id == layerID }?.name ?? store.activeProfileName
+        "Default tap layer"
     }
 
     private var editableGestures: ProfileGestures {
@@ -64,12 +59,6 @@ struct CalibrationSettingsView: View {
             }
         }
         .font(.system(size: 12))
-        .onChange(of: store.activeConfigurationID) { _, _ in
-            layerID = store.defaultProfileID
-        }
-        .onChange(of: store.profiles.map(\.id)) { _, ids in
-            if !ids.contains(layerID) { layerID = store.defaultProfileID }
-        }
     }
 
     private var scopeBar: some View {
@@ -85,10 +74,8 @@ struct CalibrationSettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 340)
 
-                Picker("Action layer", selection: $layerID) {
-                    ForEach(store.profiles, id: \.id) { Text($0.name).tag($0.id) }
-                }
-                .frame(maxWidth: .infinity)
+                Label("Default tap layer", systemImage: "hand.tap")
+                    .font(.callout.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
             }
             if device == .apple && store.settings.resolvedDevices.shareTapActions {
                 Label("Timing is calibrated for Apple trackpads; recognition thresholds are shared with ZSA Navigator.",
@@ -106,10 +93,10 @@ struct CalibrationSettingsView: View {
         calibrationCard("Recognition inherited", icon: "arrow.triangle.branch") {
             Text(separatesAppleActions
                  ? "\(selectedLayerName) currently uses the shared tap and swipe recognition settings on Apple trackpads."
-                 : "\(selectedLayerName) currently inherits tap and swipe recognition from \(store.profiles.first?.name ?? "the default layer").")
+                 : "Apple trackpads currently use the shared tap and swipe recognition settings.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(separatesAppleActions ? "Customize Apple tap settings" : "Customize this layer’s tap settings") {
+            Button("Customize Apple tap settings") {
                 enableCustomization()
             }
             Text("This uses the currently inherited values as the starting point. Action assignments remain unchanged.")
@@ -156,7 +143,7 @@ struct CalibrationSettingsView: View {
 
     private var swipeRecognitionCard: some View {
         calibrationCard("Tap + swipe recognition", icon: "hand.draw") {
-            Text("Tune all four gesture families here. Direction assignments stay in Layer actions.")
+            Text("Tune all four gesture families here. Direction assignments stay in HUD.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             LayerSwipeRecognitionEditor(gestures: gestureBinding, distanceScale: hid.distanceScale)
@@ -236,13 +223,6 @@ struct CalibrationSettingsView: View {
 
     private func enableCustomization() {
         let inherited = store.settings.effectiveGestures(for: layerID)
-        if separatesAppleActions {
-            store.updateAppleGestures(inherited, for: layerID)
-        } else {
-            store.updateGestures(inherited, for: layerID)
-            var ids = store.settings.customTapProfiles ?? []
-            ids.insert(layerID)
-            store.settings.customTapProfiles = ids
-        }
+        store.updateAppleGestures(inherited, for: layerID)
     }
 }

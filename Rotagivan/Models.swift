@@ -8,11 +8,17 @@ struct BindingTrigger: Codable, Equatable {
     var isValid: Bool { (keyboard?.isPhysicalShortcut == true && gesture == nil) || (keyboard == nil && gesture != nil) }
 }
 
+enum HUDNavigationAction: String, Codable, CaseIterable {
+    case previous, next
+    var title: String { self == .previous ? "Previous HUD" : "Next HUD" }
+    var symbol: String { self == .previous ? "chevron.left.2" : "chevron.right.2" }
+}
+
 /// A destination is independent of the input that invokes it. Physical output
 /// keys are stored as scalars so references cannot recursively contain actions.
 struct BindingAction: Codable, Equatable {
     enum Kind: String, Codable, CaseIterable {
-        case keystroke, macro, hudLayer, openApp, openURL, command, media, windowPlacement, tap
+        case keystroke, macro, hudLayer, hudNavigation, openApp, openURL, command, media, windowPlacement, tap
     }
     var kind: Kind
     var keyCode: UInt16? = nil
@@ -22,6 +28,7 @@ struct BindingAction: Codable, Equatable {
     var hudLayerID: UUID? = nil
     var hudPath: [String]? = nil
     var windowOwnerPath: [String]? = nil
+    var hudNavigation: HUDNavigationAction? = nil
     var bundleID: String? = nil
     var name: String? = nil
     var url: String? = nil
@@ -38,6 +45,7 @@ struct BindingAction: Codable, Equatable {
         case .keystroke: return shortcut?.readableCombination ?? "Keystroke"
         case .macro: return name ?? "Saved action"
         case .hudLayer: return "Open HUD · " + (name ?? (hudLayerID == nil ? "Default" : "Layer"))
+        case .hudNavigation: return hudNavigation?.title ?? "Navigate HUD"
         case .openApp: return "Open " + (name ?? bundleID ?? "app")
         case .openURL: return name ?? url ?? "Open URL"
         case .command: return command?.title ?? "Command"
@@ -61,6 +69,7 @@ struct BindingAction: Codable, Equatable {
               hudLayerID == nil || kind == .hudLayer,
               hudPath == nil || (kind == .hudLayer && hudLayerID == nil),
               windowOwnerPath == nil || (kind == .hudLayer && hudPath != nil && hudLayerID == nil),
+              hudNavigation == nil || kind == .hudNavigation,
               bundleID == nil || kind == .openApp,
               url == nil || kind == .openURL,
               command == nil || kind == .command,
@@ -77,6 +86,7 @@ struct BindingAction: Codable, Equatable {
                 guard case .group? = owner.last.flatMap(ExplorerTilePathStep.init(token:)) else { return false }
             }
             return true
+        case .hudNavigation: return hudNavigation != nil
         case .openApp:
             return bundleID.map {
                 !$0.isEmpty && $0.count <= 255 && $0 != "local.rotagivan" && $0.contains(".") &&
@@ -101,6 +111,7 @@ struct BindingAction: Codable, Equatable {
         Self(kind: .hudLayer, hudPath: destination.path.map(\.token),
             windowOwnerPath: destination.windowOwnerPath?.map(\.token), name: destination.title)
     }
+    static func hudNavigation(_ direction: HUDNavigationAction) -> Self { Self(kind: .hudNavigation, hudNavigation: direction) }
     static func openApp(bundleID: String, name: String) -> Self { Self(kind: .openApp, bundleID: bundleID, name: name) }
     static func openURL(_ url: String) -> Self { Self(kind: .openURL, url: url) }
     static func command(_ command: AppExplorerAction) -> Self { Self(kind: .command, command: command) }
@@ -1308,9 +1319,9 @@ struct RecordedShortcut: Codable, Equatable {
     var isValidGlobalHotkey: Bool {
         isPhysicalShortcut && keyCode != 53 && (keyCode >= 64 || modifiers & 0x1e0000 != 0)
     }
-    /// Escape closes the HUD; bare E and S are its persistent edit/settings controls.
+    /// Escape closes the HUD; bare S remains its persistent Settings control.
     var isValidHUDActionHotkey: Bool {
-        isPhysicalShortcut && keyCode != 53 && !(modifiers & 0x1e0000 == 0 && [1, 14].contains(keyCode))
+        isPhysicalShortcut && keyCode != 53 && !(modifiers & 0x1e0000 == 0 && keyCode == 1)
     }
 }
 

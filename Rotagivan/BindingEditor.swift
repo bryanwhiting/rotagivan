@@ -73,6 +73,10 @@ struct BindingActionPicker: View {
                 }
             }
             Section("HUD layers") {
+                Button("Previous HUD", systemImage: HUDNavigationAction.previous.symbol) {
+                    action = .hudNavigation(.previous)
+                }
+                Button("Next HUD", systemImage: HUDNavigationAction.next.symbol) { action = .hudNavigation(.next) }
                 if hudDestinations.isEmpty {
                     Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
                     ForEach(hudLayers) { layer in
@@ -165,6 +169,7 @@ struct BindingActionPicker: View {
         switch action.kind {
         case .keystroke, .macro: return "keyboard"
         case .hudLayer: return "square.stack.3d.up"
+        case .hudNavigation: return action.hudNavigation?.symbol ?? "square.stack.3d.up"
         case .openApp: return "app"
         case .openURL: return "globe"
         case .command: return action.command?.symbol ?? "macwindow"

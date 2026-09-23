@@ -264,6 +264,17 @@ struct AppExplorerSettingsView: View {
             : allSources
     }
 
+    private func moveHUDLayer(_ id: UUID, by offset: Int) {
+        var next = baseSettings
+        guard var layers = next.holdLayers,
+              let source = layers.firstIndex(where: { $0.id == id }) else { return }
+        let destination = source + offset
+        guard layers.indices.contains(destination) else { return }
+        layers.swapAt(source, destination)
+        next.holdLayers = layers
+        if saveBase(next) { selectedLayerID = id }
+    }
+
     private func hudLayerCard(_ layer: ExplorerHoldLayer?, index: Int) -> some View {
         let layerID = layer?.id
         let selected = selectedLayerID == layerID
@@ -314,6 +325,17 @@ struct AppExplorerSettingsView: View {
                         else { creatingLayer = false; editingLayer = layer }
                     }
                     Spacer(minLength: 0)
+                    let orderIndex = baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0
+                    Button { moveHUDLayer(layer.id, by: -1) } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(orderIndex == 0)
+                    .help("Move \(layer.name) left")
+                    Button { moveHUDLayer(layer.id, by: 1) } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(orderIndex + 1 >= (baseSettings.holdLayers?.count ?? 0))
+                    .help("Move \(layer.name) right")
                 }
                 .font(.caption).buttonStyle(.link).padding(.horizontal, 13).frame(height: 32)
             } else {
@@ -348,6 +370,8 @@ struct AppExplorerSettingsView: View {
                     Text("HUD layers").font(.headline)
                     Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Text("Main HUD stays first. Reorder custom layers below; two-finger swipes wrap through them from left to right.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {

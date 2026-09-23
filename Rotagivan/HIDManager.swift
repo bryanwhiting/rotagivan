@@ -261,6 +261,12 @@ final class NavigatorHIDManager: ObservableObject {
                     if fromKeyboard { releaseKeyboardHUDOwnership() }
                 }
             }
+        case .hudNavigation:
+            guard let direction = action.hudNavigation else { return }
+            let wasVisible = explorer?.isVisible == true
+            if !wasVisible { openAppExplorer() }
+            (explorer as? AppExplorerController)?.navigateHUD(direction)
+            if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
         case .openApp:
             guard let id = action.bundleID,
                   let url = ExplorerApplicationCatalog.applicationURL(for: id) else { return }

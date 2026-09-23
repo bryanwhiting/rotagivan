@@ -180,6 +180,21 @@ extension AppExplorerPresenting {
         refreshGroup()
     }
 
+    /// Move through Main HUD and the ordered custom HUD layers without closing
+    /// the panel or changing which app owns the interaction.
+    @discardableResult func navigateHUD(_ direction: HUDNavigationAction) -> Bool {
+        guard isVisible, !isEditing, !model.showingWindowManager,
+              !model.showingMediaControls, !model.showingAppWindows else { return false }
+        let available = (configuration().holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
+        let order: [UUID?] = [nil] + available.map { Optional($0.id) }
+        guard order.count > 1 else { return false }
+        let current = order.firstIndex(where: { $0 == heldKeys.activeID }) ?? 0
+        let delta = direction == .next ? 1 : -1
+        let target = order[(current + delta + order.count) % order.count]
+        switchLayer(target)
+        return true
+    }
+
     @discardableResult func switchContainer(_ tokens: [String]) -> Bool {
         guard isVisible, !isEditing, tokens.count <= 16 else { return false }
         let path = tokens.compactMap(ExplorerTilePathStep.init(token:))
@@ -284,7 +299,7 @@ extension AppExplorerPresenting {
         loadEntries()
         model.selected = nil
         input = AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount)
-        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 470, height: 520),
+        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
         panel.title = "App Explorer"
@@ -374,6 +389,10 @@ extension AppExplorerPresenting {
 
     private func performBoundAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard action.isValid, contextIsValid?() != false else { return }
+        if action.kind == .hudNavigation, let direction = action.hudNavigation {
+            _ = navigateHUD(direction)
+            return
+        }
         let dispatch = fromKeyboard ? (onKeyboardBindingAction ?? onBindingAction) : onBindingAction
         if action.kind == .hudLayer ||
            (action.kind == .command && [.appWindows, .mediaControls].contains(action.command)) {
@@ -468,6 +487,27 @@ extension AppExplorerPresenting {
         return handled
     }
 
+    private func updateCarouselContext(_ settings: AppExplorerSettings) {
+        guard !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows else {
+            model.previousLayerName = nil
+            model.nextLayerName = nil
+            model.carouselPosition = nil
+            return
+        }
+        let layers = (settings.holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
+        let order: [(id: UUID?, name: String)] = [(nil, "Main HUD")] + layers.map { (Optional($0.id), $0.name) }
+        guard order.count > 1 else {
+            model.previousLayerName = nil
+            model.nextLayerName = nil
+            model.carouselPosition = nil
+            return
+        }
+        let current = order.firstIndex(where: { $0.id == heldKeys.activeID }) ?? 0
+        model.previousLayerName = order[(current - 1 + order.count) % order.count].name
+        model.nextLayerName = order[(current + 1) % order.count].name
+        model.carouselPosition = "\(current + 1) of \(order.count)"
+    }
+
     private func loadEntries() {
         let original = configuration()
         let dictionary = hotkeyDictionary()
@@ -480,6 +520,7 @@ extension AppExplorerPresenting {
         }
         model.theme = original.resolvedTheme
         model.animationsEnabled = original.resolvedAnimationsEnabled
+        updateCarouselContext(original)
         let layer = heldKeys.activeLayer(at: layerScopePath, in: original)
         let settings = heldKeys.resolved(original)
         model.layerName = layer?.name
@@ -663,7 +704,17 @@ extension AppExplorerPresenting {
     /// Recognize assigned HUD gestures before the HUD's sector-selection gate.
     /// Unassigned strokes are replayed through the original selection path.
     private func processLocalGesture(_ report: TrackpadReport) -> Bool {
-        let gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
+        var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
+        if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
+           (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
+            let defaults: [ActionBinding] = [
+                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .hudNavigation(.next)),
+                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerRight), action: .hudNavigation(.previous))
+            ]
+            gestures += defaults.filter { fallback in
+                !gestures.contains { $0.trigger.identity == fallback.trigger.identity }
+            }
+        }
         guard !gestures.isEmpty else {
             if !localGestureReports.isEmpty { replayLocalGesture() }
             return false
@@ -1261,6 +1312,9 @@ struct ExplorerEntry {
     @Published var message: String?
     @Published var showingMediaControls = false
     @Published var layerName: String?
+    @Published var previousLayerName: String?
+    @Published var nextLayerName: String?
+    @Published var carouselPosition: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
     @Published var theme: ExplorerTheme = .starburstAir
@@ -1396,6 +1450,49 @@ struct AppExplorerView: View {
         }
         .transaction { if !animates { $0.animation = nil } }
         .help(guidance)
+        .frame(width: 640, height: 520)
+        .background { carouselBackdrop }
+        .animation(feedback, value: model.previousLayerName)
+        .animation(feedback, value: model.nextLayerName)
+    }
+
+    @ViewBuilder private var carouselBackdrop: some View {
+        ZStack {
+            if let previous = model.previousLayerName {
+                carouselGhost(previous, direction: .previous).offset(x: -205)
+            }
+            if let next = model.nextLayerName {
+                carouselGhost(next, direction: .next).offset(x: 205)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func carouselGhost(_ name: String, direction: HUDNavigationAction) -> some View {
+        ZStack {
+            if model.theme.isRadial {
+                Circle()
+                    .fill(Color.black.opacity(0.38))
+                    .overlay(Circle().stroke(Color.gray.opacity(0.72), lineWidth: 1.2))
+                    .frame(width: 330, height: 330)
+            } else {
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
+                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.gray.opacity(0.55)))
+                    .frame(width: 330, height: 430)
+            }
+            VStack(spacing: 8) {
+                Image(systemName: direction.symbol).font(.title3)
+                Text(name).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(direction == .previous ? "Swipe right" : "Swipe left").font(.caption2)
+            }
+            .foregroundStyle(Color.gray.opacity(0.9))
+        }
+        .scaleEffect(0.9)
+        .opacity(0.42)
+        .grayscale(1)
+        .shadow(color: .black.opacity(0.32), radius: 10, y: 6)
     }
 
     private var settingsFooter: some View {
@@ -1403,6 +1500,9 @@ struct AppExplorerView: View {
             Text("Press")
             footerKey("S", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")
+            if let position = model.carouselPosition {
+                Text("· \(position)").monospacedDigit()
+            }
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)

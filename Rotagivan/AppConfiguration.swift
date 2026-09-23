@@ -221,7 +221,7 @@ private indirect enum ConfigurationValue: Codable {
             case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
             case "actionBindings": allowed = "id trigger action"
             case "trigger": allowed = "keyboard gesture"
-            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath bundleID name url command media windowPlacement tap"
+            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath hudNavigation bundleID name url command media windowPlacement tap"
             case "keyboard": allowed = "keyCode modifiers keyLabel"
             case "windowPlacement": allowed = "direction layout"
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"

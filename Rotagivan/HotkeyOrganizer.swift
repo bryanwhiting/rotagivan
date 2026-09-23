@@ -15,8 +15,13 @@ struct HotkeyAudit {
         var application: String? = nil
         var kind = "Assignment"
         var gesture: AppGestureTrigger? = nil
+        // Output records participate in conflict analysis but fold into their
+        // owning assignment for presentation and shortcut searches.
+        var parentAssignmentID: String? = nil
+        var outputShortcuts: [RecordedShortcut] = []
+        var searchableShortcuts: [RecordedShortcut] { ([shortcut].compactMap { $0 }) + outputShortcuts }
         var searchText: String {
-            "\(kind) \(scope) \(trigger) \(action) \(shortcut?.readableCombination ?? "") \(precedence)"
+            "\(kind) \(scope) \(trigger) \(action) \(searchableShortcuts.map(\.readableCombination).joined(separator: " ")) \(precedence)"
         }
     }
     enum Kind: String, CaseIterable { case conflict = "Conflicts", override = "App overrides", reuse = "Reused outputs", caution = "Potential overlaps" }
@@ -28,6 +33,14 @@ struct HotkeyAudit {
     }
     var assignments: [Assignment] = []
     var findings: [Finding] = []
+    var displayAssignments: [Assignment] {
+        let outputs = Dictionary(grouping: assignments.filter { $0.parentAssignmentID != nil }, by: { $0.parentAssignmentID! })
+        return assignments.filter { $0.parentAssignmentID == nil }.map { original in
+            var row = original
+            row.outputShortcuts = (outputs[row.id] ?? []).compactMap(\.shortcut)
+            return row
+        }
+    }
 
     init(settings: StoredSettings, shortcuts: ShortcutConfiguration, layerID: UInt32, device: GestureDevice) {
         let dictionary = settings.resolvedHotkeyDictionary
@@ -101,12 +114,18 @@ struct HotkeyAudit {
             assignments.append(Assignment(id: "dictionary.hotkey.\(entry.id)", scope: "Global keyboard hotkeys",
                 trigger: shortcut.readableCombination, action: "Run \(entry.name): \(entry.summary)", shortcut: shortcut,
                 enabled: settings.enabled, precedence: "Registered globally by Rotagivan", inputScope: "", kind: "Hotkey"))
+            for (index, step) in entry.resolvedSequence.enumerated() {
+                guard let output = step.shortcut else { continue }
+                assignments.append(Assignment(id: "dictionary.hotkey.\(entry.id).step.\(index)", scope: "Global keyboard hotkeys",
+                    trigger: shortcut.readableCombination, action: output.readableCombination, shortcut: output,
+                    enabled: settings.enabled, kind: "Output", parentAssignmentID: "dictionary.hotkey.\(entry.id)"))
+            }
         }
         let activations: [(UInt32, ProfileShortcut)] = [(1, shortcuts.normal), (2, shortcuts.precision)] + shortcuts.additional.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         for (id, key) in activations where settings.availableLayerIDs.contains(id) && id != settings.resolvedDefaultProfileID {
             let shortcut = recorded(key)
-            assignments.append(Assignment(id: "activation.\(id)", scope: "Global keyboard hotkeys", trigger: "Activate \(name(id))",
-                action: dictionary.title(for: shortcut), shortcut: shortcut, enabled: settings.enabled && key.enabled, inputScope: ""))
+            assignments.append(Assignment(id: "activation.\(id)", scope: "Global keyboard hotkeys", trigger: shortcut.readableCombination,
+                action: "Activate \(name(id))", shortcut: shortcut, enabled: settings.enabled && key.enabled, inputScope: ""))
         }
         let own = shortcuts.profileActions[layerID]?.count == 3 ? shortcuts.profileActions[layerID]! : shortcuts.actions
         let primary = shortcuts.profileActions[settings.resolvedDefaultProfileID]?.count == 3 ? shortcuts.profileActions[settings.resolvedDefaultProfileID]! : shortcuts.actions
@@ -116,15 +135,15 @@ struct HotkeyAudit {
             if index == 2 { effective = shortcuts.resolvedDragShortcut(defaultID: settings.resolvedDefaultProfileID) }
             else { effective = inherit && primary.indices.contains(index) ? primary[index] : key }
             let shortcut = recorded(effective)
-            assignments.append(Assignment(id: "mouse.\(index)", scope: "Global keyboard hotkeys", trigger: ["Single click", "Double click", "Hold to drag"][index],
-                action: dictionary.title(for: shortcut), shortcut: shortcut, enabled: settings.enabled && effective.enabled, inputScope: ""))
+            assignments.append(Assignment(id: "mouse.\(index)", scope: "Global keyboard hotkeys", trigger: shortcut.readableCombination,
+                action: ["Single click", "Double click", "Hold to drag"][index], shortcut: shortcut, enabled: settings.enabled && effective.enabled, inputScope: ""))
         }
         let explorer = settings.appExplorer ?? AppExplorerSettings()
         func bindings(_ values: [ActionBinding], path: String, global: Bool, active: Bool) {
             for binding in values {
                 let key = binding.trigger.keyboard
                 assignments.append(Assignment(id: path + ".binding." + binding.id.uuidString,
-                    scope: path, trigger: binding.trigger.title, action: binding.action.title,
+                    scope: path, trigger: binding.trigger.title, action: dictionary.title(for: binding.action),
                     shortcut: key, enabled: active && (binding.trigger.gesture == nil || deviceEnabled),
                     precedence: global ? "Global binding; app gesture rules take precedence" : "Runs while this HUD layer is visible; assigned gestures take precedence over HUD navigation",
                     inputScope: global ? "" : path, kind: binding.trigger.gesture == nil ? "Hotkey" : "Tap or gesture",
@@ -132,7 +151,8 @@ struct HotkeyAudit {
                 if let output = binding.action.shortcut {
                     assignments.append(Assignment(id: path + ".binding.output." + binding.id.uuidString,
                         scope: path, trigger: binding.trigger.title, action: output.readableCombination,
-                        shortcut: output, enabled: active, kind: "Output", gesture: binding.trigger.gesture))
+                        shortcut: output, enabled: active, kind: "Output", gesture: binding.trigger.gesture,
+                        parentAssignmentID: path + ".binding." + binding.id.uuidString))
                 }
                 if let id = binding.action.macroID, let macro = dictionary.first(where: { $0.id == id }) {
                     for (index, step) in macro.resolvedSequence.enumerated() {
@@ -140,7 +160,8 @@ struct HotkeyAudit {
                         assignments.append(Assignment(id: path + ".binding." + binding.id.uuidString + ".step.\(index)",
                             scope: path, trigger: binding.trigger.title + " · " + macro.name,
                             action: output.readableCombination, shortcut: output,
-                            enabled: active && (binding.trigger.gesture == nil || deviceEnabled), kind: "Output"))
+                            enabled: active && (binding.trigger.gesture == nil || deviceEnabled), kind: "Output",
+                            parentAssignmentID: path + ".binding." + binding.id.uuidString))
                     }
                 }
                 if let id = binding.action.macroID, !dictionary.contains(where: { $0.id == id }) {
@@ -151,10 +172,8 @@ struct HotkeyAudit {
                     findings.append(Finding(id: binding.id.uuidString + ".missing", kind: .caution,
                         title: "Missing HUD layer", detail: path + " / " + binding.trigger.title))
                 }
-                if let tokens = binding.action.hudPath {
-                    let steps = tokens.compactMap(ExplorerTilePathStep.init(token:))
-                    var held = ExplorerScopedHeldKeys()
-                    if steps.count != tokens.count || held.selectContainer(steps, settings: explorer) == nil {
+                if binding.action.hudPath != nil {
+                    if !explorer.containsHUDActionTarget(binding.action) {
                         findings.append(Finding(id: binding.id.uuidString + ".missingPath", kind: .caution,
                             title: "Missing HUD layer", detail: path + " / " + binding.trigger.title))
                     }
@@ -165,8 +184,8 @@ struct HotkeyAudit {
         bindings(explorer.actionBindings ?? [], path: "HUD", global: false, active: settings.enabled)
         for layer in explorer.holdLayers ?? [] {
             if let key = layer.launchShortcut {
-                assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: "Global keyboard hotkeys", trigger: "Open HUD layer: \(layer.name)",
-                    action: dictionary.title(for: key), shortcut: key, enabled: settings.enabled,
+                assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: "Global keyboard hotkeys", trigger: key.readableCombination,
+                    action: "Open HUD layer: \(layer.name)", shortcut: key, enabled: settings.enabled,
                     precedence: "Global HUD launcher", inputScope: ""))
             }
         }
@@ -174,8 +193,8 @@ struct HotkeyAudit {
             for layer in values {
                 bindings(layer.actionBindings ?? [], path: path + " / " + layer.name, global: false, active: active)
                 if let key = layer.holdShortcut {
-                    assignments.append(Assignment(id: path + ".key." + layer.id.uuidString, scope: path, trigger: "HUD layer: \(layer.name)",
-                        action: dictionary.title(for: key), shortcut: key, enabled: active, inputScope: path))
+                    assignments.append(Assignment(id: path + ".key." + layer.id.uuidString, scope: path, trigger: key.readableCombination,
+                        action: "Open HUD layer: \(layer.name)", shortcut: key, enabled: active, inputScope: path))
                 }
                 tiles(layer.favorites, path: path + " / " + layer.name, depth: depth + 1, count: layer.slotCount ?? 8, active: active)
             }
@@ -208,17 +227,28 @@ struct HotkeyAudit {
             tiles(window.favorites ?? [], path: "Window Manager", depth: 0, count: window.slotCount ?? 8, active: settings.enabled)
             layers(window.layers, path: "Window Manager", depth: 0, active: settings.enabled)
             for binding in window.shortcuts {
-                assignments.append(Assignment(id: "window.command.\(binding.command.rawValue)", scope: "Window Manager", trigger: binding.command.title,
-                    action: dictionary.title(for: binding.shortcut), shortcut: binding.shortcut, enabled: settings.enabled, inputScope: "Window Manager"))
+                assignments.append(Assignment(id: "window.command.\(binding.command.rawValue)", scope: "Window Manager", trigger: binding.shortcut.readableCombination,
+                    action: binding.command.title, shortcut: binding.shortcut, enabled: settings.enabled, inputScope: "Window Manager"))
             }
         }
         for row in assignments {
+            if let target = row.shortcut?.assignedAction, target.kind == .hudLayer,
+               !explorer.containsHUDActionTarget(target) {
+                findings.append(Finding(id: row.id + ".missingTarget", kind: .caution,
+                    title: "Missing HUD layer", detail: row.scope + " / " + row.trigger))
+            }
+            if let output = row.shortcut?.assignedAction?.shortcut {
+                assignments.append(Assignment(id: row.id + ".output", scope: row.scope, trigger: row.trigger,
+                    action: output.readableCombination, shortcut: output, enabled: row.enabled,
+                    kind: "Output", parentAssignmentID: row.id))
+            }
             if let id = row.shortcut?.macroID ?? row.shortcut?.assignedAction?.macroID {
                 if let macro = dictionary.first(where: { $0.id == id }) {
                     for (index, action) in macro.resolvedSequence.enumerated() {
                         guard let step = action.shortcut else { continue }
                         assignments.append(Assignment(id: row.id + ".step.\(index)", scope: row.scope, trigger: "\(row.trigger) · \(macro.name) step \(index + 1)",
-                            action: step.readableCombination, shortcut: step, enabled: row.enabled, precedence: row.precedence))
+                            action: step.readableCombination, shortcut: step, enabled: row.enabled, precedence: row.precedence,
+                            kind: "Output", parentAssignmentID: row.id))
                     }
                 } else {
                     findings.append(Finding(id: row.id + ".missing", kind: .caution, title: "Missing macro", detail: "\(row.scope) / \(row.trigger): reassign this action; its macro was removed."))

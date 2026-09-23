@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor private final class LayerActionUIState: ObservableObject {
     @Published var gestures: ProfileGestures
+    @Published var globalBindings: [ActionBinding] = []
 
     init() {
         var value = ProfileGestures(
@@ -26,7 +27,12 @@ private struct LayerActionUIFixture: View {
     let macro: NamedHotkey
 
     var body: some View {
-        LayerActionAssignmentsEditor(gestures: $state.gestures)
+        LayerActionAssignmentsEditor(gestures: $state.gestures,
+            globalBindings: $state.globalBindings, resolveGestures: { base in
+                var settings = StoredSettings()
+                settings.actionBindings = state.globalBindings
+                return settings.applyingActionBindings(to: base)
+            })
             .environment(\.hudActionLayers, [layer])
             .environment(\.hotkeyDictionary, [macro])
             .padding(20)
@@ -92,6 +98,37 @@ private struct LayerActionUIFixture: View {
         precondition(menus(in: addHost).count >= 3, "The add sheet needs separate tap, optional swipe, and action controls")
         addPanel.orderOut(nil)
         addPanel.close()
-        print("Layer action UI passed: compact key-value rows, one action menu per row, and three-step tap / optional swipe / action sheet.")
+
+        state.gestures.gestures.tapToClick = false
+        let disabledBase = state.gestures
+        let globalTap = ActionBinding(trigger: BindingTrigger(gesture: .oneFingerTap), action: .tap(.rightClick))
+        let globalSwipe = ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .tap(.windowManager))
+        state.globalBindings = [globalTap, globalSwipe]
+        let ownerEditor = LayerActionAssignmentsEditor(
+            gestures: Binding(get: { state.gestures }, set: { state.gestures = $0 }),
+            globalBindings: Binding(get: { state.globalBindings }, set: { state.globalBindings = $0 }),
+            resolveGestures: { base in
+                var settings = StoredSettings()
+                settings.actionBindings = state.globalBindings
+                return settings.applyingActionBindings(to: base)
+            })
+        let globalHost = NSHostingView(rootView: LayerActionUIFixture(state: state, layer: layer, macro: macro))
+        let globalPanel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 650, height: 500),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        globalPanel.isReleasedWhenClosed = false
+        globalPanel.contentView = globalHost
+        globalPanel.orderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        try snapshot(globalHost, "layer-action-global-overrides")
+        var changed = globalTap
+        changed.action = .tap(.doubleLeftClick)
+        ownerEditor.saveGlobalDraft(changed)
+        precondition(state.globalBindings.first?.action == changed.action && state.gestures == disabledBase,
+            "Editing a global row must not rewrite disabled profile taps")
+        ownerEditor.removeGlobalBinding(id: globalSwipe.id)
+        precondition(state.globalBindings.count == 1 && state.gestures == disabledBase,
+            "Removing a global swipe must reveal the underlying layer without changing it")
+        globalPanel.orderOut(nil); globalPanel.close()
+        print("Layer action UI passed: compact rows, shared catalog, disabled-base global rows, and owner-only edit/remove.")
     }
 }

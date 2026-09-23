@@ -2,11 +2,30 @@ import SwiftUI
 
 struct LayerActionAssignmentsEditor: View {
     @Binding var gestures: ProfileGestures
+    @Binding var globalBindings: [ActionBinding]
+    var resolveGestures: (ProfileGestures) -> ProfileGestures
     @State private var showingAddAction = false
+    @State private var editingGlobalBinding: ActionBinding?
+
+    init(gestures: Binding<ProfileGestures>, globalBindings: Binding<[ActionBinding]> = .constant([]),
+         resolveGestures: @escaping (ProfileGestures) -> ProfileGestures = { $0 }) {
+        _gestures = gestures
+        _globalBindings = globalBindings
+        self.resolveGestures = resolveGestures
+    }
+
+    private var effectiveGestures: ProfileGestures {
+        resolveGestures(gestures)
+    }
+
+    private func globalBinding(for trigger: AppGestureTrigger) -> ActionBinding? {
+        globalBindings.first { $0.trigger.gesture == trigger }
+    }
 
     private var assignments: [AppGestureBinding] {
-        AppGestureTrigger.layerActionTriggers.compactMap { trigger in
-            let assignment = trigger.assignment(in: gestures).binding
+        (AppGestureTrigger.layerActionTriggers +
+            [AppGestureTrigger.twoFingerLeft, .twoFingerRight].filter { globalBinding(for: $0) != nil }).compactMap { trigger in
+            let assignment = trigger.assignment(in: effectiveGestures).binding
             return assignment.action == .none ? nil : assignment
         }
     }
@@ -48,6 +67,8 @@ struct LayerActionAssignmentsEditor: View {
                             trigger: assignment.trigger,
                             action: actionBinding(for: assignment.trigger),
                             shortcut: shortcutBinding(for: assignment.trigger),
+                            globalBinding: globalBinding(for: assignment.trigger),
+                            onEditGlobal: { if let binding = globalBinding(for: assignment.trigger) { editingGlobalBinding = binding } },
                             onRemove: { remove(assignment.trigger) }
                         )
                         if index < assignments.count - 1 {
@@ -61,6 +82,10 @@ struct LayerActionAssignmentsEditor: View {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
+            if assignments.contains(where: { globalBinding(for: $0.trigger) != nil }) {
+                Text("Global assignments stay active across layers and devices, even when this layer’s tap actions are off. Edit them here or in Hotkeys.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
 
             Label("Gesture timing, movement thresholds, and swipe recognition are in Calibration.",
                   systemImage: "dial.low")
@@ -70,6 +95,14 @@ struct LayerActionAssignmentsEditor: View {
         }
         .sheet(isPresented: $showingAddAction) {
             AddLayerActionSheet(existing: Set(assignments.map(\.trigger))) { trigger, action, shortcut in
+                if let existing = globalBinding(for: trigger) {
+                    var updated = existing
+                    updated.action = action == .shortcut && shortcut != nil
+                        ? .from(shortcut: shortcut!) : .tap(action)
+                    saveGlobalDraft(updated)
+                    showingAddAction = false
+                    return
+                }
                 var updated = gestures
                 _ = updated.setLayerAction(action, shortcut: shortcut, for: trigger)
                 gestures = updated
@@ -78,11 +111,18 @@ struct LayerActionAssignmentsEditor: View {
                 showingAddAction = false
             }
         }
+        .sheet(item: $editingGlobalBinding) { candidate in
+            BindingEditor(binding: candidate, existing: globalBindings, global: true,
+                title: "Global tap or swipe action", onSave: { updated in
+                    saveGlobalDraft(updated)
+                    editingGlobalBinding = nil
+                }, onCancel: { editingGlobalBinding = nil })
+        }
     }
 
     private func actionBinding(for trigger: AppGestureTrigger) -> Binding<TapAction> {
         Binding(get: {
-            trigger.assignment(in: gestures).binding.action
+            trigger.assignment(in: effectiveGestures).binding.action
         }, set: { action in
             let current = trigger.assignment(in: gestures).binding
             var updated = gestures
@@ -93,7 +133,7 @@ struct LayerActionAssignmentsEditor: View {
 
     private func shortcutBinding(for trigger: AppGestureTrigger) -> Binding<RecordedShortcut?> {
         Binding(get: {
-            trigger.assignment(in: gestures).binding.shortcut
+            trigger.assignment(in: effectiveGestures).binding.shortcut
         }, set: { shortcut in
             var updated = gestures
             _ = updated.setLayerAction(shortcut == nil ? .none : .shortcut, shortcut: shortcut, for: trigger)
@@ -102,16 +142,33 @@ struct LayerActionAssignmentsEditor: View {
     }
 
     private func remove(_ trigger: AppGestureTrigger) {
+        if let global = globalBinding(for: trigger) {
+            removeGlobalBinding(id: global.id)
+            return
+        }
         var updated = gestures
         _ = updated.setLayerAction(.none, shortcut: nil, for: trigger)
         gestures = updated
     }
+
+    /// Uses the same owner-writing path as the global row's editor.
+    func saveGlobalDraft(_ updated: ActionBinding) {
+        guard let index = globalBindings.firstIndex(where: { $0.id == updated.id }) else { return }
+        globalBindings[index] = updated
+    }
+
+    func removeGlobalBinding(id: UUID) {
+        globalBindings.removeAll { $0.id == id }
+    }
 }
 
 private struct LayerActionAssignmentRow: View {
+    @Environment(\.hotkeyDictionary) private var dictionary
     let trigger: AppGestureTrigger
     @Binding var action: TapAction
     @Binding var shortcut: RecordedShortcut?
+    let globalBinding: ActionBinding?
+    let onEditGlobal: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
@@ -135,12 +192,20 @@ private struct LayerActionAssignmentRow: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
 
-            UnifiedLayerActionPicker(
-                action: $action,
-                shortcut: $shortcut,
-                shortcutsOnly: trigger.direction != nil
-            )
-            .frame(width: 190)
+            if let globalBinding {
+                HStack(spacing: 5) {
+                    Text(dictionary.title(for: globalBinding.action)).lineLimit(1)
+                    Text("Global").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Button("Edit", action: onEditGlobal).controlSize(.small)
+                }.frame(width: 190, alignment: .leading)
+            } else {
+                UnifiedLayerActionPicker(
+                    action: $action,
+                    shortcut: $shortcut,
+                    shortcutsOnly: trigger.direction != nil
+                )
+                .frame(width: 190)
+            }
 
             Button(action: onRemove) {
                 Image(systemName: "trash")
@@ -148,7 +213,8 @@ private struct LayerActionAssignmentRow: View {
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
-            .help("Remove \(trigger.title)")
+            .help(globalBinding == nil ? "Remove \(trigger.title)" :
+                "Remove global assignment and reveal this layer’s action")
             .accessibilityLabel("Remove \(trigger.title)")
         }
         .font(.system(size: 12))
@@ -342,9 +408,9 @@ struct AddLayerActionSheet: View {
                     .frame(width: 220)
                     .disabled(!canSwipe)
                     .onChange(of: direction) { _, value in
-                        guard value != nil, action != .shortcut, action != .appExplorer else { return }
-                        action = .none
-                        shortcut = nil
+                        guard value != nil, action != .none, action != .shortcut, action != .appExplorer else { return }
+                        shortcut = .assigned(.tap(action))
+                        action = .shortcut
                     }
                 }
                 Divider().padding(.leading, 42)
@@ -420,8 +486,13 @@ private struct UnifiedLayerActionPicker: View {
             return .tap(action)
         }, set: { selected in
             if selected.kind == .tap {
-                action = selected.tap ?? .none
-                shortcut = nil
+                if shortcutsOnly, selected.tap != TapAction.none {
+                    action = .shortcut
+                    shortcut = .assigned(selected)
+                } else {
+                    action = selected.tap ?? .none
+                    shortcut = nil
+                }
             } else {
                 action = .shortcut
                 shortcut = selected.kind == .keystroke ? selected.shortcut : .assigned(selected)
@@ -430,7 +501,7 @@ private struct UnifiedLayerActionPicker: View {
     }
 
     var body: some View {
-        BindingActionPicker(action: value, allowPointerActions: !shortcutsOnly)
+        BindingActionPicker(action: value)
             .accessibilityIdentifier("layer-action-value-menu")
     }
 }

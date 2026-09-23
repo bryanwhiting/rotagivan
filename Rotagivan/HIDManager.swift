@@ -26,6 +26,7 @@ final class NavigatorHIDManager: ObservableObject {
     private let explorerPointer: any ExplorerPointerControlling
     private var inputRouting = TrackpadInputRouting()
     private var explorerSource: TrackpadInputSource?
+    var explorerInputSource: TrackpadInputSource? { explorerSource }
     private var calibrationSource: TrackpadInputSource?
     private var navigatorDistanceScale: TrackpadDistanceScale?
     private var appleDistanceScale: TrackpadDistanceScale?
@@ -156,6 +157,9 @@ final class NavigatorHIDManager: ObservableObject {
             self.gestures.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
             self.appleGestures.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
             (explorer as? AppExplorerController)?.onBindingAction = { [weak self] action in self?.executeBindingAction(action) }
+            (explorer as? AppExplorerController)?.onKeyboardBindingAction = { [weak self] action in
+                self?.executeBindingAction(action, fromKeyboard: true)
+            }
             explorer.onDismiss = { [weak self] in
                 guard let self else { return }
                 self.gestures.reset()
@@ -216,7 +220,7 @@ final class NavigatorHIDManager: ObservableObject {
     /// Shared executor for keyboard and trackpad bindings, including actions
     /// assigned inside the HUD. A single path keeps action references from
     /// accidentally being posted as physical keystrokes.
-    func executeBindingAction(_ action: BindingAction) {
+    func executeBindingAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard store.settings.enabled, action.isValid, !calibrationCapturing else { return }
         switch action.kind {
         case .keystroke:
@@ -227,18 +231,35 @@ final class NavigatorHIDManager: ObservableObject {
                   let macro = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == id }) else { return }
             EventPoster().performMacro(macro)
         case .hudLayer:
-            if let tokens = action.hudPath {
+            if let ownerTokens = action.windowOwnerPath, let targetTokens = action.hudPath {
+                let owner = ownerTokens.compactMap(ExplorerTilePathStep.init(token:))
+                let targetPath = targetTokens.compactMap(ExplorerTilePathStep.init(token:))
+                guard owner.count == ownerTokens.count, targetPath.count == targetTokens.count,
+                      let window = store.settings.appExplorer?.windowActionSettings(ownerPath: owner) else { return }
+                var target = ExplorerScopedHeldKeys()
+                guard target.selectContainer(targetPath, settings: window) != nil else { return }
+                let wasVisible = explorer?.isVisible == true
+                if !wasVisible { openAppExplorer() }
+                _ = (explorer as? AppExplorerController)?.switchWindowContainer(
+                    ownerTokens: ownerTokens, targetTokens: targetTokens)
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
+            } else if let tokens = action.hudPath {
                 let path = tokens.compactMap(ExplorerTilePathStep.init(token:))
                 guard path.count == tokens.count else { return }
                 var target = ExplorerScopedHeldKeys()
                 guard target.selectContainer(path, settings: store.settings.appExplorer ?? AppExplorerSettings()) != nil else { return }
-                if explorer?.isVisible != true { openAppExplorer() }
+                let wasVisible = explorer?.isVisible == true
+                if !wasVisible { openAppExplorer() }
                 _ = (explorer as? AppExplorerController)?.switchContainer(tokens)
-            } else if let id = action.hudLayerID { openHUDLayer(id, fromKeyboard: true) }
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
+            } else if let id = action.hudLayerID { openHUDLayer(id, fromKeyboard: fromKeyboard) }
             else {
                 if explorer?.isVisible == true, let controller = explorer as? AppExplorerController {
                     controller.switchLayer(nil)
-                } else { openAppExplorer() }
+                } else {
+                    openAppExplorer()
+                    if fromKeyboard { releaseKeyboardHUDOwnership() }
+                }
             }
         case .openApp:
             guard let id = action.bundleID,
@@ -255,9 +276,12 @@ final class NavigatorHIDManager: ObservableObject {
             case .windowManager:
                 if explorer?.isVisible == true { explorer?.dismiss() }
                 openAppExplorer(windowManager: true)
+                if fromKeyboard { releaseKeyboardHUDOwnership() }
             case .appWindows, .mediaControls:
-                if explorer?.isVisible != true { openAppExplorer() }
+                let wasVisible = explorer?.isVisible == true
+                if !wasVisible { openAppExplorer() }
                 (explorer as? AppExplorerController)?.showBuiltIn(command)
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
             default:
                 if let shortcut = command.macOSShortcut { EventPoster().performTap(.shortcut, shortcut: shortcut) }
                 else if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
@@ -273,11 +297,38 @@ final class NavigatorHIDManager: ObservableObject {
         case .tap:
             guard let tap = action.tap else { return }
             switch tap {
-            case .appExplorer: openAppExplorer()
-            case .windowManager: openAppExplorer(windowManager: true)
+            case .appExplorer:
+                let wasVisible = explorer?.isVisible == true
+                openAppExplorer()
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
+            case .windowManager:
+                let wasVisible = explorer?.isVisible == true
+                openAppExplorer(windowManager: true)
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
             default: EventPoster().performTap(tap)
             }
         }
+    }
+
+    /// Carbon receives registered global keys before the nonactivating HUD panel.
+    /// Route those physical events through the visible HUD's local scope first.
+    func processVisibleHUDHotkey(keyCode: UInt16, modifiers: UInt64, down: Bool) -> Bool {
+        guard store.settings.enabled, let controller = explorer as? AppExplorerController,
+              controller.isVisible, !controller.isEditing,
+              let event = NSEvent.keyEvent(with: down ? .keyDown : .keyUp, location: .zero,
+                  modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(modifiers)),
+                  timestamp: 0, windowNumber: 0, context: nil, characters: "",
+                  charactersIgnoringModifiers: "", isARepeat: false, keyCode: keyCode) else { return false }
+        return controller.processLayerKey(event)
+    }
+
+    private func releaseKeyboardHUDOwnership() {
+        guard explorer?.isVisible == true else { return }
+        // A keyboard launch has no current contact owner. The next touching
+        // trackpad chooses its own calibration and pointer-lock source.
+        explorerSource = nil
+        explorerSettings = explorerGestureSettings
+        updateExplorerPointer()
     }
 
     private func openAppExplorer(windowManager: Bool = false, layerID: UUID? = nil) {

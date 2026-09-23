@@ -13,9 +13,9 @@ struct HotkeyOrganizerView: View {
     @State private var device: GestureDevice = .navigator
     @State private var showInactive = false
     @State private var editing: NamedHotkey?
-    @State private var editingRequiresHotkey = false
     @State private var deleting: NamedHotkey?
     @State private var editingBinding: ActionBinding?
+    @State private var migratingNamedHotkeyID: String?
     @State private var expandedAssignment: String?
 
     private var selectedLayer: UInt32 { store.profiles.contains { $0.id == layer } ? layer : store.defaultProfileID }
@@ -31,10 +31,16 @@ struct HotkeyOrganizerView: View {
     private var audit: HotkeyAudit {
         HotkeyAudit(settings: store.settings, shortcuts: ShortcutConfiguration(keys), layerID: selectedLayer, device: device)
     }
+    private var reservedGlobalKeys: [RecordedShortcut] {
+        audit.assignments.filter {
+            $0.enabled && $0.inputScope == "" && !$0.id.hasPrefix("Global bindings.binding.") &&
+            $0.id != migratingNamedHotkeyID.map { "dictionary.hotkey." + $0 }
+        }.compactMap(\.shortcut).filter(\.isPhysicalShortcut)
+    }
     private func textMatches(_ value: String) -> Bool { search.isEmpty || value.localizedCaseInsensitiveContains(search) }
     private func assignmentMatches(_ row: HotkeyAudit.Assignment) -> Bool {
         textMatches(row.searchText) &&
-        (searchShortcut == nil || row.shortcut?.identity == searchShortcut?.identity) &&
+        (searchShortcut == nil || row.searchableShortcuts.contains { $0.identity == searchShortcut?.identity }) &&
         (tapFilter == nil || row.gesture == tapFilter || row.trigger == tapFilter?.title)
     }
     private func dictionaryMatches(_ entry: NamedHotkey) -> Bool {
@@ -77,34 +83,45 @@ struct HotkeyOrganizerView: View {
         .font(.system(size: 12))
         .sheet(item: $editingBinding) { binding in
             BindingEditor(binding: binding, existing: store.settings.actionBindings ?? [], global: true,
+                reservedKeys: reservedGlobalKeys,
                 occupiedGestures: occupiedGestures,
                 title: "Global assignment", onSave: { updated in
                     var bindings = store.settings.actionBindings ?? []
                     if let index = bindings.firstIndex(where: { $0.id == updated.id }) { bindings[index] = updated }
                     else { bindings.append(updated) }
                     guard bindings.isValidBindings(global: true) else { return }
-                    store.settings.actionBindings = bindings
+                    var settings = store.settings
+                    if let id = migratingNamedHotkeyID,
+                       let index = settings.hotkeyDictionary?.firstIndex(where: { $0.id == id }) {
+                        settings.hotkeyDictionary?[index].activationShortcut = nil
+                    }
+                    settings.actionBindings = bindings
+                    store.settings = settings
+                    migratingNamedHotkeyID = nil
                     editingBinding = nil
-                }, onCancel: { editingBinding = nil })
+                }, onCancel: { editingBinding = nil; migratingNamedHotkeyID = nil })
         }
         .sheet(item: $editing) { value in
             NamedHotkeyEditor(entry: value, existing: store.settings.resolvedHotkeyDictionary,
-                requiresGlobalHotkey: editingRequiresHotkey, onAssignGesture: { entry in
+                onAssignTrigger: { entry in
                     var next = store.settings.resolvedHotkeyDictionary.filter { $0.id != entry.id }
                     next.append(entry)
                     guard next.isValidDictionary else { return }
                     store.settings.hotkeyDictionary = next
-                    editing = nil; editingRequiresHotkey = false
+                    editing = nil
+                    let configurationID = store.activeConfigurationID
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        editingBinding = ActionBinding(trigger: BindingTrigger(), action: .macro(entry))
+                        guard store.activeConfigurationID == configurationID else { return }
+                        migratingNamedHotkeyID = entry.activationShortcut == nil ? nil : entry.id
+                        editingBinding = ActionBinding(trigger: BindingTrigger(keyboard: entry.activationShortcut), action: .macro(entry))
                     }
                 }, onSave: { entry in
                     var next = store.settings.resolvedHotkeyDictionary.filter { $0.id != entry.id }
                     next.append(entry)
                     guard next.isValidDictionary else { return }
                     store.settings.hotkeyDictionary = next
-                    editing = nil; editingRequiresHotkey = false
-                }, onCancel: { editing = nil; editingRequiresHotkey = false })
+                    editing = nil
+                }, onCancel: { editing = nil })
         }
         .alert("Remove saved action?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Remove", role: .destructive) {
@@ -114,7 +131,7 @@ struct HotkeyOrganizerView: View {
             Button("Cancel", role: .cancel) { deleting = nil }
         } message: { Text("Its global hotkey will stop working. Tap, swipe and HUD references to this action will also become inactive until reassigned.") }
         .onReceive(store.$activeConfigurationID.dropFirst()) { _ in
-            editing = nil; editingBinding = nil; deleting = nil; layer = 0; clearSearch()
+            editing = nil; editingBinding = nil; migratingNamedHotkeyID = nil; deleting = nil; layer = 0; clearSearch()
         }
     }
 
@@ -141,7 +158,6 @@ struct HotkeyOrganizerView: View {
     }
 
     private func beginNewAction() {
-        editingRequiresHotkey = false
         editing = NamedHotkey(name: "", shortcut: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17"))
     }
 
@@ -152,10 +168,8 @@ struct HotkeyOrganizerView: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url,
               let app = ExplorerApplicationCatalog.application(at: url) else { return }
-        editingRequiresHotkey = true
-        editing = NamedHotkey(name: "Open \(app.name)",
-            shortcut: RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17"),
-            sequence: [.app(bundleID: app.bundleID, name: app.name)])
+        migratingNamedHotkeyID = nil
+        editingBinding = ActionBinding(trigger: BindingTrigger(), action: .openApp(bundleID: app.bundleID, name: app.name))
     }
 
     private var dictionary: some View {
@@ -192,11 +206,11 @@ struct HotkeyOrganizerView: View {
                     }
                     Spacer()
                     Text(entry.summary).monospaced().foregroundStyle(.secondary).lineLimit(2)
-                    Button("Edit") { editingRequiresHotkey = false; editing = entry }
+                    Button("Edit") { editing = entry }
                     Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove saved action")
                 }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
-            let taps = audit.assignments.filter { $0.kind == "Tap or gesture" && $0.enabled && assignmentMatches($0) }
+            let taps = audit.displayAssignments.filter { $0.kind == "Tap or gesture" && $0.enabled && assignmentMatches($0) }
             if !taps.isEmpty {
                 Divider().padding(.vertical, 2)
                 Text("Tap and gesture assignments · \(taps.count)").font(.headline)
@@ -237,10 +251,10 @@ struct HotkeyOrganizerView: View {
             HStack {
                 Toggle("Show inactive or unassigned actions", isOn: $showInactive)
                 Spacer()
-                Text("\(audit.assignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }.count) matches")
+                Text("\(audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }.count) matches")
                     .foregroundStyle(.secondary)
             }
-            let rows = audit.assignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }
+            let rows = audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }
             ForEach(Array(Set(rows.map(\.scope))).sorted(), id: \.self) { scope in
                 Text(scope).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 5)
                 VStack(spacing: 1) {
@@ -269,6 +283,10 @@ struct HotkeyOrganizerView: View {
                 Text(row.scope + (row.precedence.isEmpty ? "" : " · " + row.precedence))
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 Text(row.action).font(.caption).textSelection(.enabled)
+                if !row.outputShortcuts.isEmpty {
+                    Text("Sends: " + row.outputShortcuts.map(\.readableCombination).joined(separator: " → "))
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
             }
         }.padding(.horizontal, 10).padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -288,14 +306,14 @@ struct HotkeyOrganizerView: View {
             Text("Keyboard shortcuts, taps, and swipes can run any action. HUD layers have their own assignments while open.")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach((store.settings.actionBindings ?? []).filter {
-                textMatches($0.trigger.title + " " + $0.action.title) &&
+                textMatches($0.trigger.title + " " + store.settings.resolvedHotkeyDictionary.title(for: $0.action)) &&
                     (tapFilter == nil || $0.trigger.gesture == tapFilter) &&
                     (searchShortcut == nil || $0.trigger.keyboard?.identity == searchShortcut?.identity)
             }) { binding in
                 HStack(spacing: 10) {
                     Text(binding.trigger.title).fontWeight(.medium).lineLimit(1).frame(width: 205, alignment: .leading)
                     Image(systemName: "arrow.right").foregroundStyle(.tertiary)
-                    Text(binding.action.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(store.settings.resolvedHotkeyDictionary.title(for: binding.action)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                     Button("Edit") { editingBinding = binding }
                     Button {
                         store.settings.actionBindings?.removeAll { $0.id == binding.id }
@@ -307,13 +325,13 @@ struct HotkeyOrganizerView: View {
     }
 
     private func keyboard(_ audit: HotkeyAudit) -> some View {
-        let visible = audit.assignments.filter { $0.enabled && assignmentMatches($0) }
+        let visible = audit.displayAssignments.filter { $0.enabled && assignmentMatches($0) }
         return VStack(alignment: .leading, spacing: 12) {
             Text("Assigned keys are highlighted. Select a key to see every modifier combination, tap output, launcher and HUD action that uses it.")
                 .font(.caption).foregroundStyle(.secondary)
             AssignmentKeyboardLayout(assignments: visible, selectedKeyCode: $selectedKeyCode)
             if let selectedKeyCode {
-                let rows = visible.filter { $0.shortcut?.isPhysicalShortcut == true && $0.shortcut?.keyCode == selectedKeyCode }
+                let rows = visible.filter { $0.searchableShortcuts.contains { $0.isPhysicalShortcut && $0.keyCode == selectedKeyCode } }
                 Text("Assignments on \(KeyboardLayoutKey.label(for: selectedKeyCode)) · \(rows.count)").font(.headline)
                 if rows.isEmpty { Text("No matching assignment on this key.").foregroundStyle(.secondary) }
                 ForEach(rows) { assignmentCard($0) }
@@ -321,7 +339,7 @@ struct HotkeyOrganizerView: View {
                 Text("Choose a highlighted key, or press a hotkey in the search control above.").foregroundStyle(.secondary)
             }
             if tapFilter != nil {
-                let nonKeyboard = visible.filter { $0.kind == "Tap or gesture" && $0.shortcut?.isPhysicalShortcut != true }
+                let nonKeyboard = visible.filter { $0.kind == "Tap or gesture" && !$0.searchableShortcuts.contains { $0.isPhysicalShortcut } }
                 ForEach(nonKeyboard) { assignmentCard($0) }
             }
         }
@@ -369,7 +387,7 @@ private struct AssignmentKeyboardLayout: View {
                 ForEach(Array(KeyboardLayoutKey.rows.enumerated()), id: \.offset) { _, row in
                     HStack(spacing: 5) {
                         ForEach(row) { key in
-                            let matches = assignments.filter { $0.shortcut?.isPhysicalShortcut == true && $0.shortcut?.keyCode == key.code }
+                            let matches = assignments.filter { $0.searchableShortcuts.contains { $0.isPhysicalShortcut && $0.keyCode == key.code } }
                             Button { selectedKeyCode = key.code } label: {
                                 ZStack(alignment: .topTrailing) {
                                     Text(key.label).font(.system(size: 10, weight: matches.isEmpty ? .regular : .semibold, design: .rounded))
@@ -392,8 +410,7 @@ private struct AssignmentKeyboardLayout: View {
 struct NamedHotkeyEditor: View {
     @State var entry: NamedHotkey
     var existing: [NamedHotkey]
-    var requiresGlobalHotkey = false
-    var onAssignGesture: ((NamedHotkey) -> Void)? = nil
+    var onAssignTrigger: ((NamedHotkey) -> Void)? = nil
     var onSave: (NamedHotkey) -> Void
     var onCancel: () -> Void
     @State private var action: TapAction = .shortcut
@@ -422,28 +439,25 @@ struct NamedHotkeyEditor: View {
             TextField("Name", text: $entry.name).textFieldStyle(.roundedBorder)
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Run from anywhere").fontWeight(.medium)
+                    Text("Triggers").fontWeight(.medium)
                     Spacer()
-                    ShortcutRecorder(title: entry.activationShortcut?.readableCombination ?? "Record global hotkey…") {
-                        entry.activationShortcut = $0
-                    }.frame(width: 220, height: 26)
-                    if entry.activationShortcut != nil {
+                    if let key = entry.activationShortcut {
+                        Text(key.readableCombination).font(.callout.monospaced())
                         Button { entry.activationShortcut = nil } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.plain).help("Remove global hotkey")
                     }
                 }
-                Text("Optional for reusable actions; required when adding an application hotkey. Letter and number keys need a modifier.")
+                Text("This saved action can be reused by any keyboard, tap or swipe trigger. Assign triggers in the shared assignment editor.")
                     .font(.caption).foregroundStyle(.secondary)
-                if let onAssignGesture {
-                    Button("Save and assign a tap or swipe…") {
+                if let onAssignTrigger {
+                    Button(entry.activationShortcut == nil ? "Save and assign trigger…" : "Save and edit trigger…") {
                         entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
                         updateSteps(entry.resolvedSequence)
-                        onAssignGesture(entry)
+                        onAssignTrigger(entry)
                     }
                     .disabled(!entry.isValid || activationConflict)
                 }
                 if activationConflict { Text("That global hotkey is already assigned to another saved action.").font(.caption).foregroundStyle(.red) }
-                else if requiresGlobalHotkey && entry.activationShortcut == nil { Text("Record a global hotkey for this application.").font(.caption).foregroundStyle(.orange) }
             }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             ScrollView {
                 VStack(spacing: 10) {
@@ -481,7 +495,7 @@ struct NamedHotkeyEditor: View {
                 Spacer()
                 Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); updateSteps(entry.resolvedSequence); onSave(entry) }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!entry.isValid || activationConflict || (requiresGlobalHotkey && entry.activationShortcut == nil))
+                    .disabled(!entry.isValid || activationConflict)
             }
         }.padding(24).frame(width: 590)
     }

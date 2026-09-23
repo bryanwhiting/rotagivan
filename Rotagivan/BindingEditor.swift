@@ -30,6 +30,11 @@ struct BindingTriggerPicker: View {
                     ForEach(AppGestureTrigger.baseTapTriggers) { gesture in
                         Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                     }
+                    Menu("Swipe") {
+                        ForEach([AppGestureTrigger.twoFingerLeft, .twoFingerRight]) { gesture in
+                            Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
+                        }
+                    }
                     Menu("Tap and swipe") {
                         ForEach(AppGestureTrigger.layerActionTriggers.filter { $0.direction != nil }) { gesture in
                             Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
@@ -68,17 +73,15 @@ struct BindingActionPicker: View {
                 }
             }
             Section("HUD layers") {
-                Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
-                ForEach(hudLayers) { layer in
-                    Button(layer.name, systemImage: "square.stack.3d.up") { action = .hudLayer(layer) }
+                if hudDestinations.isEmpty {
+                    Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
+                    ForEach(hudLayers) { layer in
+                        Button(layer.name, systemImage: "square.stack.3d.up") { action = .hudLayer(layer) }
+                    }
                 }
-                ForEach(hudDestinations.filter { container in
-                    !container.id.isEmpty && !(container.id.count == 1 && container.id.first.map {
-                        if case .layer = $0 { return true }; return false
-                    } == true)
-                }) { container in
-                    Button(container.title, systemImage: "square.stack.3d.up") {
-                        action = .hudContainer(container)
+                ForEach(hudDestinations) { destination in
+                    Button(destination.title, systemImage: "square.stack.3d.up") {
+                        action = .hudDestination(destination)
                     }
                 }
             }
@@ -87,6 +90,9 @@ struct BindingActionPicker: View {
                 Button("Open URL…", systemImage: "globe") { enteringURL = true }
             }
             Section("Mac and window commands") {
+                Button("Media Controls", systemImage: "speaker.wave.2.fill") {
+                    action = .command(.mediaControls)
+                }
                 ForEach(AppExplorerAction.macOSCommands + AppExplorerAction.windowCommands, id: \.self) { command in
                     Button(command.title, systemImage: command.symbol) { action = .command(command) }
                 }
@@ -115,7 +121,7 @@ struct BindingActionPicker: View {
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: symbol).frame(width: 16)
-                Text(action.isValid ? action.title : "Choose action…").lineLimit(1)
+                Text(action.isValid ? dictionary.title(for: action) : "Choose action…").lineLimit(1)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
@@ -125,7 +131,7 @@ struct BindingActionPicker: View {
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.11)))
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .accessibilityLabel("\(title): \(action.title)")
+        .accessibilityLabel("\(title): \(dictionary.title(for: action))")
         .popover(isPresented: $recording) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Keystroke").font(.headline)

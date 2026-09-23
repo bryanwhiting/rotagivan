@@ -3,9 +3,9 @@ import SwiftUI
 
 private struct HotkeyDictionaryKey: EnvironmentKey { static let defaultValue: [NamedHotkey] = [] }
 private struct HUDActionLayersKey: EnvironmentKey { static let defaultValue: [ExplorerHoldLayer] = [] }
-private struct HUDActionDestinationsKey: EnvironmentKey { static let defaultValue: [ExplorerTileContainer] = [] }
+private struct HUDActionDestinationsKey: EnvironmentKey { static let defaultValue: [HUDActionDestination] = [] }
 extension EnvironmentValues {
-    var hudActionDestinations: [ExplorerTileContainer] {
+    var hudActionDestinations: [HUDActionDestination] {
         get { self[HUDActionDestinationsKey.self] }
         set { self[HUDActionDestinationsKey.self] = newValue }
     }
@@ -119,17 +119,15 @@ struct TapActionEditor: View {
                         showManual = true
                     }
                     Divider()
-                    if !shortcutsOnly && !keyboardOnly {
-                        Button("Left click") { action = .leftClick }
-                        Button("Double left click") { action = .doubleLeftClick }
-                        Button("Triple left click") { action = .tripleLeftClick }
-                        Button("Right click") { action = .rightClick }
+                    if !keyboardOnly {
+                        Button("Left click") { choose(.leftClick) }
+                        Button("Double left click") { choose(.doubleLeftClick) }
+                        Button("Triple left click") { choose(.tripleLeftClick) }
+                        Button("Right click") { choose(.rightClick) }
                     }
                     if !keyboardOnly {
-                    Button("App Explorer") { action = .appExplorer; shortcut = nil }
-                    if !shortcutsOnly {
-                        Button("Window Manager") { action = .windowManager; shortcut = nil }
-                    }
+                    Button("App Explorer") { choose(.appExplorer) }
+                    Button("Window Manager") { choose(.windowManager) }
                     Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                     }
                 } label: {
@@ -179,14 +177,13 @@ struct TapActionEditor: View {
                     return .tap(action)
                 }, set: { selected in
                     if selected.kind == .tap {
-                        action = selected.tap ?? .none
-                        shortcut = nil
+                        choose(selected.tap ?? .none)
                     } else {
                         action = .shortcut
                         shortcut = selected.kind == .keystroke ? selected.shortcut : .assigned(selected)
                     }
                     showActionCatalog = false
-                }), allowPointerActions: !shortcutsOnly && !keyboardOnly)
+                }), allowPointerActions: !keyboardOnly)
                 .frame(width: 290)
             }.padding(16)
         }
@@ -197,6 +194,16 @@ struct TapActionEditor: View {
             if enabled { draft.modifiers |= UInt64(flag.rawValue) }
             else { draft.modifiers &= ~UInt64(flag.rawValue) }
         })).toggleStyle(.button).help(name).accessibilityLabel(name)
+    }
+
+    private func choose(_ tap: TapAction) {
+        if shortcutsOnly && tap != .none {
+            action = .shortcut
+            shortcut = .assigned(.tap(tap))
+        } else {
+            action = tap
+            shortcut = nil
+        }
     }
 }
 

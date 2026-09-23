@@ -76,6 +76,8 @@ struct ConfigurationTests {
         let actions: [BindingAction] = [
             .keystroke(firstStep), .macro(macro), .hudLayer(nil), .hudLayer(hudLayer),
             BindingAction(kind: .hudLayer, hudPath: [ExplorerTilePathStep.group(.left).token], name: "Nested"),
+            BindingAction(kind: .hudLayer, hudPath: [], windowOwnerPath: [], name: "Window Manager"),
+            BindingAction(kind: .hudLayer, hudPath: [], windowOwnerPath: [ExplorerTilePathStep.group(.right).token], name: "Owned window"),
             .openApp(bundleID: "com.apple.Safari", name: "Safari"), .openURL("https://example.com/docs"),
             .command(.missionControl), .media(.playPause),
             .windowPlacement(ExplorerWindowPlacement(direction: .left)), .tap(.rightClick)
@@ -87,7 +89,8 @@ struct ConfigurationTests {
         unified.settings.hotkeyDictionary = [macro]
         unified.settings.actionBindings = independent
         unified.settings.appExplorer = AppExplorerSettings(actionBindings: independent, favorites: [
-            AppExplorerFavorite(actionBindings: independent, direction: .left, name: "Nested", children: [])
+            AppExplorerFavorite(actionBindings: independent, direction: .left, name: "Nested", children: []),
+            AppExplorerFavorite(direction: .right, name: "Owned window", action: .windowManager)
         ], holdLayers: [ExplorerHoldLayer(actionBindings: independent, name: "Independent", holdShortcut: nil)],
         windowManager: ExplorerWindowSettings(actionBindings: independent))
         var unifiedTaps = unified.settings.gestures(for: 1)
@@ -113,7 +116,7 @@ struct ConfigurationTests {
         duplicate.settings.actionBindings?.append(independent[0])
         do { try duplicate.validate(); fatalError("Accepted duplicate binding") } catch {}
         var duplicateHUD = unified.settings.appExplorer!
-        duplicateHUD.favorites.append(AppExplorerFavorite(direction: .right, name: "Conflict",
+        duplicateHUD.favorites.append(AppExplorerFavorite(direction: .down, name: "Conflict",
             url: "https://example.com", activationShortcut: independent[0].trigger.keyboard))
         precondition(!duplicateHUD.hasValidFavorites, "Tile and independent binding cannot consume the same local key")
         precondition(!BindingAction(kind: .openURL, url: "file:///tmp/private").isValid)

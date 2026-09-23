@@ -43,6 +43,8 @@ extension AppExplorerPresenting {
     private var localGestureLastLift = Date.distantPast
     private var localGestureOrigin: CGPoint?
     private var localGestureLast = CGPoint.zero
+    private var localGestureFingerOrigins: [UInt8: CGPoint] = [:]
+    private var localGestureFingerLast: [UInt8: CGPoint] = [:]
     private var localGestureTimer: Timer?
     private let model = ExplorerModel()
     private var sourcePID: pid_t?
@@ -98,6 +100,7 @@ extension AppExplorerPresenting {
     var onDismiss: (() -> Void)?
     var onSettings: (() -> Void)?
     var onBindingAction: ((BindingAction) -> Void)?
+    var onKeyboardBindingAction: ((BindingAction) -> Void)?
     var onPresentationChanged: (() -> Void)?
     var contextIsValid: (() -> Bool)?
     weak var editingStore: SettingsStore?
@@ -194,6 +197,41 @@ extension AppExplorerPresenting {
         model.directWindowManager = false
         controlDirection = nil
         model.message = nil
+        refreshGroup()
+        return true
+    }
+
+    @discardableResult func switchWindowContainer(ownerTokens: [String], targetTokens: [String]) -> Bool {
+        guard isVisible, !isEditing, ownerTokens.count <= 16, targetTokens.count <= 16 else { return false }
+        let owner = ownerTokens.compactMap(ExplorerTilePathStep.init(token:))
+        let target = targetTokens.compactMap(ExplorerTilePathStep.init(token:))
+        guard owner.count == ownerTokens.count, target.count == targetTokens.count,
+              let window = configuration().windowActionSettings(ownerPath: owner) else { return false }
+        var selectedWindow = ExplorerScopedHeldKeys()
+        guard let windowGroups = selectedWindow.selectContainer(target, settings: window) else { return false }
+        var selectedExplorer = ExplorerScopedHeldKeys()
+        var ownerGroups: [ExplorerSlot] = []
+        var ownerSlot: ExplorerSlot?
+        if !owner.isEmpty {
+            guard case .group(let slot) = owner.last!,
+                  let groups = selectedExplorer.selectContainer(Array(owner.dropLast()), settings: configuration()) else { return false }
+            ownerGroups = groups
+            ownerSlot = slot
+        }
+        heldKeys = selectedExplorer
+        groupPath = ownerGroups; baseGroupPath = ownerGroups
+        windowKeys = selectedWindow
+        windowGroupPath = windowGroups; baseWindowGroupPath = windowGroups
+        windowOwnerPath = ownerSlot.map { ownerGroups + [$0] }
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false
+        model.showingWindowManager = true
+        model.directWindowManager = ownerSlot == nil
+        controlDirection = ownerSlot
+        tilingTarget = sourcePID.flatMap(captureWindow)
+        model.message = tilingTarget == nil
+            ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
         refreshGroup()
         return true
     }
@@ -309,6 +347,10 @@ extension AppExplorerPresenting {
            let controlDirection { return groupPath + [controlDirection] }
         return groupPath
     }
+    var inlineEditorWindowOwnerPath: [ExplorerTilePathStep]? {
+        guard model.showingWindowManager else { return nil }
+        return (windowOwnerPath ?? []).map { .group($0) }
+    }
     private var windowConfiguration: AppExplorerSettings {
         let saved = configuration(), projected = heldKeys.resolved(saved)
         return projected.windowEditor(at: windowOwnerPath ?? [])
@@ -331,11 +373,12 @@ extension AppExplorerPresenting {
         return original.actionBindings ?? []
     }
 
-    private func performBoundAction(_ action: BindingAction) {
+    private func performBoundAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard action.isValid, contextIsValid?() != false else { return }
+        let dispatch = fromKeyboard ? (onKeyboardBindingAction ?? onBindingAction) : onBindingAction
         if action.kind == .hudLayer ||
            (action.kind == .command && [.appWindows, .mediaControls].contains(action.command)) {
-            onBindingAction?(action)
+            dispatch?(action)
             return
         }
         let originalPID = sourcePID
@@ -345,7 +388,8 @@ extension AppExplorerPresenting {
             MainActor.assumeIsolated {
                 guard let self, self.selectionGeneration == generation,
                       self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
-                self.onBindingAction?(action)
+                if fromKeyboard { (self.onKeyboardBindingAction ?? self.onBindingAction)?(action) }
+                else { self.onBindingAction?(action) }
             }
         }
     }
@@ -363,13 +407,13 @@ extension AppExplorerPresenting {
         if event.type == .keyDown, let binding = visibleActionBindings.first(where: {
             $0.trigger.keyboard?.keyCode == event.keyCode && $0.trigger.keyboard?.modifiers == flags
         }) {
-            if !event.isARepeat { performBoundAction(binding.action) }
+            if !event.isARepeat { performBoundAction(binding.action, fromKeyboard: true) }
             return true
         }
         if event.type == .keyDown, let entry = model.entries.first(where: {
             $0.activationShortcut?.keyCode == event.keyCode && $0.activationShortcut?.modifiers == flags
         }) {
-            if !event.isARepeat { choose(entry.direction) }
+            if !event.isARepeat { choose(entry.direction, fromKeyboard: true) }
             return true
         }
         if model.showingWindowManager {
@@ -427,7 +471,14 @@ extension AppExplorerPresenting {
 
     private func loadEntries() {
         let original = configuration()
-        model.actionBindings = visibleActionBindings
+        let dictionary = hotkeyDictionary()
+        model.actionBindings = visibleActionBindings.map { binding in
+            var display = binding
+            if display.action.kind == .macro {
+                display.action.name = dictionary.title(for: display.action)
+            }
+            return display
+        }
         model.theme = original.resolvedTheme
         model.animationsEnabled = original.resolvedAnimationsEnabled
         let layer = heldKeys.activeLayer(at: layerScopePath, in: original)
@@ -600,6 +651,8 @@ extension AppExplorerPresenting {
         localGesturePendingWindow = 0
         localGestureFollowupDelay = 0
         localGestureOrigin = nil
+        localGestureFingerOrigins.removeAll()
+        localGestureFingerLast.removeAll()
     }
 
     private func replayLocalGesture(from index: Int = 0) {
@@ -622,9 +675,12 @@ extension AppExplorerPresenting {
         guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
             replayLocalGesture(); return false
         }
+        let joiningPair = localGestureSequenceFingers == 2 && contacts.count == 1 &&
+            (localGestureFingerCount == 0 ||
+             (localGestureFingerCount == 1 && now.timeIntervalSince(localGestureStarted) <= 0.12))
         if localGestureTapCount > 0, !contacts.isEmpty,
            (now.timeIntervalSince(localGestureLastLift) > localGesturePendingWindow ||
-            contacts.count != localGestureSequenceFingers) {
+            (contacts.count != localGestureSequenceFingers && !joiningPair)) {
             let prior: AppGestureTrigger = localGestureSequenceFingers == 2
                 ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
                 : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
@@ -650,9 +706,22 @@ extension AppExplorerPresenting {
                 localGestureOrigin = point
                 localGestureLast = point
                 localGestureMaxTravel = 0
+                localGestureFingerOrigins = Dictionary(uniqueKeysWithValues: contacts.map {
+                    ($0.id, CGPoint(x: $0.x, y: $0.y))
+                })
+                localGestureFingerLast = localGestureFingerOrigins
             } else if contacts.count >= localGestureFingerCount {
+                if localGestureFingerCount == 1 && contacts.count == 2 {
+                    localGestureOrigin = point
+                    localGestureFingerOrigins = Dictionary(uniqueKeysWithValues: contacts.map {
+                        ($0.id, CGPoint(x: $0.x, y: $0.y))
+                    })
+                }
                 localGestureFingerCount = contacts.count
                 localGestureLast = point
+                localGestureFingerLast = Dictionary(uniqueKeysWithValues: contacts.map {
+                    ($0.id, CGPoint(x: $0.x, y: $0.y))
+                })
                 localGestureMaxTravel = max(localGestureMaxTravel, hypot(point.x - (localGestureOrigin?.x ?? point.x),
                     point.y - (localGestureOrigin?.y ?? point.y)))
             }
@@ -660,6 +729,10 @@ extension AppExplorerPresenting {
         }
         guard localGestureFingerCount > 0, let origin = localGestureOrigin else { return true }
         let fingers = localGestureFingerCount
+        if localGestureTapCount > 0 && fingers != localGestureSequenceFingers {
+            replayLocalGesture()
+            return true
+        }
         let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
         let duration = now.timeIntervalSince(localGestureStarted)
         let swipeSettings: DoubleTapSwipeSettings? = fingers == 2
@@ -670,7 +743,14 @@ extension AppExplorerPresenting {
         localGestureFingerCount = 0
         localGestureOrigin = nil
         localGestureLastLift = now
-        if duration <= swipeDuration, hypot(dx, dy) >= swipeDistance,
+        let coherentPair = fingers != 2 || (localGestureFingerOrigins.count == 2 &&
+            localGestureFingerOrigins.allSatisfy { id, start in
+                guard let end = localGestureFingerLast[id] else { return false }
+                let fingerDX = end.x - start.x, fingerDY = end.y - start.y
+                return hypot(fingerDX, fingerDY) >= min(40, swipeDistance / 2) &&
+                    fingerDX * dx + fingerDY * dy > 0
+            })
+        if duration <= swipeDuration, hypot(dx, dy) >= swipeDistance, coherentPair,
            (localGestureTapCount == 0 || localGestureFollowupDelay <= (swipeSettings?.resolvedWindow ?? 0.2)),
            let direction = SwipeDirection.classify(dx: dx, dy: dy) {
             let trigger: AppGestureTrigger?
@@ -752,7 +832,7 @@ extension AppExplorerPresenting {
         return true
     }
 
-    private func choose(_ direction: ExplorerSlot) {
+    private func choose(_ direction: ExplorerSlot, fromKeyboard: Bool = false) {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
@@ -832,6 +912,10 @@ extension AppExplorerPresenting {
             if model.showingWindowManager { windowGroupPath.append(direction) }
             else { groupPath.append(direction) }
             refreshGroup()
+            return
+        }
+        if let action = entry?.shortcut?.assignedAction {
+            performBoundAction(action, fromKeyboard: fromKeyboard)
             return
         }
         if let shortcut = entry?.shortcut, let id = shortcut.hudLayerID {
@@ -1013,6 +1097,7 @@ extension AppExplorerPresenting {
                 if editingWindows { self?.windowGroupPath = path } else { self?.groupPath = path }
             }, onDone: { [weak self] in self?.finishEditing() },
             configurationOverride: editingWindows ? windowBinding : nil, windowManagerOnly: editingWindows,
+            windowOwnerPath: inlineEditorWindowOwnerPath,
             contentWidth: editorWidth, contentHeight: editorHeight))
         if let visible = visibleFrame {
             editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - editorWidth)),

@@ -93,6 +93,15 @@ import Foundation
             "Macros triggered by unified bindings expose physical outputs for interception analysis")
         precondition(unifiedAudit.assignments.contains { $0.action == "https://example.com" && $0.shortcut == layerActionKey },
             "Independent Default HUD actions appear in the assignment inventory")
+        let presentedTap = unifiedAudit.displayAssignments.filter { $0.id.contains(independentTap.id.uuidString) }
+        precondition(presentedTap.count == 1 && presentedTap[0].outputShortcuts == [key],
+            "A macro appears once, with its output retained for search and expanded details")
+        precondition(presentedTap[0].searchableShortcuts.contains(key))
+        precondition(!unifiedAudit.displayAssignments.contains { $0.kind == "Output" })
+        precondition(unifiedAudit.assignments.first { $0.id == "activation.2" }?.action == "Activate Precision")
+        let mouseRow = unifiedAudit.assignments.first { $0.id == "mouse.0" }!
+        precondition(mouseRow.trigger == mouseRow.shortcut?.readableCombination && mouseRow.action == "Single click",
+            "Keyboard input rows consistently show trigger → action, never the inverse")
         print("Hotkey organizer passed: global action triggers, tap inventory, dictionary identity/labels, inheritance/device scope, conflicts vs reuse, app precedence, nested HUDs and persistence")
     }
 }

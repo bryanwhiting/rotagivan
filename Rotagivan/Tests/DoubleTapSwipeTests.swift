@@ -176,6 +176,23 @@ private final class FakePoster: GestureEventPosting {
                 precondition(f.poster.moves == 0 && f.poster.dragStarts == 0)
             }
         }
+        for desired in [BindingAction.tap(.rightClick), .tap(.windowManager)] {
+            check { f in
+                f.enableSingleSwipe()
+                var taps = f.store.activeGestures
+                precondition(taps.setLayerAction(.shortcut, shortcut: .assigned(desired), for: .singleLeft))
+                f.store.updateGestures(taps, for: 1)
+                let saved = AppGestureTrigger.singleLeft.assignment(in: f.store.activeGestures).binding
+                precondition(saved.action == .shortcut && saved.shortcut?.assignedAction == desired,
+                    "Swipe keeps arbitrary pointer/HUD actions in the legacy shortcut payload")
+                var emitted: [BindingAction] = []
+                f.engine.onBindingAction = { emitted.append($0) }
+                f.send(0, [(900,900)]); f.send(0.03)
+                f.send(0.10, [(500,500)]); f.send(0.14, [(400,500)]); f.send(0.20)
+                precondition(emitted == [desired] && f.poster.taps.isEmpty,
+                    "Swipe dispatches assigned actions through the shared executor")
+            }
+        }
         check { f in
             f.enableSingleSwipe()
             f.doubleTap() // No swipe: still arms the existing double-tap + swipe.

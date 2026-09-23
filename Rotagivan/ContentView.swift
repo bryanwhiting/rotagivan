@@ -98,7 +98,7 @@ struct ContentView: View {
         .tint(.primary)
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
-        .environment(\.hudActionDestinations, store.settings.appExplorer?.tileContainers() ?? [])
+        .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
         .frame(width: 940, height: 740)
         .sheet(item: $renamingProfile) { profile in
             ProfileNameEditor(name: profile.name, onSave: { name in
@@ -576,8 +576,15 @@ struct ContentView: View {
             }
             if editingAppleActions ? store.settings.devices?.appleLayerGestures?[id] != nil : (id == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(id)) {
             Toggle("Enable tap actions", isOn: gesture(id, \.tapToClick))
-            if editableGestures(id).gestures.tapToClick {
-                LayerActionAssignmentsEditor(gestures: gestureBinding(id))
+            if store.settings.applyingActionBindings(to: editableGestures(id)).gestures.tapToClick ||
+               (store.settings.actionBindings ?? []).contains(where: {
+                   $0.trigger.gesture == .twoFingerLeft || $0.trigger.gesture == .twoFingerRight
+               }) {
+                LayerActionAssignmentsEditor(gestures: gestureBinding(id),
+                    globalBindings: Binding(get: { store.settings.actionBindings ?? [] }, set: { updated in
+                        guard updated.isValidBindings(global: true) else { return }
+                        store.settings.actionBindings = updated
+                    }), resolveGestures: { store.settings.applyingActionBindings(to: $0) })
                 Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Tune tap timing, movement thresholds, and all tap + swipe families in Calibration.")

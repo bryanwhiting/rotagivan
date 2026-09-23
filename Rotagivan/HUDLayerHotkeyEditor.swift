@@ -6,13 +6,20 @@ struct HUDLayerHotkeyEditor: View {
     @State private var layer: ExplorerHoldLayer
     let settings: AppExplorerSettings
     let isDefaultLayer: Bool
+    let editingGroupPath: [ExplorerSlot]
+    let layerTitle: String?
+    let containerPrefix: [ExplorerTilePathStep]
+    let windowOwnerPath: [ExplorerTilePathStep]?
+    let supportsGroupTargets: Bool
     @State private var editingBinding: ActionBinding?
     var onSave: (ExplorerHoldLayer, [HUDTapAssignmentScope: Set<AppGestureTrigger>]) -> Bool
     var onCancel: () -> Void
 
     init(store: SettingsStore, layer: ExplorerHoldLayer, settings: AppExplorerSettings,
          onSave: @escaping (ExplorerHoldLayer, [HUDTapAssignmentScope: Set<AppGestureTrigger>]) -> Bool,
-         onCancel: @escaping () -> Void, supportsDirectLaunch _: Bool = true, isDefaultLayer: Bool = false) {
+         onCancel: @escaping () -> Void, supportsDirectLaunch _: Bool = true, isDefaultLayer: Bool = false,
+         containerPrefix: [ExplorerTilePathStep] = [], windowOwnerPath: [ExplorerTilePathStep]? = nil,
+         supportsGroupTargets: Bool = true, editingGroupPath: [ExplorerSlot] = [], layerTitle: String? = nil) {
         self.store = store
         var globalLayer = layer
         globalLayer.appBundleID = nil
@@ -20,6 +27,11 @@ struct HUDLayerHotkeyEditor: View {
         _layer = State(initialValue: globalLayer)
         self.settings = settings
         self.isDefaultLayer = isDefaultLayer
+        self.editingGroupPath = editingGroupPath
+        self.layerTitle = layerTitle
+        self.containerPrefix = containerPrefix
+        self.windowOwnerPath = windowOwnerPath
+        self.supportsGroupTargets = supportsGroupTargets
         self.onSave = onSave
         self.onCancel = onCancel
     }
@@ -27,8 +39,15 @@ struct HUDLayerHotkeyEditor: View {
     private var draftExplorer: AppExplorerSettings {
         var result = settings
         if isDefaultLayer {
-            result.favorites = layer.favorites
-            result.actionBindings = layer.actionBindings
+            if let direction = editingGroupPath.last,
+               var group = result.favorite(at: editingGroupPath) {
+                group.children = layer.favorites
+                group.actionBindings = layer.actionBindings
+                _ = result.setFavorite(group, at: direction, in: Array(editingGroupPath.dropLast()))
+            } else {
+                result.favorites = layer.favorites
+                result.actionBindings = layer.actionBindings
+            }
             return result
         }
         var layers = result.holdLayers ?? []
@@ -42,13 +61,21 @@ struct HUDLayerHotkeyEditor: View {
         !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draftExplorer.hasValidFavorites
     }
 
+    private var reservedKeys: [RecordedShortcut] {
+        layer.favorites.compactMap(\.activationShortcut) +
+            settings.layers(at: settings.layerScope(at: editingGroupPath)).compactMap(\.holdShortcut) +
+            (windowOwnerPath == nil ? [] : (store.settings.appExplorer?.windowManager?.shortcuts.map(\.shortcut) ?? []))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Label(isDefaultLayer ? "Default HUD layer" : "HUD layer", systemImage: "square.3.layers.3d")
+            Label(layerTitle ?? (isDefaultLayer ? "Default HUD layer" : "HUD layer"), systemImage: "square.3.layers.3d")
                 .font(.headline).padding(.bottom, 14)
 
             if isDefaultLayer {
-                Text("This layer opens first. Assign keyboard or trackpad triggers to actions here.")
+                Text(editingGroupPath.isEmpty
+                     ? "This layer opens first. Assign keyboard or trackpad triggers to actions here."
+                     : "Assign keyboard or trackpad triggers to this HUD layer, with or without tiles.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 TextField("HUD layer name", text: $layer.name)
@@ -80,7 +107,7 @@ struct HUDLayerHotkeyEditor: View {
                         HStack(spacing: 9) {
                             Text(binding.trigger.title).fontWeight(.medium).lineLimit(1)
                             Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
-                            Text(binding.action.title).lineLimit(1)
+                            Text(store.settings.resolvedHotkeyDictionary.title(for: binding.action)).lineLimit(1)
                             Spacer()
                             Button("Edit") { editingBinding = binding }
                             Button {
@@ -137,7 +164,7 @@ struct HUDLayerHotkeyEditor: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(item: $editingBinding) { candidate in
             BindingEditor(binding: candidate, existing: layer.actionBindings ?? [],
-                reservedKeys: layer.favorites.compactMap(\.activationShortcut),
+                reservedKeys: reservedKeys,
                 title: "HUD layer action", onSave: { updated in
                     var bindings = layer.actionBindings ?? []
                     if let index = bindings.firstIndex(where: { $0.id == updated.id }) { bindings[index] = updated }
@@ -158,6 +185,7 @@ struct HUDLayerHotkeyEditor: View {
 
     private func actionRow(_ index: Int) -> some View {
         let favorite = layer.favorites[index]
+        let tileAction = action(for: favorite)
         return HStack(spacing: 10) {
             Image(systemName: favorite.action?.symbol ?? (favorite.shortcut != nil ? "keyboard" :
                 (favorite.isGroup ? "square.3.layers.3d" : (favorite.url != nil ? "globe" : "app"))))
@@ -176,13 +204,29 @@ struct HUDLayerHotkeyEditor: View {
                     .controlSize(.small)
             }
             Button("Add tap/swipe…") {
-                guard let action = BindingAction.from(favorite: favorite) else { return }
+                guard let action = tileAction else { return }
                 editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
             }
             .controlSize(.small)
-            .disabled(BindingAction.from(favorite: favorite) == nil)
+            .disabled(tileAction == nil)
         }
         .padding(.horizontal, 12).frame(minHeight: 54)
         .accessibilityIdentifier("hud-action-hotkey-\(favorite.direction.rawValue)")
+    }
+
+    private func action(for favorite: AppExplorerFavorite) -> BindingAction? {
+        if favorite.isWindowManager {
+            guard windowOwnerPath == nil else { return nil }
+            let owner = containerPrefix + (isDefaultLayer ? [] : [.layer(layer.id)]) + [.group(favorite.direction)]
+            return BindingAction(kind: .hudLayer, hudPath: [], windowOwnerPath: owner.map(\.token),
+                name: favorite.name)
+        }
+        if favorite.isGroup {
+            guard supportsGroupTargets else { return nil }
+            let path = containerPrefix + (isDefaultLayer ? [] : [.layer(layer.id)]) + [.group(favorite.direction)]
+            return BindingAction(kind: .hudLayer, hudPath: path.map(\.token),
+                windowOwnerPath: windowOwnerPath?.map(\.token), name: favorite.name)
+        }
+        return BindingAction.from(favorite: favorite)
     }
 }

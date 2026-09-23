@@ -96,7 +96,8 @@ struct WindowManagerSettingsView: View {
                 var next = explorer
                 guard next.saveWindowEditor(updated) else { error = "This HUD layer exceeds the nesting or tile limits."; return }
                 store.settings.appExplorer = next; error = nil
-            }), scopeTitle: "Window Manager", windowManagerOnly: true, windowApplet: true)
+            }), scopeTitle: "Window Manager", windowManagerOnly: true, windowApplet: true,
+                windowOwnerPath: [])
             Divider()
             HStack {
                 Text("Window Manager actions").font(.headline)
@@ -136,12 +137,17 @@ struct WindowManagerSettingsView: View {
                     if window.shortcuts.contains(where: { $0.command == command }) {
                         Button("Clear") { var next = window; next.shortcuts.removeAll { $0.command == command }; save(next) }
                     }
+                    Button("Add tap/swipe…") {
+                        editingBinding = ActionBinding(trigger: BindingTrigger(), action: .command(command))
+                    }
                 }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .sheet(item: $editingBinding) { candidate in
             BindingEditor(binding: candidate, existing: window.actionBindings ?? [],
+                reservedKeys: (window.favorites ?? []).compactMap(\.activationShortcut) +
+                    window.layers.compactMap(\.holdShortcut) + window.shortcuts.map(\.shortcut),
                 title: "Window Manager action", onSave: { updated in
                     var next = window
                     var bindings = next.actionBindings ?? []
@@ -168,6 +174,9 @@ struct AppExplorerSettingsView: View {
     @State private var selectedLayerID: UUID?
     @State private var editingLayer: ExplorerHoldLayer?
     @State private var editingDefaultLayer = false
+    @State private var editingGroupHotkeys: [ExplorerSlot]?
+    @State private var groupHotkeysSnapshot: AppExplorerFavorite?
+    @State private var groupHotkeysOwnerID: UUID?
     @State private var creatingLayer = false
     @State private var removingLayer = false
     @State private var editingTileLayers: [ExplorerSlot]?
@@ -192,6 +201,7 @@ struct AppExplorerSettingsView: View {
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
     private let transferPrefix: [ExplorerTilePathStep]
+    private let windowOwnerPath: [ExplorerTilePathStep]?
     private var transferSettings: AppExplorerSettings { transferRoot?() ?? baseSettings }
     private var transferPath: [ExplorerTilePathStep] {
         transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + groupPath.map { .group($0) }
@@ -206,6 +216,11 @@ struct AppExplorerSettingsView: View {
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
     private var scopeBindings: [ActionBinding] {
         groupPath.isEmpty ? (settings.actionBindings ?? []) : (settings.favorite(at: groupPath)?.actionBindings ?? [])
+    }
+    private var legacyReservedKeys: [RecordedShortcut] {
+        favorites.compactMap(\.activationShortcut) +
+            settings.layers(at: settings.layerScope(at: groupPath)).compactMap(\.holdShortcut) +
+            (windowOwnerPath == nil ? [] : (store.settings.appExplorer?.windowManager?.shortcuts.map(\.shortcut) ?? []))
     }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
     private var availableBookmarkSlots: [ExplorerSlot] {
@@ -295,8 +310,8 @@ struct AppExplorerSettingsView: View {
                 Divider()
                 HStack(spacing: 12) {
                     Button("Edit hotkeys") {
-                        creatingLayer = false
-                        editingLayer = layer
+                        if selected && !groupPath.isEmpty { openGroupHotkeys() }
+                        else { creatingLayer = false; editingLayer = layer }
                     }
                     Spacer(minLength: 0)
                 }
@@ -306,7 +321,10 @@ struct AppExplorerSettingsView: View {
                 HStack {
                     Label("Default layer", systemImage: "pin.fill")
                     Spacer(minLength: 0)
-                    Button("Edit hotkeys") { editingDefaultLayer = true }
+                    Button("Edit hotkeys") {
+                        if !groupPath.isEmpty { openGroupHotkeys() }
+                        else { editingDefaultLayer = true }
+                    }
                         .buttonStyle(.link)
                 }.font(.caption).padding(.horizontal, 13).frame(height: 32)
             }
@@ -366,7 +384,7 @@ struct AppExplorerSettingsView: View {
     init(store: SettingsStore, groupPath: [ExplorerSlot] = [], compact: Bool = false, initialLayerID: UUID? = nil,
          configurationOverride: Binding<AppExplorerSettings>? = nil, scopeTitle: String? = nil, windowManagerOnly: Bool = false, windowApplet: Bool = false,
          transferRoot: (() -> AppExplorerSettings)? = nil, transferSave: ((AppExplorerSettings) -> Bool)? = nil,
-         transferPrefix: [ExplorerTilePathStep] = [],
+         transferPrefix: [ExplorerTilePathStep] = [], windowOwnerPath: [ExplorerTilePathStep]? = nil,
          onGroupPathChange: (([ExplorerSlot]) -> Void)? = nil) {
         self.store = store
         _groupPath = State(initialValue: groupPath)
@@ -379,6 +397,7 @@ struct AppExplorerSettingsView: View {
         self.transferRoot = transferRoot
         self.transferSave = transferSave
         self.transferPrefix = transferPrefix
+        self.windowOwnerPath = windowOwnerPath
         self.onGroupPathChange = onGroupPathChange
     }
 
@@ -442,7 +461,9 @@ struct AppExplorerSettingsView: View {
                     .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
                     .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
                         "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
-                    if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
+                    if !groupPath.isEmpty {
+                        Button("Edit hotkeys…") { openGroupHotkeys() }
+                    } else if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                         Button("Edit hotkeys…") { creatingLayer = false; editingLayer = layer }
                         Button("Remove", role: .destructive) { removingLayer = true }
                     } else {
@@ -479,6 +500,7 @@ struct AppExplorerSettingsView: View {
                 }
                 Spacer(minLength: 4)
                 if !groupPath.isEmpty {
+                    Button("Edit hotkeys…") { openGroupHotkeys() }
                     Button("Rename…") { editingGroupPath = groupPath }
                 }
             }.font(.subheadline.weight(.medium))
@@ -596,7 +618,10 @@ struct AppExplorerSettingsView: View {
                                 // the parent instead of leaving a stale binding to its old slot.
                                 editingTileLayers = nil
                                 return true
-                            }, transferPrefix: tile.isWindowManager ? [] : transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) })).padding(24)
+                            }, transferPrefix: tile.isWindowManager ? [] : transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) },
+                            windowOwnerPath: tile.isWindowManager
+                                ? (windowOwnerPath == nil ? transferPrefix + (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) } : nil)
+                                : windowOwnerPath)).padding(24)
                     }
                     Button("Done") { editingTileLayers = nil }.keyboardShortcut(.cancelAction).padding()
                 }.frame(width: 660, height: 620)
@@ -632,7 +657,8 @@ struct AppExplorerSettingsView: View {
                 store.settings = stored
                 selectedLayerID = updated.id; groupPath = []; editingLayer = nil; groupError = nil
                 return true
-            }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly)
+            }, onCancel: { editingLayer = nil }, supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly,
+                containerPrefix: transferPrefix, windowOwnerPath: windowOwnerPath)
         }
         .sheet(isPresented: $editingDefaultLayer) {
             HUDLayerHotkeyEditor(store: store,
@@ -649,7 +675,26 @@ struct AppExplorerSettingsView: View {
                     return true
                 }, onCancel: { editingDefaultLayer = false },
                 supportsDirectLaunch: configurationOverride == nil && !windowManagerOnly,
-                isDefaultLayer: true)
+                isDefaultLayer: true, containerPrefix: transferPrefix,
+                windowOwnerPath: windowOwnerPath)
+        }
+        .sheet(isPresented: Binding(get: { editingGroupHotkeys != nil }, set: { if !$0 { editingGroupHotkeys = nil } })) {
+            if let path = editingGroupHotkeys, let snapshot = groupHotkeysSnapshot {
+                HUDLayerHotkeyEditor(store: store,
+                    layer: ExplorerHoldLayer(actionBindings: snapshot.actionBindings,
+                        name: snapshot.name, holdShortcut: nil,
+                        favorites: snapshot.children ?? [], slotCount: snapshot.slotCount),
+                    settings: settings, onSave: { updated, _ in
+                        guard saveGroupHotkeyDraft(updated, at: path,
+                                ownerID: groupHotkeysOwnerID, snapshot: snapshot) else { return false }
+                        editingGroupHotkeys = nil; groupHotkeysSnapshot = nil; groupError = nil
+                        return true
+                    }, onCancel: { editingGroupHotkeys = nil },
+                    isDefaultLayer: true, containerPrefix: transferPrefix +
+                        (selectedLayerID.map { [.layer($0)] } ?? []) + path.map { .group($0) },
+                    windowOwnerPath: windowOwnerPath, editingGroupPath: path,
+                    layerTitle: snapshot.name + " hotkeys")
+            }
         }
         .confirmationDialog("Remove this HUD layer and all its slots?", isPresented: $removingLayer, titleVisibility: .visible) {
             Button("Remove HUD layer", role: .destructive) {
@@ -693,7 +738,7 @@ struct AppExplorerSettingsView: View {
         }
         .sheet(item: $editingTileBinding) { candidate in
             BindingEditor(binding: candidate, existing: scopeBindings,
-                reservedKeys: favorites.compactMap(\.activationShortcut), title: "HUD action",
+                reservedKeys: legacyReservedKeys, title: "HUD action",
                 onSave: { updated in
                     saveScopeBinding(updated)
                     editingTileBinding = nil
@@ -818,9 +863,10 @@ struct AppExplorerSettingsView: View {
                         Text("Works while this HUD layer is open. Escape and bare E/S stay reserved for HUD controls.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Button("Assign tap or swipe to this action…") {
-                            guard let assigned = BindingAction.from(favorite: favorite) else { return }
+                            guard let assigned = tileBindingAction(favorite, at: direction) else { return }
                             editingTileBinding = ActionBinding(trigger: BindingTrigger(), action: assigned)
                         }
+                        .disabled(tileBindingAction(favorite, at: direction) == nil)
                     }
                 }
 
@@ -1316,6 +1362,45 @@ struct AppExplorerSettingsView: View {
         _ = save(next)
     }
 
+    private func openGroupHotkeys() {
+        guard !groupPath.isEmpty, let group = settings.favorite(at: groupPath) else { return }
+        groupHotkeysSnapshot = group
+        groupHotkeysOwnerID = selectedLayerID
+        editingGroupHotkeys = groupPath
+    }
+
+    /// Shared by the sheet and the native empty-group save regression.
+    @discardableResult func saveGroupHotkeyDraft(_ updated: ExplorerHoldLayer, at path: [ExplorerSlot],
+                                                  ownerID: UUID?, snapshot: AppExplorerFavorite) -> Bool {
+        guard ownerID == selectedLayerID,
+              var live = settings.favorite(at: path), live == snapshot,
+              let direction = path.last else {
+            groupError = "This HUD layer changed while editing. Reopen its hotkeys."
+            return false
+        }
+        live.children = mergingActionHotkeys(from: updated.favorites, into: live.children ?? [])
+        live.actionBindings = updated.actionBindings
+        var next = settings
+        guard next.setFavorite(live, at: direction, in: Array(path.dropLast())),
+              save(next) else { return false }
+        groupError = nil
+        return true
+    }
+
+    private func tileBindingAction(_ favorite: AppExplorerFavorite, at direction: ExplorerSlot) -> BindingAction? {
+        if favorite.isWindowManager {
+            guard windowOwnerPath == nil else { return nil }
+            return BindingAction(kind: .hudLayer, hudPath: [],
+                windowOwnerPath: (transferPath + [.group(direction)]).map(\.token), name: favorite.name)
+        }
+        if favorite.isGroup {
+            return BindingAction(kind: .hudLayer,
+                hudPath: (transferPath + [.group(direction)]).map(\.token),
+                windowOwnerPath: windowOwnerPath?.map(\.token), name: favorite.name)
+        }
+        return BindingAction.from(favorite: favorite)
+    }
+
     private func preservingHotkey(_ replacement: AppExplorerFavorite, at path: [ExplorerSlot]) -> AppExplorerFavorite {
         var replacement = replacement
         if replacement.activationShortcut == nil {
@@ -1625,6 +1710,7 @@ struct ExplorerInlineEditor: View {
     var onDone: () -> Void
     var configurationOverride: Binding<AppExplorerSettings>? = nil
     var windowManagerOnly = false
+    var windowOwnerPath: [ExplorerTilePathStep]? = nil
     var contentWidth: CGFloat = Self.preferredWidth
     var contentHeight: CGFloat = 760
     var body: some View {
@@ -1637,6 +1723,7 @@ struct ExplorerInlineEditor: View {
             ScrollView {
                 AppExplorerSettingsView(store: store, groupPath: groupPath, compact: false,
                     configurationOverride: configurationOverride, windowManagerOnly: windowManagerOnly,
+                    windowOwnerPath: windowManagerOnly ? (windowOwnerPath ?? []) : nil,
                     onGroupPathChange: onGroupPathChange)
                     .padding(.horizontal, 2)
             }
@@ -1646,7 +1733,7 @@ struct ExplorerInlineEditor: View {
         }.padding(26).frame(width: contentWidth, height: contentHeight)
             .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
             .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
-            .environment(\.hudActionDestinations, store.settings.appExplorer?.tileContainers() ?? [])
+            .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
     }
 }

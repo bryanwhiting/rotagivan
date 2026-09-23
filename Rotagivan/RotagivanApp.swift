@@ -61,7 +61,10 @@ struct RotagivanApp: App {
         hotKeys.onExplorerHold = { down in hid.explorerHold(down) }
         hotKeys.configureExplorer(nil)
         hotKeys.onHUDLayer = { id in hid.openHUDLayer(id, fromKeyboard: true) }
-        hotKeys.onBindingAction = { hid.executeBindingAction($0) }
+        hotKeys.onBindingAction = { hid.executeBindingAction($0, fromKeyboard: true) }
+        hotKeys.onHUDKey = { keyCode, modifiers, down in
+            hid.processVisibleHUDHotkey(keyCode: keyCode, modifiers: modifiers, down: down)
+        }
         hotKeys.onNamedHotkey = { id in
             guard let action = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == id }) else { return }
             hotkeyPoster.performMacro(action)

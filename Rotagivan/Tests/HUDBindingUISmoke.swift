@@ -62,6 +62,21 @@ import SwiftUI
         precondition(defaultSaved?.favorites.isEmpty == true, "Default layer binding must not create a tile")
         defaultPanel.orderOut(nil); defaultPanel.close()
 
+        for recent in [false, true] {
+            let group = AppExplorerFavorite(direction: .left, name: recent ? "Recent Apps" : "Nested",
+                children: [], groupMode: recent ? .recent : .favorites)
+            store.settings.appExplorer = AppExplorerSettings(favorites: [group])
+            let groupEditor = AppExplorerSettingsView(store: store, groupPath: [.left])
+            var draft = ExplorerHoldLayer.empty(name: group.name)
+            draft.favorites = []
+            draft.actionBindings = [first]
+            precondition(groupEditor.saveGroupHotkeyDraft(draft, at: [.left], ownerID: nil, snapshot: group),
+                "An empty nested or Recent Apps HUD layer must save its own binding")
+            let savedGroup = store.settings.appExplorer?.favorite(at: [.left])
+            precondition(savedGroup?.actionBindings == [first] && savedGroup?.children?.isEmpty == true,
+                "Group binding must stay on the group without creating a tile")
+        }
+
         let many = (0..<110).map { index in
             ActionBinding(trigger: BindingTrigger(keyboard: RecordedShortcut(
                 keyCode: UInt16(index), modifiers: 1 << 20, keyLabel: "Key \(index)")), action: openURL)
@@ -96,7 +111,7 @@ import SwiftUI
         bindingEditor.saveDraft()
         precondition(selected == first, "The shared editor should pass the independent trigger and action to its save callback")
         bindingPanel.orderOut(nil); bindingPanel.close()
-        print("HUD binding UI passed: default and custom tile-free saves, 110-row scrolling, and shared editor save callback")
+        print("HUD binding UI passed: default, nested, Recent, and custom tile-free saves, 110-row scrolling, shared editor callback")
     }
 
     private static func scrollViews(in view: NSView) -> [NSScrollView] {

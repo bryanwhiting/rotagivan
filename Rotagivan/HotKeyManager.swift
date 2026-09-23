@@ -136,6 +136,51 @@ final class HotKeyManager {
     var onHUDLayer: ((UUID) -> Void)?
     var onNamedHotkey: ((String) -> Void)?
     var onBindingAction: ((BindingAction) -> Void)?
+    /// Gives a visible HUD first refusal on physical Carbon hotkeys.
+    var onHUDKey: ((UInt16, UInt64, Bool) -> Bool)?
+    private var registeredKeys: [String: (UInt16, UInt64)] = [:]
+    private var profileKeyIdentities = Set<String>()
+    private var interceptedKeys: [String: (UInt16, UInt64)] = [:]
+    private var cancelledReleases = Set<String>()
+    private func hotkeyIdentity(_ signature: OSType, _ id: UInt32) -> String { "\(signature):\(id)" }
+    private func remember(_ signature: OSType, _ id: UInt32, _ key: UInt32, _ carbon: UInt32) {
+        let cocoa = UInt64((carbon & 4096 != 0 ? 1 << 18 : 0) |
+            (carbon & 2048 != 0 ? 1 << 19 : 0) |
+            (carbon & 512 != 0 ? 1 << 17 : 0) |
+            (carbon & 256 != 0 ? 1 << 20 : 0))
+        registeredKeys[hotkeyIdentity(signature, id)] = (UInt16(truncatingIfNeeded: key), cocoa)
+    }
+    @discardableResult func routeHUDHotkey(signature: OSType, id: UInt32, down: Bool,
+                                           key override: (UInt16, UInt64)? = nil) -> Bool {
+        let identity = hotkeyIdentity(signature, id)
+        guard !recording else { return false }
+        if !down, cancelledReleases.remove(identity) != nil { return true }
+        if down { cancelledReleases.remove(identity) }
+        if let captured = interceptedKeys[identity] {
+            if !down {
+                interceptedKeys.removeValue(forKey: identity)
+                _ = onHUDKey?(captured.0, captured.1, false)
+            }
+            return true
+        }
+        guard down, let key = override ?? registeredKeys[identity],
+              onHUDKey?(key.0, key.1, true) == true else { return false }
+        interceptedKeys[identity] = key
+        return true
+    }
+    /// End HUD-local held layers before Carbon registrations change identity.
+    func cancelHUDCaptures() {
+        let captured = interceptedKeys
+        interceptedKeys.removeAll()
+        for (identity, key) in captured {
+            cancelledReleases.insert(identity)
+            _ = onHUDKey?(key.0, key.1, false)
+        }
+    }
+    func beginShortcutRecording() {
+        recording = true
+        cancelHUDCaptures()
+    }
     private var actionBindings: [ActionBinding] = []
     private var bindingActions: [UInt32: BindingAction] = [:]
     private var bindingPressed = Set<UInt32>()
@@ -231,12 +276,14 @@ final class HotKeyManager {
         }.store(in: &recordingObservers)
         NotificationCenter.default.publisher(for: .shortcutRecordingStarted).sink { [weak self] _ in
             guard let self else { return }
-            self.recording = true
+            self.beginShortcutRecording()
             self.onExplorerHold?(false)
             self.onAction?(5, false)
             (self.refs + self.actionRefs).compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
             self.refs.removeAll()
             self.actionRefs.removeAll()
+            self.registeredKeys.removeAll()
+            self.profileKeyIdentities.removeAll()
             self.pressed.removeAll()
             self.activation.releaseHolds()
             self.onProfileChanged?(self.activation.active)
@@ -259,6 +306,7 @@ final class HotKeyManager {
             let owner = Unmanaged<HotKeyManager>.fromOpaque(context).takeUnretainedValue()
             let down = GetEventKind(event) == UInt32(kEventHotKeyPressed)
             DispatchQueue.main.async {
+                if owner.routeHUDHotkey(signature: id.signature, id: id.id, down: down) { return }
                 if id.signature == HotKeyManager.fourCC("RHUD") {
                     if down, !owner.recording, owner.hudPressed.insert(id.id).inserted,
                        let layer = owner.hudLaunchIDs[id.id] { owner.onHUDLayer?(layer) }
@@ -293,11 +341,14 @@ final class HotKeyManager {
 
     private func register(normal: ProfileShortcut, precision: ProfileShortcut, additional: [UInt32: ProfileShortcut], resetActivation: Bool = true) {
         guard !recording else { return }
+        cancelHUDCaptures()
         onAction?(5, false)
         actionRefs.compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
         actionRefs.removeAll()
         refs.compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
         refs.removeAll()
+        registeredKeys.removeAll()
+        profileKeyIdentities.removeAll()
         pressed.removeAll()
         if resetActivation { activation = ProfileActivationState(defaultID: defaultProfileID) }
         profileHolds = [1: normal.holdToActivate ?? true, 2: precision.holdToActivate ?? true]
@@ -332,17 +383,23 @@ final class HotKeyManager {
                 ShortcutSettings.shared.error = "\(displayName) shortcut is unavailable. Choose another combination."
             }
             refs.append(ref)
+            if result == noErr {
+                remember(Self.fourCC("NZCL"), id, shortcut.keyCode, shortcut.modifiers)
+                profileKeyIdentities.insert(hotkeyIdentity(Self.fourCC("NZCL"), id))
+            }
         }
     }
 
     private func registerActions() {
         guard !recording else { return }
+        cancelHUDCaptures()
         onExplorerHold?(false)
         // Releasing before replacing registrations prevents a stuck drag on profile changes.
         onAction?(5, false)
         pressed.removeAll()
         actionRefs.compactMap { $0 }.forEach { UnregisterEventHotKey($0) }
         actionRefs.removeAll()
+        registeredKeys = registeredKeys.filter { profileKeyIdentities.contains($0.key) }
         ShortcutSettings.shared.error = profileError
         hudLaunchIDs.removeAll()
         hudPressed.removeAll()
@@ -368,6 +425,7 @@ final class HotKeyManager {
             let result = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: UInt32(index + 3)), GetApplicationEventTarget(), 0, &ref)
             if result != noErr { ShortcutSettings.shared.error = "\(name) shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
+            if result == noErr { remember(Self.fourCC("NZCL"), UInt32(index + 3), shortcut.keyCode, shortcut.modifiers) }
         }
         for (index, layer) in hudLayers.enumerated() where layer.isAvailable(in: NSWorkspace.shared.frontmostApplication?.bundleIdentifier) {
             guard let shortcut = layer.launchShortcut, shortcut.isPhysicalShortcut else { continue }
@@ -383,7 +441,7 @@ final class HotKeyManager {
             let id = UInt32(index)
             var ref: EventHotKeyRef?
             let result = RegisterEventHotKey(profileKey.keyCode, profileKey.modifiers, EventHotKeyID(signature: Self.fourCC("RHUD"), id: id), GetApplicationEventTarget(), 0, &ref)
-            if result == noErr { hudLaunchIDs[id] = layer.id; actionRefs.append(ref) }
+            if result == noErr { hudLaunchIDs[id] = layer.id; actionRefs.append(ref); remember(Self.fourCC("RHUD"), id, profileKey.keyCode, profileKey.modifiers) }
             else { ShortcutSettings.shared.error = "HUD layer \(layer.name) launch key is unavailable." }
         }
         if let shortcut = explorerShortcut {
@@ -401,6 +459,7 @@ final class HotKeyManager {
             let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers, EventHotKeyID(signature: Self.fourCC("NZCL"), id: 6), GetApplicationEventTarget(), 0, &ref)
             if result != noErr { ShortcutSettings.shared.error = "App Explorer shortcut is unavailable. Choose another combination." }
             actionRefs.append(ref)
+            if result == noErr { remember(Self.fourCC("NZCL"), 6, UInt32(shortcut.keyCode), modifiers) }
         }
         for (index, entry) in namedHotkeys.enumerated() {
             guard let shortcut = entry.activationShortcut, shortcut.isValidGlobalHotkey else { continue }
@@ -415,7 +474,7 @@ final class HotKeyManager {
             var ref: EventHotKeyRef?
             let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers,
                 EventHotKeyID(signature: Self.fourCC("RMAC"), id: id), GetApplicationEventTarget(), 0, &ref)
-            if result == noErr { namedHotkeyIDs[id] = entry.id; actionRefs.append(ref) }
+            if result == noErr { namedHotkeyIDs[id] = entry.id; actionRefs.append(ref); remember(Self.fourCC("RMAC"), id, UInt32(shortcut.keyCode), modifiers) }
             else { ShortcutSettings.shared.error = "\(entry.name) hotkey is unavailable." }
         }
         for (index, binding) in actionBindings.enumerated() {
@@ -433,7 +492,7 @@ final class HotKeyManager {
             var ref: EventHotKeyRef?
             let result = RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers,
                 EventHotKeyID(signature: Self.fourCC("RBND"), id: id), GetApplicationEventTarget(), 0, &ref)
-            if result == noErr { bindingActions[id] = binding.action; actionRefs.append(ref) }
+            if result == noErr { bindingActions[id] = binding.action; actionRefs.append(ref); remember(Self.fourCC("RBND"), id, UInt32(shortcut.keyCode), modifiers) }
             else { ShortcutSettings.shared.error = "\(binding.trigger.title) is unavailable."
             }
         }

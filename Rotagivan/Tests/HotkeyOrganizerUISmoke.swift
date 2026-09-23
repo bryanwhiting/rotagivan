@@ -108,7 +108,7 @@ import SwiftUI
         appMacro.steps = nil
         appMacro.sequence = [.app(bundleID: "test.editor", name: "Editor"), .key(shortcut), .key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]
         appMacro.activationShortcut = RecordedShortcut(keyCode: 64, modifiers: 1 << 20, keyLabel: "F17")
-        try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], requiresGlobalHotkey: true, onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
+        try renderEditor(NamedHotkeyEditor(entry: appMacro, existing: [appMacro], onSave: { _ in }, onCancel: {}), name: "macro-app-editor", size: NSSize(width: 638, height: 650))
         try renderEditor(HUDLayerHotkeyEditor(store: store, layer: editorLayer, settings: store.settings.appExplorer!,
             onSave: { _, _ in true }, onCancel: {}), name: "hud-layer-editor", size: NSSize(width: 560, height: 720))
         let defaultLayer = ExplorerHoldLayer(name: "Default", holdShortcut: nil,

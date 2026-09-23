@@ -138,6 +138,7 @@ struct AppExplorerSettingsView: View {
     @State private var tileLayerOwnerID: UUID?
     @State private var inheritTileLayers = false
     @State private var editingApplicationPath: [ExplorerSlot]?
+    @State private var importingBookmarks = false
     @State private var groupPath: [ExplorerSlot]
     @State private var editingGroupPath: [ExplorerSlot]?
     @State private var removingGroupPath: [ExplorerSlot]?
@@ -166,6 +167,13 @@ struct AppExplorerSettingsView: View {
     private var settings: AppExplorerSettings { baseSettings.projected(layerID: selectedLayerID) }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
+    private var availableBookmarkSlots: [ExplorerSlot] {
+        let occupied = Set(favorites.map(\.direction))
+        return ExplorerSlot.slots(settings.count(at: groupPath)).filter { !occupied.contains($0) }
+    }
+    private var existingBookmarkURLs: Set<String> {
+        Set(favorites.compactMap(\.url))
+    }
     private var themeBinding: Binding<ExplorerTheme> {
         Binding(get: { baseSettings.resolvedTheme }, set: { theme in
             var next = baseSettings; next.theme = theme; saveBase(next)
@@ -276,6 +284,14 @@ struct AppExplorerSettingsView: View {
                 }
                 Spacer()
                 Button {
+                    importingBookmarks = true
+                } label: {
+                    Label("Import bookmarks", systemImage: "book.closed")
+                }
+                .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
+                .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
+                    "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
+                Button {
                     creatingLayer = true
                     editingLayer = .empty()
                 } label: {
@@ -369,6 +385,14 @@ struct AppExplorerSettingsView: View {
                         editingLayer = .empty()
                     }.disabled((baseSettings.holdLayers ?? []).count >= 16 ||
                         (scopeTitle != nil && baseSettings.holdLayers == nil))
+                    Button {
+                        importingBookmarks = true
+                    } label: {
+                        Label("Import bookmarks", systemImage: "book.closed")
+                    }
+                    .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
+                    .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
+                        "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
                     if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                         Button("Rename & hotkeys…") { creatingLayer = false; editingLayer = layer }
                         Button("Remove", role: .destructive) { removingLayer = true }
@@ -476,6 +500,23 @@ struct AppExplorerSettingsView: View {
         }
         .overlay(alignment: .bottomLeading) {
             if let groupError { Text(groupError).font(.caption).foregroundStyle(.red).padding(6).background(.regularMaterial) }
+        }
+        .sheet(isPresented: $importingBookmarks) {
+            ExplorerBookmarkImporter(capacity: availableBookmarkSlots.count,
+                existingURLs: existingBookmarkURLs, onImport: { bookmarks in
+                    let slots = availableBookmarkSlots
+                    guard !bookmarks.isEmpty, bookmarks.count <= slots.count else { return false }
+                    var next = settings
+                    for (bookmark, slot) in zip(bookmarks, slots) {
+                        let favorite = AppExplorerFavorite(direction: slot, name: bookmark.title,
+                            url: bookmark.url.absoluteString)
+                        guard next.setFavorite(favorite, at: slot, in: groupPath) else { return false }
+                    }
+                    guard next.hasValidFavorites, save(next) else { return false }
+                    importingBookmarks = false
+                    groupError = nil
+                    return true
+                }, onCancel: { importingBookmarks = false })
         }
         .sheet(item: $tileTransfer) { transfer in
             ExplorerTileTransferEditor(transfer: transfer, onSave: { destination, slot, copy in
@@ -1014,6 +1055,10 @@ struct AppExplorerSettingsView: View {
         Menu {
             Button("Choose app…", systemImage: "app") { editingApplicationPath = groupPath + [direction] }
             Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") { editingURLPath = groupPath + [direction] }
+            Button("Import Chrome or Safari bookmarks…", systemImage: "book.closed") {
+                importingBookmarks = true
+            }
+            .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
             if let favorite, favorite.bundleID != nil {
                 Divider()
                 Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in

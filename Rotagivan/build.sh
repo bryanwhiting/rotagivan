@@ -57,6 +57,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/MacroPlayback.swift" \
   "$script_dir/AppExplorerSelection.swift" \
   "$script_dir/ExplorerApplicationCatalog.swift" \
+  "$script_dir/BrowserBookmarks.swift" \
   "$script_dir/ExplorerDestinationPicker.swift" \
   "$script_dir/WebsiteFavicon.swift" \
   "$script_dir/WindowTiling.swift" \

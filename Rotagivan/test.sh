@@ -65,6 +65,9 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/AppExplorer
 xcrun swiftc "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/Tests/ExplorerApplicationCatalogTests.swift \
   -framework AppKit -o "$test_dir/ExplorerApplicationCatalogTests"
 "$test_dir/ExplorerApplicationCatalogTests"
+xcrun swiftc "${common[@]}" Rotagivan/BrowserBookmarks.swift Rotagivan/Tests/BrowserBookmarkTests.swift \
+  -o "$test_dir/BrowserBookmarkTests"
+"$test_dir/BrowserBookmarkTests"
 xcrun swiftc "${common[@]}" Rotagivan/WebsiteFavicon.swift Rotagivan/Tests/FaviconTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/FaviconTests"
 "$test_dir/FaviconTests"
@@ -110,7 +113,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
-  Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ExplorerDestinationPicker.swift \
+  Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/WebsiteFavicon.swift \
   Rotagivan/WindowTiling.swift \
   Rotagivan/ExplorerAppearance.swift \

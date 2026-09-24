@@ -30,15 +30,15 @@ const layer = (name: string, position: HudLayer["position"], accent: string, lab
 
 export function createProfile(name = "Default"): Profile {
   const main: HudLayer = {
-    id: "main", name: "Main HUD", position: "right", slots: 8, accent: "#9fe870", shortcut: "⌥ Space", tiles: mainTiles()
+    id: "main", name: "Main HUD", position: "right", slots: 8, accent: "#69c9ff", shortcut: "⌥ Space", tiles: mainTiles()
   };
   return {
     id: crypto.randomUUID(), name,
     layers: [
       main,
-      layer("Work", "right", "#ffb45c", ["Mail", "Calendar", "Slack", "Browser", "Tasks", "Docs", "Meet", "Focus"]),
-      layer("Create", "up", "#78b8ff", ["Canvas", "Notes", "Capture", "Music"]),
-      layer("Window Lab", "down", "#f48fb1", ["Left ½", "Right ½", "Top ½", "Bottom ½", "Left ⅓", "Center ⅓", "Right ⅓", "Full"])
+      layer("Work", "right", "#84bfff", ["Mail", "Calendar", "Slack", "Browser", "Tasks", "Docs", "Meet", "Focus"]),
+      layer("Create", "up", "#55d5ff", ["Canvas", "Notes", "Capture", "Music"]),
+      layer("Window Lab", "down", "#9ac8ff", ["Left ½", "Right ½", "Top ½", "Bottom ½", "Left ⅓", "Center ⅓", "Right ⅓", "Full"])
     ],
     pointer: {
       cursorSpeed: 50, cursorAcceleration: 52, smoothing: 28,

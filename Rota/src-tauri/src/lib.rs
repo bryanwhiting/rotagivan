@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, process::Command};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
+mod mac_menu;
 mod mcp;
 mod state_store;
 use state_store::RotaStore;
@@ -91,6 +92,21 @@ fn perform_native_action(action: NativeAction) -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .menu(mac_menu::build)
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if id.starts_with("nav|")
+                || id.starts_with("hud|")
+                || id.starts_with("state|")
+                || id.starts_with("action|")
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                let _ = app.emit("rota-menu", id);
+            }
+        })
         .setup(|app| {
             let directory = app.path().app_data_dir().map_err(|error| error.to_string())?;
             fs::create_dir_all(&directory)?;

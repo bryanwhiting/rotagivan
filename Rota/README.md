@@ -16,6 +16,8 @@ React/TypeScript settings surface and a Three.js spatial HUD.
 - Editable multi-step Custom Commands and app-specific overrides.
 - A shared six-family action hierarchy for window management, media control,
   system actions, macOS settings, apps and bookmarks, and Custom Commands.
+- A native macOS menu bar with standard app, edit, and window behavior plus
+  direct access to the full action hierarchy, HUD, and settings destinations.
 - Rust-owned atomic settings persistence and simplified native action adapters.
 - A local MCP Streamable HTTP server through which agents can read or edit every setting.
 

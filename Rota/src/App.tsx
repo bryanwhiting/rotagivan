@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AppWindow, Bluetooth, ChevronDown, Command, Crosshair, Database,
   Gauge, Grid3X3, Keyboard, MonitorUp, MousePointer2, Plus, Power, Radio,
@@ -81,6 +82,9 @@ export function App() {
   const [status, setStatus] = useState<BackendStatus | null>(null);
   const [toast, setToast] = useState("");
   const lastSaved = useRef("");
+  const stateRef = useRef(state);
+
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   useEffect(() => {
     Promise.all([loadState(), getBackendStatus()]).then(([saved, backend]) => {
@@ -122,6 +126,19 @@ export function App() {
     const timer = window.setTimeout(() => setToast(""), 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<string>("rota-menu", event => {
+      const [kind, family, action] = event.payload.split("|");
+      if (kind === "nav" && family) setSection(family as SectionId);
+      if (kind === "hud" && family === "open") setHudOpen(true);
+      if (kind === "state" && family === "save") void saveState(stateRef.current).then(() => setToast("Settings saved"));
+      if (kind === "action" && action) void nativeAction("test-action", action).then(message => setToast(`${family} · ${message}`));
+    }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten; });
+    return () => { disposed = true; stop?.(); };
+  }, []);
 
   const profileIndex = Math.max(0, state.profiles.findIndex(profile => profile.id === state.activeProfileId));
   const profile = state.profiles[profileIndex] ?? state.profiles[0];

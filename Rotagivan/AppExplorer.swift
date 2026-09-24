@@ -214,7 +214,13 @@ extension AppExplorerPresenting {
         }?.index
         let fallback = (current + (direction == .next ? 1 : -1) + order.count) % order.count
         guard let target = nearest ?? ((direction == .next || direction == .previous) ? fallback : nil) else { return false }
+        let currentLayer = heldKeys.activeID.flatMap { activeID in available.first { $0.id == activeID } }
+        let outgoing = HUDCarouselPreview(id: currentLayer?.id.uuidString ?? "main",
+            name: currentLayer?.name ?? "Main HUD", position: direction.departurePosition,
+            slotCount: currentLayer?.slotCount ?? settings.slotCount ?? 8,
+            entries: (currentLayer?.favorites ?? settings.favorites).map { makeEntry($0, depth: 0) })
         switchLayer(order[target])
+        model.carouselTransition = HUDCarouselTransition(direction: direction, outgoing: outgoing)
         return true
     }
 
@@ -296,6 +302,7 @@ extension AppExplorerPresenting {
     private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil) {
         guard !isVisible else { return }
         resetLocalGesture()
+        model.carouselTransition = nil
         cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
@@ -1371,6 +1378,32 @@ struct HUDCarouselPreview: Identifiable {
     let entries: [ExplorerEntry]
 }
 
+struct HUDCarouselTransition: Identifiable {
+    let id = UUID()
+    let direction: HUDNavigationAction
+    let outgoing: HUDCarouselPreview
+}
+
+private extension HUDNavigationAction {
+    var screenVector: CGVector {
+        switch self {
+        case .next: return CGVector(dx: 1, dy: 0)
+        case .previous: return CGVector(dx: -1, dy: 0)
+        case .above: return CGVector(dx: 0, dy: -1)
+        case .below: return CGVector(dx: 0, dy: 1)
+        }
+    }
+
+    var departurePosition: HUDLayerPosition {
+        switch self {
+        case .next: return .left
+        case .previous: return .right
+        case .above: return .bottom
+        case .below: return .top
+        }
+    }
+}
+
 private struct HUDMiniSector: Shape {
     let slot: ExplorerSlot
     let count: Int
@@ -1468,6 +1501,7 @@ private struct HUDMiniWheel: View {
     @Published var previousLayerName: String?
     @Published var nextLayerName: String?
     @Published var carouselPreviews: [HUDCarouselPreview] = []
+    @Published var carouselTransition: HUDCarouselTransition?
     @Published var carouselPosition: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
@@ -1486,6 +1520,8 @@ struct AppExplorerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var appeared = false
     @State private var reticleRotation = -135.0
+    @State private var carouselTransition: HUDCarouselTransition?
+    @State private var carouselProgress = 1.0
     var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
     var onBack: () -> Void = {}
@@ -1506,6 +1542,14 @@ struct AppExplorerView: View {
             reduceMotion: reduceMotion || forceReduceMotion)
     }
     private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
+    private var carouselVector: CGVector { carouselTransition?.direction.screenVector ?? .zero }
+    private var carouselArrivalOffset: CGSize {
+        CGSize(width: carouselVector.dx * 330 * (1 - carouselProgress),
+               height: carouselVector.dy * 280 * (1 - carouselProgress))
+    }
+    private var carouselArrivalAngle: Double {
+        (carouselVector.dx + carouselVector.dy) * 16 * (1 - carouselProgress)
+    }
     private var accent: Color { model.theme.accent }
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var opaqueChrome: Bool { reduceTransparency || forceReduceTransparency }
@@ -1589,6 +1633,12 @@ struct AppExplorerView: View {
         .padding(26)
         .frame(width: 470, height: 520)
         .background(ExplorerHUDBackdrop(theme: model.theme, forceReduceTransparency: forceReduceTransparency))
+        .offset(carouselArrivalOffset)
+        .rotation3DEffect(.degrees(carouselArrivalAngle),
+            axis: (x: carouselVector.dy, y: -carouselVector.dx, z: 0), perspective: 0.72)
+        .scaleEffect(carouselTransition == nil ? 1 : 0.86 + 0.14 * carouselProgress)
+        .opacity(carouselTransition == nil ? 1 : 0.28 + 0.72 * carouselProgress)
+        .overlay { carouselDeparture }
         .tint(accent)
         .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
         .scaleEffect(animates && !appeared ? 0.985 : 1)
@@ -1601,6 +1651,9 @@ struct AppExplorerView: View {
             withAnimation(feedback) {
                 reticleRotation = ExplorerHUDMotion.nearestAngle(from: reticleRotation, to: reticleAngle(direction))
             }
+        }
+        .onReceive(model.$carouselTransition.compactMap { $0 }) { transition in
+            beginCarouselTransition(transition)
         }
         .transaction { if !animates { $0.animation = nil } }
         .help(guidance)
@@ -1623,9 +1676,53 @@ struct AppExplorerView: View {
 
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
         HUDMiniWheel(preview: preview, theme: model.theme)
-            .opacity(0.38)
+            .scaleEffect(0.88)
+            .rotation3DEffect(.degrees(13),
+                axis: (x: Double(preview.position.y), y: Double(-preview.position.x), z: 0), perspective: 0.75)
+            .opacity(0.42)
             .grayscale(0.7)
             .shadow(color: .black.opacity(0.32), radius: 10, y: 6)
+    }
+
+    @ViewBuilder private var carouselDeparture: some View {
+        if let transition = carouselTransition, animates {
+            let vector = transition.direction.screenVector
+            HUDMiniWheel(preview: transition.outgoing, theme: model.theme)
+                .scaleEffect(2.05 - 1.18 * carouselProgress)
+                .offset(x: -vector.dx * 350 * carouselProgress,
+                        y: -vector.dy * 300 * carouselProgress)
+                .rotation3DEffect(.degrees(-(vector.dx + vector.dy) * 17 * carouselProgress),
+                    axis: (x: vector.dy, y: -vector.dx, z: 0), perspective: 0.72)
+                .opacity(1 - 0.78 * carouselProgress)
+                .shadow(color: .black.opacity(0.42), radius: 24, y: 12)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func beginCarouselTransition(_ transition: HUDCarouselTransition) {
+        guard animates, !isPreview else {
+            carouselTransition = nil
+            carouselProgress = 1
+            DispatchQueue.main.async { model.carouselTransition = nil }
+            return
+        }
+        var instant = Transaction()
+        instant.animation = nil
+        withTransaction(instant) {
+            carouselTransition = transition
+            carouselProgress = 0
+        }
+        DispatchQueue.main.async {
+            withAnimation(.interpolatingSpring(stiffness: 230, damping: 27)) {
+                carouselProgress = 1
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.48) {
+                guard carouselTransition?.id == transition.id else { return }
+                carouselTransition = nil
+                if model.carouselTransition?.id == transition.id { model.carouselTransition = nil }
+            }
+        }
     }
 
     private var settingsFooter: some View {

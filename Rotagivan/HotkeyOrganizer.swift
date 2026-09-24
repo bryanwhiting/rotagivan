@@ -77,7 +77,7 @@ struct HotkeyAudit {
                 let inherited = binding.trigger.assignment(in: base)
                 let resolved = binding.trigger.assignment(in: effective)
                 let detail = "\(binding.trigger.title): \(actionName(inherited.binding)) → \(actionName(binding))"
-                let navigation = binding.trigger == .twoFingerLeft || binding.trigger == .twoFingerRight
+                let navigation = [.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].contains(binding.trigger)
                 let applies = deviceEnabled && app.enabled && (base.gestures.tapToClick || navigation)
                 let explanation = !app.enabled ? "App rule disabled" : !base.gestures.tapToClick && !navigation ? "Tap actions disabled in this layer" : "Replaces the global action while \(app.name) is frontmost"
                 assignments.append(Assignment(id: "app.\(app.bundleID).\(binding.trigger.rawValue)", scope: app.name,

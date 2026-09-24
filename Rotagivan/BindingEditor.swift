@@ -31,7 +31,7 @@ struct BindingTriggerPicker: View {
                         Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                     }
                     Menu("Swipe") {
-                        ForEach([AppGestureTrigger.twoFingerLeft, .twoFingerRight]) { gesture in
+                        ForEach([AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown]) { gesture in
                             Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                         }
                     }
@@ -77,6 +77,8 @@ struct BindingActionPicker: View {
                     action = .hudNavigation(.previous)
                 }
                 Button("Next HUD", systemImage: HUDNavigationAction.next.symbol) { action = .hudNavigation(.next) }
+                Button("HUD above", systemImage: HUDNavigationAction.above.symbol) { action = .hudNavigation(.above) }
+                Button("HUD below", systemImage: HUDNavigationAction.below.symbol) { action = .hudNavigation(.below) }
                 if hudDestinations.isEmpty {
                     Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
                     ForEach(hudLayers) { layer in

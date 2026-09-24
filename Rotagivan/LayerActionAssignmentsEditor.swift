@@ -24,7 +24,7 @@ struct LayerActionAssignmentsEditor: View {
 
     private var assignments: [AppGestureBinding] {
         (AppGestureTrigger.layerActionTriggers +
-            [AppGestureTrigger.twoFingerLeft, .twoFingerRight].filter { globalBinding(for: $0) != nil }).compactMap { trigger in
+            [AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].filter { globalBinding(for: $0) != nil }).compactMap { trigger in
             let assignment = trigger.assignment(in: effectiveGestures).binding
             return assignment.action == .none ? nil : assignment
         }
@@ -97,7 +97,7 @@ struct LayerActionAssignmentsEditor: View {
             AddLayerActionSheet(existing: Set(assignments.map(\.trigger))) { trigger, action, shortcut in
                 let bindingAction: BindingAction = action == .shortcut && shortcut != nil
                     ? .from(shortcut: shortcut!) : .tap(action)
-                if trigger == .twoFingerLeft || trigger == .twoFingerRight {
+                if [.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].contains(trigger) {
                     if let existing = globalBinding(for: trigger) {
                         var updated = existing
                         updated.action = bindingAction
@@ -377,7 +377,7 @@ struct AddLayerActionSheet: View {
     @State private var shortcut: RecordedShortcut?
 
     private var standaloneSwipe: Bool {
-        tap == .twoFingerLeft || tap == .twoFingerRight
+        [.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].contains(tap)
     }
     private var trigger: AppGestureTrigger {
         guard swipeEnabled, canSwipe else { return tap }
@@ -413,6 +413,8 @@ struct AddLayerActionSheet: View {
                         Section("Two-finger swipe") {
                             Text(AppGestureTrigger.twoFingerLeft.title).tag(AppGestureTrigger.twoFingerLeft)
                             Text(AppGestureTrigger.twoFingerRight.title).tag(AppGestureTrigger.twoFingerRight)
+                            Text(AppGestureTrigger.twoFingerUp.title).tag(AppGestureTrigger.twoFingerUp)
+                            Text(AppGestureTrigger.twoFingerDown.title).tag(AppGestureTrigger.twoFingerDown)
                         }
                     }
                     .labelsHidden()

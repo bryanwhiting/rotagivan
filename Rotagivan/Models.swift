@@ -9,9 +9,48 @@ struct BindingTrigger: Codable, Equatable {
 }
 
 enum HUDNavigationAction: String, Codable, CaseIterable {
-    case previous, next
-    var title: String { self == .previous ? "Previous HUD" : "Next HUD" }
-    var symbol: String { self == .previous ? "chevron.left.2" : "chevron.right.2" }
+    case previous, next, above, below
+    var title: String {
+        switch self {
+        case .previous: return "Previous HUD (left)"
+        case .next: return "Next HUD (right)"
+        case .above: return "HUD above"
+        case .below: return "HUD below"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .previous: return "chevron.left.2"
+        case .next: return "chevron.right.2"
+        case .above: return "chevron.up.2"
+        case .below: return "chevron.down.2"
+        }
+    }
+}
+
+enum HUDLayerPosition: String, Codable, CaseIterable, Identifiable {
+    case left, right, top, bottom
+    var id: Self { self }
+    static let legacyOrder: [Self] = [.right, .bottom, .left, .top]
+    var title: String { rawValue.capitalized }
+    var symbol: String {
+        switch self {
+        case .left: return "arrow.left"
+        case .right: return "arrow.right"
+        case .top: return "arrow.up"
+        case .bottom: return "arrow.down"
+        }
+    }
+    var opposite: Self {
+        switch self {
+        case .left: return .right
+        case .right: return .left
+        case .top: return .bottom
+        case .bottom: return .top
+        }
+    }
+    var x: Int { self == .left ? -1 : self == .right ? 1 : 0 }
+    var y: Int { self == .top ? 1 : self == .bottom ? -1 : 0 }
 }
 
 /// A destination is independent of the input that invokes it. Physical output
@@ -546,6 +585,9 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     }
     var id = UUID()
     var name: String
+    // Nil preserves older configs; the first four legacy layers receive open
+    // cardinal positions in their existing order until the user arranges them.
+    var position: HUDLayerPosition? = nil
     var holdShortcut: RecordedShortcut?
     var favorites: [AppExplorerFavorite] = []
     var windowLayout: ExplorerWindowLayout = .halves
@@ -664,6 +706,19 @@ struct AppExplorerSettings: Codable, Equatable {
     var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
+    var resolvedHUDPositions: [UUID: HUDLayerPosition] {
+        let layers = holdLayers ?? []
+        var used = Set(layers.compactMap(\.position))
+        var result = Dictionary(uniqueKeysWithValues: layers.compactMap { layer in
+            layer.position.map { (layer.id, $0) }
+        })
+        for layer in layers where layer.position == nil {
+            guard let position = HUDLayerPosition.legacyOrder.first(where: { !used.contains($0) }) else { continue }
+            result[layer.id] = position
+            used.insert(position)
+        }
+        return result
+    }
     /// Present generated legacy window presets through the ordinary group editor.
     /// The first edit saves explicit slots; an empty saved array stays empty.
     func windowEditor(at path: [ExplorerSlot] = []) -> Self {
@@ -812,7 +867,8 @@ struct AppExplorerSettings: Codable, Equatable {
         let windowCommandKeys = windowManager?.shortcuts.map(\.shortcut) ?? []
         func validLayers(_ layers: [ExplorerHoldLayer], depth: Int, groupDepth: Int, count: Int = 8,
                          commandKeys: [RecordedShortcut] = []) -> Bool {
-            guard depth <= 12, layers.count <= 16, Set(layers.map(\.id)).count == layers.count else { return false }
+            guard depth <= 12, layers.count <= 16, Set(layers.map(\.id)).count == layers.count,
+                  Set(layers.compactMap(\.position)).count == layers.compactMap(\.position).count else { return false }
             var keys = Set<String>()
             for layer in layers {
                 remainingLayers -= 1
@@ -1644,7 +1700,7 @@ struct StoredSettings: Codable {
         }
         for binding in assignedGestures {
             guard let trigger = binding.trigger.gesture else { continue }
-            if trigger == .twoFingerLeft || trigger == .twoFingerRight {
+            if [.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].contains(trigger) {
                 var swipe = result.twoFingerSwipe ?? DoubleTapSwipeSettings()
                 if let direction = trigger.direction {
                     swipe.setAction(.shortcut, for: direction)

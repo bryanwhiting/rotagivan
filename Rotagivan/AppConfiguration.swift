@@ -225,7 +225,7 @@ private indirect enum ConfigurationValue: Codable {
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "actionBindings defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager"
             case "windowManager": allowed = "actionBindings layout layers shortcuts favorites slotCount"
-            case "layers", "holdLayers": allowed = "actionBindings id name holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
+            case "layers", "holdLayers": allowed = "actionBindings id name position holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
             case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
             case "actionBindings": allowed = "id trigger action"
             case "trigger": allowed = "keyboard gesture"

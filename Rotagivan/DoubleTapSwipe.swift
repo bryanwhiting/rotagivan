@@ -1,13 +1,13 @@
 import Foundation
 
-/// Quick horizontal two-finger gestures reserve their axis before emitting
-/// any scroll. Vertical movement or a slow start commits to ordinary scrolling.
+/// A quick two-finger gesture reserves only a configured direction before
+/// emitting scroll. Unassigned directions and slow starts still scroll normally.
 struct TwoFingerNavigationRecognizer {
     struct Result {
         var consumed = false
         var direction: SwipeDirection?
     }
-    private enum Phase { case idle, candidate, horizontal, scrolling, ending, drain }
+    private enum Phase { case idle, candidate, swiping, scrolling, ending, drain }
     private var phase = Phase.idle
     private var origins: [UInt8: CGPoint] = [:]
     private var last: [UInt8: CGPoint] = [:]
@@ -30,7 +30,7 @@ struct TwoFingerNavigationRecognizer {
         }
         if phase == .idle {
             guard touching.count == 2, let settings, settings.enabled,
-                  settings.action(for: .left) != .none || settings.action(for: .right) != .none else { return Result() }
+                  [.left, .right, .up, .down].contains(where: { settings.action(for: $0) != .none }) else { return Result() }
             guard Set(touching.map(\.id)).count == 2 else { phase = .drain; return Result(consumed:true) }
             captured = settings; profile = profileID
             origins = Dictionary(uniqueKeysWithValues: touching.map { ($0.id, CGPoint(x:$0.x,y:$0.y)) })
@@ -62,12 +62,15 @@ struct TwoFingerNavigationRecognizer {
             }
             let dx = last.reduce(0.0) { $0 + $1.value.x - (origins[$1.key]?.x ?? $1.value.x) } / 2
             let dy = last.reduce(0.0) { $0 + $1.value.y - (origins[$1.key]?.y ?? $1.value.y) } / 2
-            let direction: SwipeDirection = dx < 0 ? .left : .right
+            let horizontal = abs(dx) > abs(dy) * 1.8
+            let vertical = abs(dy) > abs(dx) * 1.8
+            let direction: SwipeDirection = horizontal ? (dx < 0 ? .left : .right) : (dy < 0 ? .up : .down)
             let coherent = last.allSatisfy { id, point in
-                let fingerDX = point.x - origins[id]!.x
-                return abs(fingerDX) >= 40 && fingerDX * dx > 0
+                let movement = horizontal ? point.x - origins[id]!.x : point.y - origins[id]!.y
+                return abs(movement) >= 40 && movement * (horizontal ? dx : dy) > 0
             }
-            endingDirection = coherent && abs(dx) >= 80 && abs(dx) > abs(dy) * 1.8 && now.timeIntervalSince(start) <= 0.35 ? direction : nil
+            endingDirection = coherent && (horizontal || vertical) && hypot(dx, dy) >= 80 &&
+                captured?.action(for: direction) != TapAction.none && now.timeIntervalSince(start) <= 0.35 ? direction : nil
             if touching.isEmpty { phase = .idle; return Result(consumed: true, direction: endingDirection) }
             firstLift = now; phase = .ending
             return Result(consumed: true)
@@ -81,14 +84,17 @@ struct TwoFingerNavigationRecognizer {
         let dy = touching.reduce(0.0) { $0 + $1.y - origins[$1.id]!.y } / 2
         travel = max(travel, hypot(dx,dy))
         let elapsed = now.timeIntervalSince(start)
-        if abs(dy) >= 12 && abs(dy) * 1.8 >= abs(dx) || elapsed > (phase == .candidate ? 0.18 : 0.35) {
+        if elapsed > (phase == .candidate ? 0.18 : 0.35) {
             phase = .scrolling
             return Result()
         }
-        if phase == .candidate && abs(dx) >= 12 && abs(dx) > abs(dy) * 1.8 {
-            let direction: SwipeDirection = dx < 0 ? .left : .right
+        if phase == .candidate && hypot(dx, dy) >= 12 {
+            let horizontal = abs(dx) > abs(dy) * 1.8
+            let vertical = abs(dy) > abs(dx) * 1.8
+            guard horizontal || vertical else { phase = .scrolling; return Result() }
+            let direction: SwipeDirection = horizontal ? (dx < 0 ? .left : .right) : (dy < 0 ? .up : .down)
             guard captured?.action(for: direction) != TapAction.none else { phase = .scrolling; return Result() }
-            phase = .horizontal
+            phase = .swiping
         }
         return Result(consumed: true)
     }

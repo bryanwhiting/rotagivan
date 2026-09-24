@@ -7,6 +7,7 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
     case doubleLeft = "double.left", doubleRight = "double.right", doubleUp = "double.up", doubleDown = "double.down"
     case doubleTopLeft = "double.topLeft", doubleTopRight = "double.topRight", doubleBottomLeft = "double.bottomLeft", doubleBottomRight = "double.bottomRight"
     case twoFingerLeft = "twoFinger.left", twoFingerRight = "twoFinger.right"
+    case twoFingerUp = "twoFinger.up", twoFingerDown = "twoFinger.down"
     case oneTapTwoLeft = "oneTapTwo.left", oneTapTwoRight = "oneTapTwo.right", oneTapTwoUp = "oneTapTwo.up", oneTapTwoDown = "oneTapTwo.down"
     case oneTapTwoTopLeft = "oneTapTwo.topLeft", oneTapTwoTopRight = "oneTapTwo.topRight", oneTapTwoBottomLeft = "oneTapTwo.bottomLeft", oneTapTwoBottomRight = "oneTapTwo.bottomRight"
     case twoSingleLeft = "twoSingle.left", twoSingleRight = "twoSingle.right", twoSingleUp = "twoSingle.up", twoSingleDown = "twoSingle.down"

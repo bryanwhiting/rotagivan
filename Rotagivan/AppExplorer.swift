@@ -185,13 +185,36 @@ extension AppExplorerPresenting {
     @discardableResult func navigateHUD(_ direction: HUDNavigationAction) -> Bool {
         guard isVisible, !isEditing, !model.showingWindowManager,
               !model.showingMediaControls, !model.showingAppWindows else { return false }
-        let available = (configuration().holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
+        let settings = configuration()
+        let available = (settings.holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
         let order: [UUID?] = [nil] + available.map { Optional($0.id) }
         guard order.count > 1 else { return false }
         let current = order.firstIndex(where: { $0 == heldKeys.activeID }) ?? 0
-        let delta = direction == .next ? 1 : -1
-        let target = order[(current + delta + order.count) % order.count]
-        switchLayer(target)
+        let positions = settings.resolvedHUDPositions
+        let source = heldKeys.activeID.flatMap { positions[$0] }
+        let origin = (x: source?.x ?? 0, y: source?.y ?? 0)
+        let vector: (x: Int, y: Int)
+        switch direction {
+        case .next: vector = (1, 0)
+        case .previous: vector = (-1, 0)
+        case .above: vector = (0, 1)
+        case .below: vector = (0, -1)
+        }
+        let candidates = order.indices.filter { $0 != current }.compactMap { index -> (index: Int, forward: Int, cross: Int)? in
+            let id = order[index]
+            guard id == nil || id.flatMap({ positions[$0] }) != nil else { return nil }
+            let point = id.flatMap { positions[$0] }
+            let dx = (point?.x ?? 0) - origin.x, dy = (point?.y ?? 0) - origin.y
+            let forward = dx * vector.x + dy * vector.y
+            guard forward > 0 else { return nil }
+            return (index, forward, abs(dx * vector.y - dy * vector.x))
+        }
+        let nearest = candidates.min { lhs, rhs in
+            (lhs.cross, lhs.forward) < (rhs.cross, rhs.forward)
+        }?.index
+        let fallback = (current + (direction == .next ? 1 : -1) + order.count) % order.count
+        guard let target = nearest ?? ((direction == .next || direction == .previous) ? fallback : nil) else { return false }
+        switchLayer(order[target])
         return true
     }
 
@@ -299,7 +322,7 @@ extension AppExplorerPresenting {
         loadEntries()
         model.selected = nil
         input = AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount)
-        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
+        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
         panel.title = "App Explorer"
@@ -492,6 +515,7 @@ extension AppExplorerPresenting {
             model.previousLayerName = nil
             model.nextLayerName = nil
             model.carouselPosition = nil
+            model.carouselPreviews = []
             return
         }
         let layers = (settings.holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
@@ -500,12 +524,29 @@ extension AppExplorerPresenting {
             model.previousLayerName = nil
             model.nextLayerName = nil
             model.carouselPosition = nil
+            model.carouselPreviews = []
             return
         }
         let current = order.firstIndex(where: { $0.id == heldKeys.activeID }) ?? 0
         model.previousLayerName = order[(current - 1 + order.count) % order.count].name
         model.nextLayerName = order[(current + 1) % order.count].name
         model.carouselPosition = "\(current + 1) of \(order.count)"
+        let positions = settings.resolvedHUDPositions
+        let activePosition = heldKeys.activeID.flatMap { positions[$0] }
+        var taken = Set<HUDLayerPosition>()
+        var previews: [HUDCarouselPreview] = []
+        let others: [(id: UUID?, name: String, favorites: [AppExplorerFavorite], count: Int, preferred: HUDLayerPosition?)] =
+            [(nil, "Main HUD", settings.favorites, settings.slotCount ?? 8, activePosition?.opposite)] +
+            layers.map { (Optional($0.id), $0.name, $0.favorites, $0.slotCount ?? settings.slotCount ?? 8, positions[$0.id]) }
+        for layer in others where layer.id != heldKeys.activeID {
+            guard let preferred = layer.preferred else { continue }
+            guard let position = ([preferred] + HUDLayerPosition.allCases).first(where: { !taken.contains($0) }) else { continue }
+            taken.insert(position)
+            previews.append(HUDCarouselPreview(id: layer.id?.uuidString ?? "main", name: layer.name,
+                position: position, slotCount: layer.count,
+                entries: layer.favorites.map { makeEntry($0, depth: 0) }))
+        }
+        model.carouselPreviews = previews
     }
 
     private func loadEntries() {
@@ -707,10 +748,17 @@ extension AppExplorerPresenting {
         var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
         if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
            (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
-            let defaults: [ActionBinding] = [
+            let occupied = Set(configuration().resolvedHUDPositions.values)
+            var defaults: [ActionBinding] = [
                 ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .hudNavigation(.next)),
                 ActionBinding(trigger: BindingTrigger(gesture: .twoFingerRight), action: .hudNavigation(.previous))
             ]
+            if occupied.contains(.top) {
+                defaults.append(ActionBinding(trigger: BindingTrigger(gesture: .twoFingerUp), action: .hudNavigation(.above)))
+            }
+            if occupied.contains(.bottom) {
+                defaults.append(ActionBinding(trigger: BindingTrigger(gesture: .twoFingerDown), action: .hudNavigation(.below)))
+            }
             gestures += defaults.filter { fallback in
                 !gestures.contains { $0.trigger.identity == fallback.trigger.identity }
             }
@@ -808,7 +856,13 @@ extension AppExplorerPresenting {
            let direction = SwipeDirection.classify(dx: dx, dy: dy) {
             let trigger: AppGestureTrigger?
             if fingers == 2 && localGestureTapCount == 0 {
-                trigger = direction == .left ? .twoFingerLeft : direction == .right ? .twoFingerRight : nil
+                switch direction {
+                case .left: trigger = .twoFingerLeft
+                case .right: trigger = .twoFingerRight
+                case .up: trigger = .twoFingerUp
+                case .down: trigger = .twoFingerDown
+                default: trigger = nil
+                }
             } else if oneTapPairSwipe && fingers == 2 {
                 trigger = .combining(tap: .oneFingerTap, direction: direction, swipeFingers: 2)
             } else {
@@ -1309,6 +1363,90 @@ struct ExplorerEntry {
     }
 }
 
+struct HUDCarouselPreview: Identifiable {
+    let id: String
+    let name: String
+    let position: HUDLayerPosition
+    let slotCount: Int
+    let entries: [ExplorerEntry]
+}
+
+private struct HUDMiniSector: Shape {
+    let slot: ExplorerSlot
+    let count: Int
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let half = 180.0 / Double(count) - 1.5
+        let start = (slot.angle - half) * .pi / 180
+        let end = (slot.angle + half) * .pi / 180
+        func point(_ angle: Double, _ radius: Double) -> CGPoint {
+            CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+        }
+        var path = Path()
+        path.move(to: point(start, 30))
+        path.addLine(to: point(start, 106))
+        for step in 1...10 { path.addLine(to: point(start + (end - start) * Double(step) / 10, 106)) }
+        path.addLine(to: point(end, 30))
+        for step in 1...10 { path.addLine(to: point(end - (end - start) * Double(step) / 10, 30)) }
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct HUDMiniWheel: View {
+    let preview: HUDCarouselPreview
+    let theme: ExplorerTheme
+    private var accent: Color { theme.accent }
+    var body: some View {
+        ZStack {
+            Circle().fill(theme.surface.opacity(0.95))
+                .overlay(Circle().stroke(accent.opacity(0.8), lineWidth: 1.5))
+            ForEach(ExplorerSlot.slots(preview.slotCount), id: \.self) { slot in
+                let entry = preview.entries.first { $0.direction == slot }
+                HUDMiniSector(slot: slot, count: preview.slotCount)
+                    .fill(entry == nil ? accent.opacity(0.04) : accent.opacity(0.17))
+                    .overlay(HUDMiniSector(slot: slot, count: preview.slotCount)
+                        .stroke(accent.opacity(entry == nil ? 0.14 : 0.55), lineWidth: 0.8))
+                if let entry {
+                    let angle = slot.angle * .pi / 180
+                    VStack(spacing: 1) {
+                        tileSymbol(entry).frame(width: 21, height: 21)
+                        Text(entry.name)
+                            .font(.system(size: preview.slotCount > 8 ? 5 : 6, weight: .medium))
+                            .lineLimit(1).truncationMode(.tail)
+                            .frame(width: preview.slotCount > 8 ? 34 : 47)
+                    }
+                    .position(x: 112 + cos(angle) * 70, y: 112 + sin(angle) * 70)
+                }
+            }
+            VStack(spacing: 2) {
+                Image(systemName: "square.stack.3d.up").font(.system(size: 12))
+                Text(preview.name).font(.system(size: 7, weight: .semibold))
+                    .lineLimit(2).multilineTextAlignment(.center).frame(width: 55)
+            }
+            .foregroundStyle(accent)
+            .frame(width: 58, height: 58)
+            .background(Circle().fill(theme.surface))
+        }
+        .foregroundStyle(.white)
+        .frame(width: 224, height: 224)
+        .accessibilityLabel("\(preview.name), \(preview.entries.count) tiles, \(preview.position.title)")
+    }
+
+    @ViewBuilder private func tileSymbol(_ entry: ExplorerEntry) -> some View {
+        if let icon = entry.icon {
+            Image(nsImage: icon).resizable().scaledToFit()
+        } else if entry.isWebURL {
+            WebsiteFavicon(url: entry.url, size: 21, symbolName: entry.webIconSymbol)
+        } else {
+            Image(systemName: entry.command?.symbol ??
+                (entry.isGroup ? "folder.fill" : entry.isWindowManager ? "rectangle.split.2x2" :
+                entry.shortcut != nil ? "keyboard" : "app.dashed"))
+                .resizable().scaledToFit()
+        }
+    }
+}
+
 @MainActor final class ExplorerModel: ObservableObject {
     // MRU starts at the left and proceeds clockwise. Positions freeze on open.
     static let directions = AppExplorerSettings.recentDirections
@@ -1329,6 +1467,7 @@ struct ExplorerEntry {
     @Published var layerName: String?
     @Published var previousLayerName: String?
     @Published var nextLayerName: String?
+    @Published var carouselPreviews: [HUDCarouselPreview] = []
     @Published var carouselPosition: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
@@ -1465,49 +1604,28 @@ struct AppExplorerView: View {
         }
         .transaction { if !animates { $0.animation = nil } }
         .help(guidance)
-        .frame(width: 640, height: 520)
+        .frame(width: 950, height: 850)
         .background { carouselBackdrop }
-        .animation(feedback, value: model.previousLayerName)
-        .animation(feedback, value: model.nextLayerName)
+        .animation(feedback, value: model.carouselPreviews.map(\.id))
     }
 
     @ViewBuilder private var carouselBackdrop: some View {
         ZStack {
-            if let previous = model.previousLayerName {
-                carouselGhost(previous, direction: .previous).offset(x: -205)
-            }
-            if let next = model.nextLayerName {
-                carouselGhost(next, direction: .next).offset(x: 205)
+            ForEach(model.carouselPreviews) { preview in
+                carouselGhost(preview)
+                    .offset(x: CGFloat(preview.position.x) * 340,
+                            y: CGFloat(-preview.position.y) * 290)
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func carouselGhost(_ name: String, direction: HUDNavigationAction) -> some View {
-        ZStack {
-            if model.theme.isRadial {
-                Circle()
-                    .fill(Color.black.opacity(0.38))
-                    .overlay(Circle().stroke(Color.gray.opacity(0.72), lineWidth: 1.2))
-                    .frame(width: 330, height: 330)
-            } else {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
-                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.gray.opacity(0.55)))
-                    .frame(width: 330, height: 430)
-            }
-            VStack(spacing: 8) {
-                Image(systemName: direction.symbol).font(.title3)
-                Text(name).font(.caption.weight(.semibold)).lineLimit(1)
-                Text(direction == .previous ? "Swipe right" : "Swipe left").font(.caption2)
-            }
-            .foregroundStyle(Color.gray.opacity(0.9))
-        }
-        .scaleEffect(0.9)
-        .opacity(0.42)
-        .grayscale(1)
-        .shadow(color: .black.opacity(0.32), radius: 10, y: 6)
+    private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
+        HUDMiniWheel(preview: preview, theme: model.theme)
+            .opacity(0.38)
+            .grayscale(0.7)
+            .shadow(color: .black.opacity(0.32), radius: 10, y: 6)
     }
 
     private var settingsFooter: some View {

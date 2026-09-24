@@ -264,15 +264,50 @@ struct AppExplorerSettingsView: View {
             : allSources
     }
 
-    private func moveHUDLayer(_ id: UUID, by offset: Int) {
+    private func placeHUDLayer(_ id: UUID, at destination: HUDLayerPosition) {
         var next = baseSettings
         guard var layers = next.holdLayers,
               let source = layers.firstIndex(where: { $0.id == id }) else { return }
-        let destination = source + offset
-        guard layers.indices.contains(destination) else { return }
-        layers.swapAt(source, destination)
+        let resolved = next.resolvedHUDPositions
+        let previous = resolved[id]
+        for index in layers.indices { layers[index].position = resolved[layers[index].id] }
+        if let occupied = layers.firstIndex(where: { $0.position == destination && $0.id != id }) {
+            layers[occupied].position = previous
+        }
+        layers[source].position = destination
         next.holdLayers = layers
         if saveBase(next) { selectedLayerID = id }
+    }
+
+    private func layerAt(_ position: HUDLayerPosition) -> ExplorerHoldLayer? {
+        let resolved = baseSettings.resolvedHUDPositions
+        return baseSettings.holdLayers?.first { resolved[$0.id] == position }
+    }
+
+    private func hudPositionCell(_ position: HUDLayerPosition) -> some View {
+        Group {
+            if let layer = layerAt(position) {
+                hudLayerCard(layer, index: (baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0) + 1)
+                    .draggable(layer.id.uuidString)
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: position.symbol).font(.title3)
+                    Text("Drop a HUD here").font(.caption.weight(.medium))
+                    Text(position.title).font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .frame(width: 220, height: 170)
+                .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+            }
+        }
+        .dropDestination(for: String.self) { identifiers, _ in
+            guard let value = identifiers.first, let id = UUID(uuidString: value),
+                  baseSettings.holdLayers?.contains(where: { $0.id == id }) == true else { return false }
+            placeHUDLayer(id, at: position)
+            return true
+        }
+        .accessibilityIdentifier("hud-position-\(position.rawValue)")
     }
 
     private func hudLayerCard(_ layer: ExplorerHoldLayer?, index: Int) -> some View {
@@ -325,17 +360,16 @@ struct AppExplorerSettingsView: View {
                         else { creatingLayer = false; editingLayer = layer }
                     }
                     Spacer(minLength: 0)
-                    let orderIndex = baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0
-                    Button { moveHUDLayer(layer.id, by: -1) } label: {
-                        Image(systemName: "chevron.left")
+                    Menu {
+                        ForEach(HUDLayerPosition.allCases) { position in
+                            Button(position.title, systemImage: position.symbol) {
+                                placeHUDLayer(layer.id, at: position)
+                            }
+                        }
+                    } label: {
+                        Text(baseSettings.resolvedHUDPositions[layer.id]?.title ?? "Unplaced")
                     }
-                    .disabled(orderIndex == 0)
-                    .help("Move \(layer.name) left")
-                    Button { moveHUDLayer(layer.id, by: 1) } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .disabled(orderIndex + 1 >= (baseSettings.holdLayers?.count ?? 0))
-                    .help("Move \(layer.name) right")
+                    .help("Place \(layer.name) around the Main HUD")
                 }
                 .font(.caption).buttonStyle(.link).padding(.horizontal, 13).frame(height: 32)
             } else {
@@ -370,7 +404,7 @@ struct AppExplorerSettingsView: View {
                     Text("HUD layers").font(.headline)
                     Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Main HUD stays first. Reorder custom layers below; two-finger swipes wrap through them from left to right.")
+                    Text("Drag a HUD to a position around Main, or choose a position on its card. Two-finger swipes move in that direction.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -391,13 +425,29 @@ struct AppExplorerSettingsView: View {
                 .disabled((baseSettings.holdLayers ?? []).count >= 16 ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
             }
-            ScrollView(.horizontal, showsIndicators: true) {
+            VStack(spacing: 10) {
+                hudPositionCell(.top)
                 HStack(alignment: .top, spacing: 10) {
+                    hudPositionCell(.left)
                     hudLayerCard(nil, index: 0)
-                    ForEach(Array((baseSettings.holdLayers ?? []).enumerated()), id: \.element.id) { index, layer in
-                        hudLayerCard(layer, index: index + 1)
+                    hudPositionCell(.right)
+                }
+                hudPositionCell(.bottom)
+            }
+            .frame(maxWidth: .infinity)
+            let placed = baseSettings.resolvedHUDPositions
+            let unplaced = (baseSettings.holdLayers ?? []).filter { placed[$0.id] == nil }
+            if !unplaced.isEmpty {
+                Text("Unplaced HUDs · assign a position to show one beside the active HUD")
+                    .font(.caption).foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: 10) {
+                        ForEach(unplaced) { layer in
+                            hudLayerCard(layer, index: (baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0) + 1)
+                                .draggable(layer.id.uuidString)
+                        }
                     }
-                }.padding(.vertical, 2)
+                }
             }
         }
     }

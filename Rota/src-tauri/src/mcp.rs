@@ -64,12 +64,12 @@ impl RotaMcp {
         state.pointer(&request.pointer).cloned().map(Json).ok_or_else(|| format!("Setting path does not exist: {}", request.pointer))
     }
 
-    #[tool(name = "rota_set_setting", description = "Edit any existing Rota setting using an RFC 6901 JSON Pointer. Read settings first and preserve the existing JSON type. This covers devices, HUD layers/tiles, motion, calibration, macros, overrides, sync, and general settings.")]
+    #[tool(name = "rota_set_setting", description = "Edit any existing Rota setting using an RFC 6901 JSON Pointer. Read settings first and preserve the existing JSON type. This covers devices, HUD layers/tiles, motion, calibration, Custom Commands, overrides, sync, and general settings.")]
     async fn set_setting(&self, Parameters(request): Parameters<SetRequest>) -> Result<Json<Value>, String> {
         self.store.set_pointer(&request.pointer, request.value).map(Json)
     }
 
-    #[tool(name = "rota_delete_setting", description = "Delete an object property or array element from Rota settings using an RFC 6901 JSON Pointer. Intended for removing profiles, layers, tiles, macros, and overrides after reading current settings.")]
+    #[tool(name = "rota_delete_setting", description = "Delete an object property or array element from Rota settings using an RFC 6901 JSON Pointer. Intended for removing profiles, layers, tiles, Custom Commands, and overrides after reading current settings.")]
     async fn delete_setting(&self, Parameters(request): Parameters<PointerRequest>) -> Result<Json<Value>, String> {
         self.store.delete_pointer(&request.pointer).map(Json)
     }
@@ -79,7 +79,7 @@ impl RotaMcp {
         self.store.replace(request.state).map(Json)
     }
 
-    #[tool(name = "rota_patch_settings", description = "Atomically apply an RFC 6902 JSON Patch to Rota settings. This is the preferred way to add, remove, reorder, or change multiple profiles, layers, tiles, macros, and overrides.")]
+    #[tool(name = "rota_patch_settings", description = "Atomically apply an RFC 6902 JSON Patch to Rota settings. This is the preferred way to add, remove, reorder, or change multiple profiles, layers, tiles, Custom Commands, and overrides.")]
     async fn patch_settings(&self, Parameters(request): Parameters<PatchRequest>) -> Result<Json<Value>, String> {
         self.store.apply_patch(request.patch).map(Json)
     }
@@ -95,8 +95,16 @@ impl RotaMcp {
                 "activeLayerId": "layer ID", "profiles": "profiles with layers, tiles, pointer, calibration",
                 "navigatorEnabled": "boolean", "appleEnabled": "boolean", "appleInputAllowed": "boolean",
                 "shareActions": "boolean", "hudTheme": "graphite | starburst | air", "hudAnimations": "boolean",
-                "macros": "macro array", "overrides": "app override array", "syncEnabled": "boolean", "syncEndpoint": "string"
+                "macros": "Custom Commands array (legacy storage key)", "overrides": "app override array", "syncEnabled": "boolean", "syncEndpoint": "string"
             },
+            "actionHierarchy": [
+                { "family": "Window Management", "actions": ["Left Half", "Right Half", "Top Half", "Bottom Half", "Left Third", "Center Third", "Right Third", "Fill Desktop", "Toggle Full Screen", "Minimize Window", "Close Window"] },
+                { "family": "Media Control", "actions": ["Play / Pause", "Previous Track", "Next Track", "Volume Up", "Volume Down", "Mute"] },
+                { "family": "System Actions", "actions": ["Copy", "Paste", "Cut", "Undo", "Redo", "Select All", "Save", "Find"] },
+                { "family": "macOS Settings", "actions": ["Mission Control", "Previous Desktop", "Next Desktop", "Show Desktop", "App Windows", "Trackpad Settings", "Accessibility Settings"] },
+                { "family": "Open Apps & Bookmarks", "actions": ["Open App", "Open Bookmark", "Recent Apps", "Current App Windows"] },
+                { "family": "Custom Commands", "actions": ["Run Custom Command", "Keystroke Sequence", "Create Custom Command"] }
+            ],
             "recommended": "Preserve IDs, keep HUD slot counts from 2 through 16, and keep percentage controls from 0 through 100."
         }))
     }

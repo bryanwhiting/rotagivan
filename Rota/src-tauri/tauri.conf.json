@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Rota",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "app.rota.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -30,6 +30,6 @@
     "targets": ["app", "dmg"],
     "category": "Utility",
     "shortDescription": "Spatial control for your trackpad",
-    "longDescription": "Rota maps trackpad gestures to pointer profiles, macros, windows, and a spatial HUD."
+    "longDescription": "Rota maps trackpad gestures to pointer profiles, Custom Commands, windows, and a spatial HUD."
   }
 }

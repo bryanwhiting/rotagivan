@@ -1,4 +1,4 @@
-export type SectionId = "devices" | "hud" | "calibration" | "macros" | "overrides" | "pointer" | "general";
+export type SectionId = "devices" | "hud" | "calibration" | "commands" | "overrides" | "pointer" | "general";
 export type HudDirection = "left" | "right" | "up" | "down";
 export type HudTheme = "graphite" | "starburst" | "air";
 

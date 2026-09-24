@@ -7,19 +7,31 @@ import {
 import { createDefaultState, createProfile } from "./defaults";
 import { getBackendStatus, loadState, nativeAction, saveState } from "./lib/backend";
 import { HudScene } from "./components/HudScene";
+import { ACTION_CATEGORIES, actionCategoryFor, canonicalAction } from "./actionCatalog";
 import type { BackendStatus, HudDirection, HudLayer, Profile, RotaMacro, RotaState, SectionId, Tile } from "./types";
 
 const sections: { id: SectionId; label: string; eyebrow: string; icon: typeof Grid3X3 }[] = [
   { id: "devices", label: "Devices", eyebrow: "Input", icon: Bluetooth },
   { id: "hud", label: "HUD Studio", eyebrow: "Spatial", icon: Rotate3D },
   { id: "calibration", label: "Calibration", eyebrow: "Gesture", icon: Crosshair },
-  { id: "macros", label: "Macros", eyebrow: "Automation", icon: Keyboard },
+  { id: "commands", label: "Custom Commands", eyebrow: "Compose", icon: Keyboard },
   { id: "overrides", label: "App Overrides", eyebrow: "Context", icon: AppWindow },
   { id: "pointer", label: "Pointer & Scroll", eyebrow: "Motion", icon: MousePointer2 },
   { id: "general", label: "General", eyebrow: "System", icon: Settings2 }
 ];
 
 const clone = <T,>(value: T): T => structuredClone(value);
+
+function normalizeActionCatalog(state: RotaState) {
+  const next = clone(state);
+  const normalizeTiles = (tiles: Tile[]) => tiles.forEach(tile => {
+    tile.action = canonicalAction(tile.action);
+    if (tile.children) normalizeTiles(tile.children);
+  });
+  next.profiles.forEach(profile => profile.layers.forEach(layer => normalizeTiles(layer.tiles)));
+  next.overrides.forEach(item => { item.action = canonicalAction(item.action); });
+  return next;
+}
 
 function Toggle({ checked, onChange, label, detail }: { checked: boolean; onChange: (value: boolean) => void; label: string; detail?: string }) {
   return <label className="toggle-row"><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span><button type="button" role="switch" aria-checked={checked} className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button></label>;
@@ -31,6 +43,19 @@ function Range({ label, value, min = 0, max = 100, unit = "%", onChange }: { lab
 
 function Card({ title, icon: Icon, children, className = "" }: { title: string; icon: typeof Grid3X3; children: React.ReactNode; className?: string }) {
   return <section className={`card ${className}`}><header><Icon size={17} /><h3>{title}</h3></header><div className="card-body">{children}</div></section>;
+}
+
+function ActionSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const known = actionCategoryFor(value);
+  return <select value={value} onChange={event => onChange(event.target.value)}>
+    {!known && value && value !== "Unassigned" && <option value={value}>{value} · Legacy</option>}
+    <option value="Unassigned">Unassigned</option>
+    {ACTION_CATEGORIES.map(category => <optgroup key={category.id} label={category.label}>{category.actions.map(action => <option key={action.label} value={action.label}>{action.label}</option>)}</optgroup>)}
+  </select>;
+}
+
+function ActionHierarchy() {
+  return <section className="action-hierarchy" aria-label="Action hierarchy"><header><span>ACTION HIERARCHY</span><strong>Choose a family, then an action</strong><p>Every HUD tile and gesture follows the same six-part structure.</p></header><div>{ACTION_CATEGORIES.map((category, index) => <article key={category.id}><i>{String(index + 1).padStart(2, "0")}</i><b>{category.glyph}</b><span><strong>{category.label}</strong><small>{category.description}</small></span><em>{category.actions.length}</em></article>)}</div></section>;
 }
 
 function MotionGraph({ speed, acceleration, color }: { speed: number; acceleration: number; color: string }) {
@@ -59,10 +84,10 @@ export function App() {
 
   useEffect(() => {
     Promise.all([loadState(), getBackendStatus()]).then(([saved, backend]) => {
-      const value = saved ?? createDefaultState();
+      const value = normalizeActionCatalog(saved ?? createDefaultState());
       setState(value); setStatus(backend); setReady(true);
       lastSaved.current = JSON.stringify(value);
-      if (!saved) void saveState(value);
+      if (!saved || JSON.stringify(saved) !== lastSaved.current) void saveState(value);
     });
   }, []);
 
@@ -137,7 +162,7 @@ export function App() {
         {section === "devices" && <DevicesPage state={state} update={update} notify={notify} />}
         {section === "hud" && <HudPage state={state} profile={profile} layer={layer} layerIndex={layerIndex} selectLayer={setSelectedLayerId} update={update} updateLayer={updateLayer} navigate={navigateHud} open={() => setHudOpen(true)} />}
         {section === "calibration" && <CalibrationPage profile={profile} update={updateProfile} />}
-        {section === "macros" && <MacrosPage state={state} update={update} />}
+        {section === "commands" && <CustomCommandsPage state={state} update={update} />}
         {section === "overrides" && <OverridesPage state={state} update={update} />}
         {section === "pointer" && <PointerPage profile={profile} update={updateProfile} />}
         {section === "general" && <GeneralPage state={state} status={status} update={update} addProfile={addProfile} notify={notify} />}
@@ -175,7 +200,7 @@ function HudPage({ state, profile, layer, layerIndex, selectLayer, update, updat
     <section className="inspector"><div className="layer-tabs"><div>{profile.layers.map(item => <button key={item.id} className={item.id === layer.id ? "active" : ""} onClick={() => selectLayer(item.id)}>{item.name}</button>)}</div><button onClick={addLayer}><Plus size={14}/></button></div>
       <Card title="Layer geometry" icon={Grid3X3}><label className="field"><span>Name</span><input value={layer.name} onChange={event => updateLayer(draft => { draft.name = event.target.value; })}/></label><div className="field split"><span>Direction</span><select value={layer.position} onChange={event => updateLayer(draft => { draft.position = event.target.value as HudDirection; })}>{["left","right","up","down"].map(value => <option key={value}>{value}</option>)}</select></div><Range label="Tile slots" value={layer.slots} min={2} max={16} unit="" onChange={setSlots}/><label className="field color-field"><span>Accent</span><input type="color" value={layer.accent} onChange={event => updateLayer(draft => { draft.accent = event.target.value; })}/><code>{layer.accent}</code></label></Card>
       <Card title="Surface & motion" icon={Sparkles}><div className="segmented">{(["graphite","starburst","air"] as const).map(theme => <button key={theme} className={state.hudTheme === theme ? "active" : ""} onClick={() => update(draft => { draft.hudTheme = theme; })}>{theme}</button>)}</div><Toggle checked={state.hudAnimations} onChange={value => update(draft => { draft.hudAnimations = value; })} label="Physics animation" detail="Quaternion rotation, inertia and depth"/></Card>
-      {selected && <Card title={`Tile ${selectedTile + 1} assignment`} icon={Command}><label className="field"><span>Label</span><input value={selected.label} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].label = event.target.value; })}/></label><label className="field"><span>Glyph</span><input value={selected.icon} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].icon = event.target.value; })}/></label><label className="field"><span>Action</span><select value={selected.action} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].action = event.target.value; })}>{["Unassigned","Open app","Open URL","Keystroke","Macro","Window Manager","Media Controls","Recent Apps","Reserved group","Action"].map(action => <option key={action}>{action}</option>)}</select></label><label className="field"><span>Value</span><input value={selected.detail ?? ""} placeholder="App, URL, shortcut or command" onChange={event => updateLayer(draft => { draft.tiles[selectedTile].detail = event.target.value; })}/></label><button className="wide-action" onClick={() => updateLayer(draft => { const tile = draft.tiles[selectedTile]; tile.children = tile.children?.length ? undefined : [{ id: crypto.randomUUID(), label: "Deep option", icon: "↳", action: "Action" }]; })}>{selected.children?.length ? "Remove deep layer" : "Add hold-for-depth layer"}</button></Card>}
+      {selected && <Card title={`Tile ${selectedTile + 1} assignment`} icon={Command}><label className="field"><span>Label</span><input value={selected.label} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].label = event.target.value; })}/></label><label className="field"><span>Glyph</span><input value={selected.icon} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].icon = event.target.value; })}/></label><label className="field"><span>Action</span><ActionSelect value={selected.action} onChange={value => updateLayer(draft => { draft.tiles[selectedTile].action = value; })}/></label>{actionCategoryFor(selected.action) && <div className="action-breadcrumb"><span>{actionCategoryFor(selected.action)?.glyph}</span>{actionCategoryFor(selected.action)?.label}<i>›</i><strong>{selected.action}</strong></div>}<label className="field"><span>Value</span><input value={selected.detail ?? ""} placeholder="App, URL, shortcut or command" onChange={event => updateLayer(draft => { draft.tiles[selectedTile].detail = event.target.value; })}/></label><button className="wide-action" onClick={() => updateLayer(draft => { const tile = draft.tiles[selectedTile]; tile.children = tile.children?.length ? undefined : [{ id: crypto.randomUUID(), label: "Deep option", icon: "↳", action: "Run Custom Command" }]; })}>{selected.children?.length ? "Remove deep layer" : "Add hold-for-depth layer"}</button></Card>}
     </section>
     <Card title={`Tiles · ${layer.slots} slots`} icon={Command} className="tile-editor"><div className="tile-grid">{Array.from({ length: layer.slots }, (_, index) => { const tile = layer.tiles[index]; return <button key={tile?.id ?? index} className={selectedTile === index ? "selected" : ""} onClick={() => setSelectedTile(index)}><b>{tile?.icon ?? "+"}</b><span>{tile?.label ?? "Empty"}</span><small>{tile?.children?.length ? `${tile.children.length} deep option · ${tile.action}` : tile?.action ?? "Click to assign"}</small></button>; })}</div></Card>
   </div>;
@@ -186,15 +211,15 @@ function CalibrationPage({ profile, update }: { profile: Profile; update: (recip
   return <div className="page"><div className="page-intro"><span>MEASURED, NOT GUESSED</span><h2>Gesture calibration</h2><p>Tune recognition windows without changing native pointer behavior.</p></div><div className="two-up"><Card title="Tap rhythm" icon={Activity}><Range label="Tap duration" value={calibration.tapDuration} min={80} max={400} unit=" ms" onChange={value => update(draft => { draft.calibration.tapDuration = value; })}/><Range label="Movement tolerance" value={calibration.tapMovement} min={4} max={60} unit="" onChange={value => update(draft => { draft.calibration.tapMovement = value; })}/><Range label="Double-tap delay" value={calibration.doubleTapDelay} min={120} max={500} unit=" ms" onChange={value => update(draft => { draft.calibration.doubleTapDelay = value; })}/></Card><Card title="Swipe intent" icon={Crosshair}><Range label="Travel distance" value={calibration.swipeDistance} min={30} max={180} unit="" onChange={value => update(draft => { draft.calibration.swipeDistance = value; })}/><Range label="Time window" value={calibration.swipeDuration} min={120} max={700} unit=" ms" onChange={value => update(draft => { draft.calibration.swipeDuration = value; })}/><div className="gesture-pad"><i/><span>SWIPE TO TEST</span></div></Card></div></div>;
 }
 
-function MacrosPage({ state, update }: { state: RotaState; update: (recipe: (draft: RotaState) => void) => void }) {
+function CustomCommandsPage({ state, update }: { state: RotaState; update: (recipe: (draft: RotaState) => void) => void }) {
   const [selected, setSelected] = useState(state.macros[0]?.id ?? "");
   const macro = state.macros.find(item => item.id === selected) ?? state.macros[0];
-  const addMacro = () => update(draft => { const item: RotaMacro = { id: crypto.randomUUID(), name: "New macro", shortcut: "", steps: [] }; draft.macros.push(item); setSelected(item.id); });
-  return <div className="page macro-layout"><section className="macro-list"><header><span>SAVED ACTIONS</span><button onClick={addMacro}><Plus size={15}/></button></header>{state.macros.map(item => <button key={item.id} className={macro?.id === item.id ? "active" : ""} onClick={() => setSelected(item.id)}><Command size={16}/><span><strong>{item.name}</strong><small>{item.steps.length} steps</small></span><kbd>{item.shortcut || "—"}</kbd></button>)}</section>{macro && <Card title="Sequence editor" icon={Keyboard} className="macro-editor"><div className="form-row"><input value={macro.name} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.name = event.target.value; })}/><input className="shortcut" value={macro.shortcut} placeholder="Record shortcut" onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.shortcut = event.target.value; })}/></div><div className="steps">{macro.steps.map((step, index) => <div className="step" key={step.id}><i>{index + 1}</i><select value={step.type} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].type = event.target.value as typeof step.type; })}><option value="keys">Keys</option><option value="app">Open app</option><option value="delay">Delay</option></select><input value={step.value} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].value = event.target.value; })}/><label><input type="number" value={step.delay} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].delay = Number(event.target.value); })}/> ms</label></div>)}</div><button className="wide-action" onClick={() => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps.push({ id: crypto.randomUUID(), type: "keys", value: "⌘ K", delay: 80 }); })}><Plus size={15}/> Add step</button></Card>}</div>;
+  const addCommand = () => update(draft => { const item: RotaMacro = { id: crypto.randomUUID(), name: "New command", shortcut: "", steps: [] }; draft.macros.push(item); setSelected(item.id); });
+  return <div className="page macro-layout"><ActionHierarchy/><section className="macro-list"><header><span>CUSTOM COMMANDS</span><button aria-label="Add custom command" onClick={addCommand}><Plus size={15}/></button></header>{state.macros.map(item => <button key={item.id} className={macro?.id === item.id ? "active" : ""} onClick={() => setSelected(item.id)}><Command size={16}/><span><strong>{item.name}</strong><small>{item.steps.length} steps</small></span><kbd>{item.shortcut || "—"}</kbd></button>)}</section>{macro && <Card title="Command sequence" icon={Keyboard} className="macro-editor"><div className="form-row"><input aria-label="Command name" value={macro.name} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.name = event.target.value; })}/><input aria-label="Command shortcut" className="shortcut" value={macro.shortcut} placeholder="Record shortcut" onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.shortcut = event.target.value; })}/></div><div className="steps">{macro.steps.map((step, index) => <div className="step" key={step.id}><i>{index + 1}</i><select value={step.type} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].type = event.target.value as typeof step.type; })}><option value="keys">Keys</option><option value="app">Open app</option><option value="delay">Delay</option></select><input value={step.value} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].value = event.target.value; })}/><label><input type="number" value={step.delay} onChange={event => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps[index].delay = Number(event.target.value); })}/> ms</label></div>)}</div><button className="wide-action" onClick={() => update(draft => { draft.macros.find(item => item.id === macro.id)!.steps.push({ id: crypto.randomUUID(), type: "keys", value: "⌘ K", delay: 80 }); })}><Plus size={15}/> Add command step</button></Card>}</div>;
 }
 
 function OverridesPage({ state, update }: { state: RotaState; update: (recipe: (draft: RotaState) => void) => void }) {
-  return <div className="page"><div className="page-intro"><span>CONTEXT ENGINE</span><h2>App overrides</h2><p>Change what a gesture means when a specific app is frontmost.</p><button className="primary" onClick={() => update(draft => { draft.overrides.push({ id: crypto.randomUUID(), app: "Choose app", detail: "New context", enabled: true, gesture: "Two-finger left", action: "Main HUD" }); })}><Plus size={15}/> Add override</button></div><div className="override-list">{state.overrides.map((item, index) => <Card key={item.id} title={item.app} icon={AppWindow}><Toggle checked={item.enabled} onChange={value => update(draft => { draft.overrides[index].enabled = value; })} label={item.detail}/><label className="field"><span>Gesture</span><input value={item.gesture} onChange={event => update(draft => { draft.overrides[index].gesture = event.target.value; })}/></label><label className="field"><span>Action</span><input value={item.action} onChange={event => update(draft => { draft.overrides[index].action = event.target.value; })}/></label><button className="danger-link" onClick={() => update(draft => { draft.overrides.splice(index, 1); })}><Trash2 size={14}/> Remove</button></Card>)}</div></div>;
+  return <div className="page"><div className="page-intro"><span>CONTEXT ENGINE</span><h2>App overrides</h2><p>Change what a gesture means when a specific app is frontmost.</p><button className="primary" onClick={() => update(draft => { draft.overrides.push({ id: crypto.randomUUID(), app: "Choose app", detail: "New context", enabled: true, gesture: "Two-finger left", action: "Mission Control" }); })}><Plus size={15}/> Add override</button></div><div className="override-list">{state.overrides.map((item, index) => <Card key={item.id} title={item.app} icon={AppWindow}><Toggle checked={item.enabled} onChange={value => update(draft => { draft.overrides[index].enabled = value; })} label={item.detail}/><label className="field"><span>Gesture</span><input value={item.gesture} onChange={event => update(draft => { draft.overrides[index].gesture = event.target.value; })}/></label><label className="field"><span>Action</span><ActionSelect value={item.action} onChange={value => update(draft => { draft.overrides[index].action = value; })}/></label><button className="danger-link" onClick={() => update(draft => { draft.overrides.splice(index, 1); })}><Trash2 size={14}/> Remove</button></Card>)}</div></div>;
 }
 
 function PointerPage({ profile, update }: { profile: Profile; update: (recipe: (profile: Profile) => void) => void }) {

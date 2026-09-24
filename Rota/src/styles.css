@@ -91,6 +91,8 @@ main { min-width: 0; display: flex; flex-direction: column; }
 .field > span { color: var(--muted); font-size: 10px; }
 .field input, .field select, .form-row input, .step input, .step select, .profile-grid input { width: 100%; min-height: 34px; padding: 0 10px; color: #edf2ed; border: 1px solid var(--line); background: #0f1313; font-size: 10px; }
 .field select { text-transform: capitalize; }
+.field select optgroup { color: var(--lime); font-style: normal; font-weight: 700; }
+.field select option { color: #edf2ed; font-weight: 500; }
 .color-field { grid-template-columns: 90px 38px 1fr; }
 .color-field input { height: 28px; min-height: 0; padding: 2px; }
 .color-field code { color: var(--muted); font-size: 10px; }
@@ -128,6 +130,8 @@ main { min-width: 0; display: flex; flex-direction: column; }
 .tile-grid button.selected { border-color: rgba(159,232,112,.55); background: rgba(159,232,112,.08); box-shadow: inset 0 -2px var(--lime); }
 .tile-grid b, .tile-grid span, .tile-grid small { display: block; }
 .tile-grid b { color: var(--lime); font-size: 18px; }.tile-grid span { margin-top: 7px; font-size: 10px; font-weight: 700; }.tile-grid small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.action-breadcrumb { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 9px; border: 1px solid rgba(159,232,112,.16); background: rgba(159,232,112,.045); color: #829088; font-size: 8px; }
+.action-breadcrumb > span { color: var(--lime); font-size: 13px; }.action-breadcrumb i { color: #536059; font-style: normal; }.action-breadcrumb strong { color: #dfe8e1; font-weight: 600; }
 
 .hud-scene { position: relative; flex: 1; width: 100%; min-height: 420px; overflow: hidden; touch-action: none; cursor: grab; user-select: none; }
 .hud-scene:active { cursor: grabbing; }
@@ -163,6 +167,17 @@ main { min-width: 0; display: flex; flex-direction: column; }
 .gesture-pad i { position: absolute; width: 34px; height: 34px; border: 1px solid var(--blue); border-radius: 50%; box-shadow: 0 0 25px rgba(115,183,255,.25); }
 
 .macro-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
+.action-hierarchy { grid-column: 1 / -1; border: 1px solid var(--line); background: linear-gradient(135deg, rgba(26,34,31,.94), rgba(13,17,17,.94)); }
+.action-hierarchy > header { display: grid; grid-template-columns: 1fr auto; align-items: end; padding: 16px; border-bottom: 1px solid var(--line); }
+.action-hierarchy > header span { color: var(--lime); font: 600 8px "Rajdhani"; letter-spacing: .18em; }
+.action-hierarchy > header strong { grid-row: 2; margin-top: 4px; font: 600 18px "Rajdhani"; }
+.action-hierarchy > header p { grid-column: 2; grid-row: 1 / span 2; margin: 0; color: var(--muted); font-size: 9px; }
+.action-hierarchy > div { display: grid; grid-template-columns: repeat(3, 1fr); }
+.action-hierarchy article { display: grid; grid-template-columns: 23px 28px 1fr 22px; align-items: center; gap: 7px; min-height: 70px; padding: 11px 13px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.action-hierarchy article:nth-child(3n) { border-right: 0; }.action-hierarchy article:nth-last-child(-n+3) { border-bottom: 0; }
+.action-hierarchy article > i { color: #536159; font: normal 600 9px "Rajdhani"; }.action-hierarchy article > b { color: var(--lime); font-size: 18px; text-align: center; }
+.action-hierarchy article span strong, .action-hierarchy article span small { display: block; }.action-hierarchy article span strong { font-size: 10px; }.action-hierarchy article span small { margin-top: 3px; color: var(--muted); font-size: 7px; line-height: 1.35; }
+.action-hierarchy article > em { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid rgba(159,232,112,.2); border-radius: 50%; color: #9dac9f; font: normal 600 8px "Rajdhani"; }
 .macro-list { border: 1px solid var(--line); background: rgba(15,19,19,.8); }
 .macro-list header { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 13px; border-bottom: 1px solid var(--line); }
 .macro-list header button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line); background: transparent; }

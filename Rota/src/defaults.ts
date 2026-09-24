@@ -5,27 +5,27 @@ const tile = (label: string, icon: string, action: string, detail?: string): Til
 });
 
 const mainTiles = (): Tile[] => {
-  const windows = tile("Windows", "▦", "Window Manager", "8 layouts");
+  const windows = tile("Windows", "▦", "Left Half", "Hold for more layouts");
   windows.children = [
-    tile("Left ⅓", "⅓", "Window placement"),
-    tile("Left ½", "½", "Window placement"),
-    tile("Left ⅔", "⅔", "Window placement")
+    tile("Left ⅓", "⅓", "Left Third"),
+    tile("Left ½", "½", "Left Half"),
+    tile("Full", "□", "Fill Desktop")
   ];
   return [
-    tile("Finder", "◫", "Open app", "com.apple.finder"),
-    tile("Search", "⌕", "Keystroke", "⌘ Space"),
-    tile("Mission", "✣", "System command", "Mission Control"),
-    tile("Actions", "⌘", "Reserved group", "Copy · Paste · Undo"),
+    tile("Finder", "◫", "Open App", "com.apple.finder"),
+    tile("Search", "⌕", "Find", "⌘ F"),
+    tile("Mission", "✣", "Mission Control"),
+    tile("Actions", "⌘", "Copy", "Copy · Paste · Undo"),
     windows,
     tile("Recent", "↺", "Recent Apps", "Live group"),
-    tile("Media", "◖", "Media Controls", "Playback"),
-    tile("Notes", "✎", "Open app", "com.apple.Notes")
+    tile("Media", "◖", "Play / Pause", "Playback"),
+    tile("Notes", "✎", "Open App", "com.apple.Notes")
   ];
 };
 
 const layer = (name: string, position: HudLayer["position"], accent: string, labels: string[]): HudLayer => ({
   id: crypto.randomUUID(), name, position, accent, shortcut: "", slots: labels.length,
-  tiles: labels.map((label, index) => tile(label, ["◫", "⌘", "↗", "◆", "✦", "◎", "▦", "↺"][index % 8], "Action"))
+  tiles: labels.map((label, index) => tile(label, ["◫", "⌘", "↗", "◆", "✦", "◎", "▦", "↺"][index % 8], name === "Window Lab" ? ["Left Half", "Right Half", "Top Half", "Bottom Half", "Left Third", "Center Third", "Right Third", "Fill Desktop"][index] : "Open App"))
 });
 
 export function createProfile(name = "Default"): Profile {
@@ -78,8 +78,8 @@ export function createDefaultState(): RotaState {
       }
     ],
     overrides: [
-      { id: crypto.randomUUID(), app: "Safari", detail: "Browsing", enabled: true, gesture: "Two-finger left", action: "Previous tab" },
-      { id: crypto.randomUUID(), app: "Finder", detail: "Files", enabled: true, gesture: "Two-finger right", action: "Main HUD" }
+      { id: crypto.randomUUID(), app: "Safari", detail: "Browsing", enabled: true, gesture: "Two-finger left", action: "Previous Desktop" },
+      { id: crypto.randomUUID(), app: "Finder", detail: "Files", enabled: true, gesture: "Two-finger right", action: "Mission Control" }
     ],
     syncEnabled: false,
     syncEndpoint: ""

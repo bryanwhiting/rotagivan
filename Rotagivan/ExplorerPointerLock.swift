@@ -45,8 +45,8 @@ final class ExplorerCursorHold {
 }
 
 /// Scoped to a visible, non-editing Apple-controlled HUD. In addition to
-/// swallowing motion events, pin the actual WindowServer cursor and balance
-/// one hide/show pair. Never change native pointer preferences or app focus.
+/// swallowing motion and scroll events, pin the actual WindowServer cursor and
+/// balance one hide/show pair. Never change native pointer preferences or app focus.
 @MainActor final class ExplorerPointerLock: ExplorerPointerControlling {
     var onInterruption: (() -> Void)?
     private var tap: CFMachPort?
@@ -55,7 +55,7 @@ final class ExplorerCursorHold {
 
     nonisolated static func suppresses(_ type: CGEventType) -> Bool {
         switch type {
-        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: return true
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel: return true
         default: return false
         }
     }
@@ -72,7 +72,7 @@ final class ExplorerCursorHold {
         // the disabled-tap callback clears the handle if macOS interrupts capture.
         if tap != nil { return true }
         release()
-        let mask = [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        let mask = [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]
             .reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
         guard let tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
             options: .defaultTap, eventsOfInterest: mask, callback: Self.callback,

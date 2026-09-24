@@ -32,7 +32,7 @@ import AppKit
         ]
         let deepLeft = AppExplorerFavorite(direction: .left, name: "Left half", children: deepChoices, slotCount: 3,
             windowPlacement: ExplorerWindowPlacement(direction: .left, layout: .halves))
-        let settings = AppExplorerSettings(favorites: [deepLeft, favorite(.right, "Search")],
+        var settings = AppExplorerSettings(favorites: [deepLeft, favorite(.right, "Search")],
             holdLayers: [right, top, bottom])
         controller.configuration = { settings }
         controller.contextIsValid = { true }
@@ -70,6 +70,23 @@ import AppKit
         try deepBitmap.representation(using: .png, properties: [:])!.write(to: deepURL)
         controller.dismiss()
         precondition(!controller.isVisible)
-        print("Native App Explorer HUD rotated in all four directions and rendered a held three-choice deep fan without activating an app.")
+
+        // Vertical swipes remain useful even when the next HUD has only a
+        // horizontal map position: they fall back to the same cyclic stack.
+        settings.holdLayers = [right]
+        controller.show(waitingForLift: false)
+        func pair(_ y: Double?) -> TrackpadReport {
+            TrackpadReport(contacts: y.map { value in [
+                FingerContact(id: 1, x: 480, y: value, touching: true, confident: true),
+                FingerContact(id: 2, x: 520, y: value, touching: true, confident: true)
+            ] } ?? [], buttonDown: false, scanTime: 0)
+        }
+        controller.process(pair(500))
+        controller.process(pair(620))
+        controller.process(pair(nil))
+        precondition(controller.displayedEntries.contains { $0.name == "Mail" },
+            "A two-finger downward swipe must navigate the HUD even without a layer below")
+        controller.dismiss()
+        print("Native App Explorer HUD slid in all four directions, captured vertical two-finger navigation, and rendered a held three-choice deep fan without activating an app.")
     }
 }

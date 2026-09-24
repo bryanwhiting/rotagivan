@@ -212,8 +212,9 @@ extension AppExplorerPresenting {
         let nearest = candidates.min { lhs, rhs in
             (lhs.cross, lhs.forward) < (rhs.cross, rhs.forward)
         }?.index
-        let fallback = (current + (direction == .next ? 1 : -1) + order.count) % order.count
-        guard let target = nearest ?? ((direction == .next || direction == .previous) ? fallback : nil) else { return false }
+        let advances = direction == .next || direction == .above
+        let fallback = (current + (advances ? 1 : -1) + order.count) % order.count
+        let target = nearest ?? fallback
         let outgoing = snapshotHUD()
         switchLayer(order[target])
         model.carouselTransition = HUDCarouselTransition(direction: direction, outgoing: outgoing)
@@ -800,17 +801,12 @@ extension AppExplorerPresenting {
         var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
         if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
            (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
-            let occupied = Set(configuration().resolvedHUDPositions.values)
-            var defaults: [ActionBinding] = [
+            let defaults: [ActionBinding] = [
                 ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .hudNavigation(.next)),
-                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerRight), action: .hudNavigation(.previous))
+                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerRight), action: .hudNavigation(.previous)),
+                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerUp), action: .hudNavigation(.above)),
+                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerDown), action: .hudNavigation(.below))
             ]
-            if occupied.contains(.top) {
-                defaults.append(ActionBinding(trigger: BindingTrigger(gesture: .twoFingerUp), action: .hudNavigation(.above)))
-            }
-            if occupied.contains(.bottom) {
-                defaults.append(ActionBinding(trigger: BindingTrigger(gesture: .twoFingerDown), action: .hudNavigation(.below)))
-            }
             gestures += defaults.filter { fallback in
                 !gestures.contains { $0.trigger.identity == fallback.trigger.identity }
             }

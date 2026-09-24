@@ -3,13 +3,13 @@ import Foundation
 
 @main struct ExplorerPointerLockTests {
     @MainActor static func main() {
-        for type in [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged] {
+        for type in [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel] {
             precondition(ExplorerPointerLock.suppresses(type))
         }
         for type in [CGEventType.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
-                     .otherMouseDown, .otherMouseUp, .scrollWheel, .keyDown, .keyUp, .flagsChanged,
+                     .otherMouseDown, .otherMouseUp, .keyDown, .keyUp, .flagsChanged,
                      .tapDisabledByTimeout, .tapDisabledByUserInput] {
-            precondition(!ExplorerPointerLock.suppresses(type), "Never swallow buttons, scrolling, Escape, or system disable notifications")
+            precondition(!ExplorerPointerLock.suppresses(type), "Never swallow buttons, Escape, or system disable notifications")
         }
         for enabled in [true, false] {
             for apple in [true, false] {
@@ -65,6 +65,6 @@ import Foundation
         noPosition.position = { nil }
         noPosition.hide = { preconditionFailure("No position: do not hide") }
         precondition(!noPosition.acquire())
-        print("Pointer lock passed: motion-only policy, pinning, hide/restore pairing, repeated teardown, failed capture, and deallocation. No live pointer capture used.")
+        print("Pointer lock passed: HUD motion/scroll suppression, pinning, hide/restore pairing, repeated teardown, failed capture, and deallocation. No live pointer capture used.")
     }
 }

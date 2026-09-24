@@ -46,7 +46,7 @@ requirement="=identifier \"app.rota.desktop\" and certificate leaf = H\"$signing
 
 osascript -e 'tell application "Rota" to quit' >/dev/null 2>&1 || true
 for _ in {1..30}; do
-  pgrep -x Rota >/dev/null || break
+  pgrep -x rota >/dev/null || break
   sleep 0.1
 done
 ditto "$app_source" "$app_target"

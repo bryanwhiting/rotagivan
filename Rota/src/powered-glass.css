@@ -60,3 +60,32 @@ kbd { border-color: rgba(65,120,153,.17); border-radius: 5px; background: rgba(2
 @media (prefers-reduced-transparency: reduce) {
   .sidebar, .topbar, .card, .action-hierarchy, .macro-list { backdrop-filter: none; background: #f1f7fb; }
 }
+
+/* Directional HUD layer orbit */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.layer-map-panel { grid-column: 1 / -1; border: 1px solid rgba(64,123,158,.16); border-radius: 18px; background: linear-gradient(145deg, rgba(255,255,255,.88), rgba(220,239,250,.68)); box-shadow: var(--shadow), inset 0 1px rgba(255,255,255,.96); overflow: hidden; }
+.layer-map-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 92px; padding: 18px 22px; border-bottom: 1px solid rgba(61,120,155,.12); background: linear-gradient(100deg, rgba(255,255,255,.48), rgba(104,202,251,.08)); }
+.layer-map-panel > header span { color: #158fd4; font: 700 8px "Rajdhani"; letter-spacing: .2em; }
+.layer-map-panel > header h2 { margin: 4px 0 3px; color: #183c54; font: 600 22px "Rajdhani"; }
+.layer-map-panel > header p { margin: 0; color: #78909f; font-size: 9px; }
+.layer-map-panel > header .primary:disabled { opacity: .45; cursor: default; box-shadow: none; }
+.layer-map-canvas { position: relative; display: grid; grid-template-columns: repeat(3, minmax(170px, 220px)); grid-template-rows: repeat(3, 144px); grid-template-areas: ". up ." "left main right" ". down ."; justify-content: center; gap: 14px; min-height: 500px; padding: 26px; background: radial-gradient(circle at center, rgba(89,192,245,.14), transparent 36%), linear-gradient(rgba(77,145,181,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(77,145,181,.045) 1px, transparent 1px); background-size: auto, 24px 24px, 24px 24px; }
+.layer-map-canvas::before, .layer-map-canvas::after { content: ""; position: absolute; left: 50%; top: 50%; z-index: 0; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(57,169,227,.23), transparent); }
+.layer-map-canvas::before { width: min(74%, 700px); height: 1px; transform: translate(-50%,-50%); }.layer-map-canvas::after { width: 1px; height: 74%; transform: translate(-50%,-50%); background: linear-gradient(transparent, rgba(57,169,227,.23), transparent); }
+.direction-up { grid-area: up; }.direction-left { grid-area: left; }.direction-right { grid-area: right; }.direction-down { grid-area: down; }.main-layer { grid-area: main; }
+.layer-drop-zone, .layer-map-card { position: relative; z-index: 1; min-width: 0; border-radius: 14px; }
+.layer-drop-zone { display: grid; place-items: center; align-content: center; gap: 6px; border: 1px dashed rgba(62,128,165,.33); background: rgba(243,249,252,.42); color: #7892a2; cursor: pointer; transition: transform 160ms var(--ease), border-color 160ms ease, background 160ms ease, box-shadow 160ms ease; }
+.layer-drop-zone svg { color: #64afd6; }.layer-drop-zone strong { color: #4b7087; font-size: 10px; }.layer-drop-zone span { font-size: 8px; }
+.layer-drop-zone:hover { transform: translateY(-2px); border-color: #39a9e5; background: rgba(116,207,251,.13); box-shadow: 0 12px 30px rgba(44,145,198,.12), inset 0 0 24px rgba(84,194,247,.08); }
+.layer-map-card { display: grid; grid-template-rows: 1fr 34px; border: 1px solid rgba(64,122,157,.16); background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(228,239,246,.76)); box-shadow: 0 10px 28px rgba(57,96,119,.1), inset 0 1px rgba(255,255,255,.96); overflow: hidden; transition: transform 160ms var(--ease), border-color 160ms ease, box-shadow 160ms ease; }
+.layer-map-card:hover { transform: translateY(-2px); }.layer-map-card.selected { border-color: #3daff0; box-shadow: 0 0 0 2px rgba(61,175,240,.16), 0 14px 34px rgba(47,145,198,.17), inset 0 1px white; }
+.layer-map-card.selected::after { content: "✓"; position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: white; background: linear-gradient(135deg,#70d2ff,#2e9fe1); font-size: 10px; box-shadow: 0 5px 12px rgba(43,150,208,.25); }
+.layer-card-main { display: grid; grid-template-columns: 23px 1fr; align-content: center; column-gap: 7px; width: 100%; padding: 12px; border: 0; background: transparent; color: #2c5066; text-align: left; cursor: pointer; }
+.layer-card-main > i { grid-row: 1 / span 3; align-self: start; width: 4px; height: 42px; border-radius: 5px; box-shadow: 0 0 12px currentColor; }.layer-number { color: #269fdf; font: 700 8px "Rajdhani"; letter-spacing: .12em; }
+.layer-card-main strong { min-width: 0; overflow: hidden; color: #1f4056; font: 600 14px "Rajdhani"; text-overflow: ellipsis; white-space: nowrap; }.layer-card-main small { color: #79909f; font-size: 8px; }.layer-card-main em { grid-column: 2; margin-top: 4px; color: #5f7e91; font: normal 8px "Avenir Next"; }
+.layer-map-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; border-top: 1px solid rgba(61,119,154,.11); background: rgba(239,247,251,.6); }
+.layer-map-card footer button { padding: 0; border: 0; background: transparent; color: #148bd0; font-size: 8px; cursor: pointer; }.layer-map-card footer span { display: flex; align-items: center; gap: 5px; color: #607e90; font-size: 8px; }
+.layer-map-card footer select { max-width: 78px; min-height: 24px; padding: 0 6px; border: 1px solid rgba(64,121,156,.18); border-radius: 7px; color: #42667c; background: rgba(255,255,255,.8); font-size: 8px; }
+.main-layer { background: linear-gradient(145deg, rgba(231,247,255,.96), rgba(196,226,243,.82)); }.main-layer .layer-card-main strong { color: #123c57; }
+.fixed-direction { color: #238fc9; font-size: 10px; font-weight: 600; }
+@media (max-width: 1050px) { .layer-map-canvas { grid-template-columns: repeat(3, minmax(150px, 1fr)); } }

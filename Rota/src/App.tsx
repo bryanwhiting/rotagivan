@@ -8,6 +8,7 @@ import {
 import { createDefaultState, createProfile } from "./defaults";
 import { getBackendStatus, loadState, nativeAction, saveState } from "./lib/backend";
 import { HudScene } from "./components/HudScene";
+import { LayerMap } from "./components/LayerMap";
 import { ACTION_CATEGORIES, actionCategoryFor, canonicalAction } from "./actionCatalog";
 import type { BackendStatus, HudDirection, HudLayer, Profile, RotaMacro, RotaState, SectionId, Tile } from "./types";
 
@@ -202,10 +203,23 @@ function DevicesPage({ state, update, notify }: { state: RotaState; update: (rec
 function HudPage({ state, profile, layer, layerIndex, selectLayer, update, updateLayer, navigate, open }: { state: RotaState; profile: Profile; layer: HudLayer; layerIndex: number; selectLayer: (id: string) => void; update: (recipe: (draft: RotaState) => void) => void; updateLayer: (recipe: (layer: HudLayer) => void) => void; navigate: (direction: HudDirection) => void; open: () => void }) {
   const [selectedTile, setSelectedTile] = useState(0);
   const selected = layer.tiles[selectedTile];
-  const addLayer = () => update(draft => {
+  const addLayer = (position: HudDirection) => {
+    const id = crypto.randomUUID();
+    update(draft => {
+      const current = draft.profiles.find(item => item.id === profile.id)!;
+      const tiles = Array.from({ length: 6 }, () => ({ id: crypto.randomUUID(), label: "Empty", icon: "+", action: "Unassigned" }));
+      current.layers.push({ id, name: `${position === "up" ? "Above" : position === "down" ? "Below" : position[0].toUpperCase() + position.slice(1)} HUD`, position, slots: 6, accent: "#69c9ff", shortcut: "", tiles });
+    });
+    selectLayer(id);
+  };
+  const moveLayer = (id: string, position: HudDirection) => update(draft => {
     const current = draft.profiles.find(item => item.id === profile.id)!;
-    const newLayer: HudLayer = { id: crypto.randomUUID(), name: `Layer ${current.layers.length + 1}`, position: "right", slots: 6, accent: "#69c9ff", shortcut: "", tiles: [] };
-    current.layers.push(newLayer);
+    const moving = current.layers.find(item => item.id === id);
+    if (!moving || moving.id === "main" || moving.position === position) return;
+    const previous = moving.position;
+    const occupant = current.layers.find(item => item.id !== "main" && item.id !== id && item.position === position);
+    if (occupant) occupant.position = previous;
+    moving.position = position;
   });
   const setSlots = (slots: number) => updateLayer(draft => {
     draft.slots = slots;
@@ -213,9 +227,10 @@ function HudPage({ state, profile, layer, layerIndex, selectLayer, update, updat
     draft.tiles = draft.tiles.slice(0, slots);
   });
   return <div className="page hud-studio">
+    <LayerMap profile={profile} selectedLayerId={layer.id} selectLayer={selectLayer} addLayer={addLayer} moveLayer={moveLayer}/>
     <section className="hud-preview-card"><div className="hud-preview-toolbar"><div><span>LIVE THREE.JS PREVIEW</span><strong>{layer.name}</strong></div><button onClick={open}><Rotate3D size={15}/> Immersive</button></div><HudScene layer={layer} layerIndex={layerIndex} layerCount={profile.layers.length} animate={state.hudAnimations} onNavigate={navigate} /></section>
-    <section className="inspector"><div className="layer-tabs"><div>{profile.layers.map(item => <button key={item.id} className={item.id === layer.id ? "active" : ""} onClick={() => selectLayer(item.id)}>{item.name}</button>)}</div><button onClick={addLayer}><Plus size={14}/></button></div>
-      <Card title="Layer geometry" icon={Grid3X3}><label className="field"><span>Name</span><input value={layer.name} onChange={event => updateLayer(draft => { draft.name = event.target.value; })}/></label><div className="field split"><span>Direction</span><select value={layer.position} onChange={event => updateLayer(draft => { draft.position = event.target.value as HudDirection; })}>{["left","right","up","down"].map(value => <option key={value}>{value}</option>)}</select></div><Range label="Tile slots" value={layer.slots} min={2} max={16} unit="" onChange={setSlots}/><label className="field color-field"><span>Accent</span><input type="color" value={layer.accent} onChange={event => updateLayer(draft => { draft.accent = event.target.value; })}/><code>{layer.accent}</code></label></Card>
+    <section className="inspector">
+      <Card title="Layer geometry" icon={Grid3X3}><label className="field"><span>Name</span><input value={layer.name} onChange={event => updateLayer(draft => { draft.name = event.target.value; })}/></label><div className="field split"><span>Direction</span>{layer.id === "main" ? <strong className="fixed-direction">Center · fixed</strong> : <select value={layer.position} onChange={event => moveLayer(layer.id, event.target.value as HudDirection)}>{["left","right","up","down"].map(value => <option key={value}>{value}</option>)}</select>}</div><Range label="Tile slots" value={layer.slots} min={2} max={16} unit="" onChange={setSlots}/><label className="field color-field"><span>Accent</span><input type="color" value={layer.accent} onChange={event => updateLayer(draft => { draft.accent = event.target.value; })}/><code>{layer.accent}</code></label></Card>
       <Card title="Surface & motion" icon={Sparkles}><div className="segmented">{(["graphite","starburst","air"] as const).map(theme => <button key={theme} className={state.hudTheme === theme ? "active" : ""} onClick={() => update(draft => { draft.hudTheme = theme; })}>{theme}</button>)}</div><Toggle checked={state.hudAnimations} onChange={value => update(draft => { draft.hudAnimations = value; })} label="Physics animation" detail="Quaternion rotation, inertia and depth"/></Card>
       {selected && <Card title={`Tile ${selectedTile + 1} assignment`} icon={Command}><label className="field"><span>Label</span><input value={selected.label} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].label = event.target.value; })}/></label><label className="field"><span>Glyph</span><input value={selected.icon} onChange={event => updateLayer(draft => { draft.tiles[selectedTile].icon = event.target.value; })}/></label><label className="field"><span>Action</span><ActionSelect value={selected.action} onChange={value => updateLayer(draft => { draft.tiles[selectedTile].action = value; })}/></label>{actionCategoryFor(selected.action) && <div className="action-breadcrumb"><span>{actionCategoryFor(selected.action)?.glyph}</span>{actionCategoryFor(selected.action)?.label}<i>›</i><strong>{selected.action}</strong></div>}<label className="field"><span>Value</span><input value={selected.detail ?? ""} placeholder="App, URL, shortcut or command" onChange={event => updateLayer(draft => { draft.tiles[selectedTile].detail = event.target.value; })}/></label><button className="wide-action" onClick={() => updateLayer(draft => { const tile = draft.tiles[selectedTile]; tile.children = tile.children?.length ? undefined : [{ id: crypto.randomUUID(), label: "Deep option", icon: "↳", action: "Run Custom Command" }]; })}>{selected.children?.length ? "Remove deep layer" : "Add hold-for-depth layer"}</button></Card>}
     </section>

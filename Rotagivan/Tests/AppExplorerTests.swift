@@ -75,7 +75,7 @@ import Foundation
         }
         precondition(!AppExplorerFavorite(direction: .up, bundleID: "com.apple.Safari", name: "Mixed", shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", url: "https://example.com", shortcut: chord).isValidDestination)
-        precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", children: [], shortcut: chord).isValidDestination)
+        precondition(AppExplorerFavorite(direction: .up, name: "Deep shortcut", children: [], shortcut: chord).isValidDestination)
         precondition(!AppExplorerFavorite(direction: .up, name: "Mixed", action: .windowManager, shortcut: chord).isValidDestination)
         let actionKey = RecordedShortcut(keyCode: 15, modifiers: 1 << 20, keyLabel: "R")
         let keyedAction = AppExplorerFavorite(direction: .right, name: "Docs", url: "https://example.com",
@@ -178,9 +178,9 @@ import Foundation
         groups.setFavorite(nil, at: .down, in: [.left])
         precondition(groups.favorite(at: [.left, .up])?.bundleID == legacy.bundleID)
         precondition(groups.favorite(at: [.left, .down]) == nil)
-        var invalidGroup = AppExplorerFavorite(direction: .left, name: "Mixed", children: [])
-        invalidGroup.url = "https://example.com"
-        precondition(!AppExplorerSettings(favorites: [invalidGroup]).hasValidFavorites)
+        var deepURL = AppExplorerFavorite(direction: .left, name: "Deep URL", children: [])
+        deepURL.url = "https://example.com"
+        precondition(AppExplorerSettings(favorites: [deepURL]).hasValidFavorites)
         precondition(!AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .left, name: "Duplicate", children: [web, web])]).hasValidFavorites)
         var chain = legacy
         for i in 0..<AppExplorerSettings.maximumGroupDepth {

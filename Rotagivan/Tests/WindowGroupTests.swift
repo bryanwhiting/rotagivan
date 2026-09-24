@@ -73,7 +73,8 @@ import Foundation
                 var invalid = tile; invalid.action = .maximize
                 precondition(!invalid.isValidDestination)
                 invalid = tile; invalid.children = []
-                precondition(!invalid.isValidDestination)
+                invalid.slotCount = 4
+                precondition(invalid.isValidDestination, "A window placement may expose a programmable deep-swipe fan")
                 invalid = tile; invalid.url = "https://example.com"
                 precondition(!invalid.isValidDestination)
             }

@@ -25,8 +25,8 @@ import CoreGraphics
         var empty = StoredSettings(); empty.appOverrides = []
         precondition(empty.resolvedAppOverrides.isEmpty)
 
-        precondition(AppGestureTrigger.layerActionTriggers.count == 38)
-        precondition(Set(AppGestureTrigger.layerActionTriggers).count == 38)
+        precondition(AppGestureTrigger.layerActionTriggers.count == 46)
+        precondition(Set(AppGestureTrigger.layerActionTriggers).count == 46)
         precondition(AppGestureTrigger.combining(tap: .oneFingerTripleTap, direction: .left) == nil)
         precondition(AppGestureTrigger.combining(tap: .twoFingerDoubleTap, direction: .topRight) == .twoDoubleTopRight)
         precondition(AppGestureTrigger.twoSingleBottomLeft.baseTapTrigger == .twoFingerTap)

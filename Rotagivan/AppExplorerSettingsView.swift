@@ -555,14 +555,15 @@ struct AppExplorerSettingsView: View {
                 Text("Slot direction and window position are independent. Use ••• → Window management → Resize window to assign any position and size.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Picker("Slots in this HUD layer", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
+            Picker(settings.favorite(at: groupPath)?.hasPrimaryDestination == true ? "Slots in this deep swipe" : "Slots in this HUD layer",
+                selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                 var next = settings
                 guard next.resize(to: count, at: groupPath) else {
                     groupError = "Remove some tiles before choosing fewer slots. Your existing tiles have been kept."; return
                 }
                 _ = save(next)
-            })) { ForEach([4, 8, 12, 16], id: \.self) { Text("\($0)").tag($0) } }
-                .pickerStyle(.segmented)
+            })) { ForEach(Array(2...16), id: \.self) { Text("\($0) slots").tag($0) } }
+                .pickerStyle(.menu)
             HStack(spacing: 5) {
                 Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? "Default") { groupPath = [] }
                     .buttonStyle(.link)
@@ -578,7 +579,7 @@ struct AppExplorerSettingsView: View {
                     Button("Rename…") { editingGroupPath = groupPath }
                 }
             }.font(.subheadline.weight(.medium))
-            if !groupPath.isEmpty {
+            if !groupPath.isEmpty, settings.favorite(at: groupPath)?.isPureGroup == true {
                 Picker("HUD layer contents", selection: Binding(get: {
                     settings.favorite(at: groupPath)?.groupMode ?? .favorites
                 }, set: { mode in
@@ -1073,7 +1074,7 @@ struct AppExplorerSettingsView: View {
                 if favorite != nil {
                     Divider().padding(.top, 2)
                     VStack(alignment: .leading, spacing: 8) {
-                        if let favorite, favorite.isGroup {
+                        if let favorite, favorite.isPureGroup {
                             HStack(spacing: 12) {
                                 Button(favorite.isWindowManager ? "Edit Window Manager…" : "Edit HUD layer…") {
                                     if favorite.isWindowManager {
@@ -1087,11 +1088,21 @@ struct AppExplorerSettingsView: View {
                                 }
                                 Button("Rename…") { editingGroupPath = groupPath + [direction] }
                             }
-                        } else if let favorite, favorite.supportsHoldLayers {
+                        } else if let favorite, favorite.supportsHoldLayers && !favorite.hasDeepChoices {
                             Button("Edit HUD layers…") {
                                 tileLayerSnapshot = favorite
                                 tileLayerOwnerID = selectedLayerID
                                 editingTileLayers = groupPath + [direction]
+                            }
+                        }
+                        if let favorite, favorite.hasPrimaryDestination {
+                            Button(favorite.hasDeepChoices ? "Edit deep swipe options…" : "Add deep swipe options…") {
+                                var updated = favorite
+                                if updated.children == nil { updated.children = [] }
+                                if updated.slotCount == nil { updated.slotCount = 4 }
+                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                                groupPath.append(direction)
+                                previewEditing = nil
                             }
                         }
                         HStack(spacing: 14) {
@@ -1150,7 +1161,7 @@ struct AppExplorerSettingsView: View {
                 Text(direction.title).font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Menu {
-                    if let favorite, favorite.supportsHoldLayers {
+                    if let favorite, favorite.supportsHoldLayers && !favorite.hasDeepChoices {
                         Button(favorite.isWindowManager ? "Edit Window Manager layer…" : "Edit HUD layers…") {
                             tileLayerSnapshot = favorite
                             tileLayerOwnerID = selectedLayerID
@@ -1158,11 +1169,19 @@ struct AppExplorerSettingsView: View {
                         }
                         Divider()
                     }
-                    if favorite?.isGroup == true {
+                    if favorite?.isPureGroup == true {
                         if favorite?.isWindowManager != true { Button("Edit HUD layer…") { groupPath.append(direction) } }
                         Button("Rename HUD layer…") { editingGroupPath = groupPath + [direction] }
                     } else {
                         assignmentMenu(direction, favorite: favorite)
+                        if let favorite, favorite.hasPrimaryDestination {
+                            Button(favorite.hasDeepChoices ? "Edit deep swipe options…" : "Add deep swipe options…") {
+                                var updated = favorite
+                                if updated.children == nil { updated.children = []; updated.slotCount = 4 }
+                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                                groupPath.append(direction)
+                            }
+                        }
                     }
                     if favorite != nil {
                         Divider()
@@ -1198,7 +1217,7 @@ struct AppExplorerSettingsView: View {
                         WindowTileIcon(direction: placement.direction, layout: placement.layout).frame(width: 24, height: 24)
                     } else if favorite.isWindowManager {
                         Image(systemName: "rectangle.split.2x2").foregroundStyle(.teal).frame(width: 16, height: 16)
-                    } else if !favorite.isGroup, favorite.url != nil {
+                    } else if favorite.url != nil {
                         WebsiteFavicon(url: favorite.resolvedWebURL, size: 16, symbolName: favorite.iconSymbol)
                     } else {
                         Image(systemName: favorite.isRecentGroup ? "clock.arrow.circlepath" : (favorite.isGroup ? "folder.fill" : (favorite.url != nil ? "globe" : "app")))
@@ -1226,7 +1245,7 @@ struct AppExplorerSettingsView: View {
             if favorite != nil {
                 HStack(spacing: 12) {
                     if favorite?.isGroup == true {
-                        Button("Edit HUD layer") {
+                        Button(favorite?.hasDeepChoices == true ? "Edit deep swipe" : "Edit HUD layer") {
                             if let favorite, favorite.isWindowManager {
                                 tileLayerSnapshot = favorite
                                 tileLayerOwnerID = selectedLayerID
@@ -1235,7 +1254,7 @@ struct AppExplorerSettingsView: View {
                         }
                     }
                     Button("Remove") {
-                        if favorite?.isGroup == true { removingGroupPath = groupPath + [direction] }
+                        if favorite?.isPureGroup == true { removingGroupPath = groupPath + [direction] }
                         else { edit { $0.setFavorite(nil, at: direction, in: groupPath) } }
                     }
                 }.font(.caption2).buttonStyle(.link)
@@ -1461,7 +1480,7 @@ struct AppExplorerSettingsView: View {
             return BindingAction(kind: .hudLayer, hudPath: [],
                 windowOwnerPath: (transferPath + [.group(direction)]).map(\.token), name: favorite.name)
         }
-        if favorite.isGroup {
+        if favorite.isPureGroup {
             return BindingAction(kind: .hudLayer,
                 hudPath: (transferPath + [.group(direction)]).map(\.token),
                 windowOwnerPath: windowOwnerPath?.map(\.token), name: favorite.name)
@@ -1476,6 +1495,10 @@ struct AppExplorerSettingsView: View {
         }
         if replacement.actionBindings == nil {
             replacement.actionBindings = settings.favorite(at: path)?.actionBindings
+        }
+        if replacement.children == nil, let current = settings.favorite(at: path), current.hasDeepChoices {
+            replacement.children = current.children
+            replacement.slotCount = current.slotCount
         }
         return replacement
     }

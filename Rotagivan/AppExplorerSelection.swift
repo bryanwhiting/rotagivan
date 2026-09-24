@@ -4,19 +4,41 @@ import CoreGraphics
 /// Pure input gate: consume the trigger's remaining contact, then use a fresh
 /// one-finger displacement. No cursor events or app activation occur here.
 struct AppExplorerSelection {
-    enum Result: Equatable { case waiting, highlight(ExplorerSlot?), select(ExplorerSlot), back, cancel }
+    struct Continuation: Equatable {
+        let contactID: UInt8
+        let origin: CGPoint
+        let point: CGPoint
+    }
+    enum Result: Equatable { case waiting, highlight(ExplorerSlot?), deepen(ExplorerSlot, Continuation), select(ExplorerSlot), back, cancel }
     var waitingForLift: Bool
     var slotCount = 8
+    var deepSlots: Set<ExplorerSlot> = []
+    var fanOrigin: ExplorerSlot?
     private var contactID: UInt8?
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
     private var selected: ExplorerSlot?
+    private var selectedAt = Date.distantPast
     private var finished = false
     private var started = Date.distantPast
     private var maximumTravel = 0.0
     static let minimumDistance = 60.0
 
-    init(waitingForLift: Bool, slotCount: Int = 8) { self.waitingForLift = waitingForLift; self.slotCount = slotCount }
+    static let deepHoldDuration = 0.48
+
+    init(waitingForLift: Bool, slotCount: Int = 8, deepSlots: Set<ExplorerSlot> = []) {
+        self.waitingForLift = waitingForLift; self.slotCount = slotCount; self.deepSlots = deepSlots
+    }
+
+    init(continuing continuation: Continuation, slotCount: Int, fanOrigin: ExplorerSlot) {
+        waitingForLift = false
+        self.slotCount = slotCount
+        self.fanOrigin = fanOrigin
+        contactID = continuation.contactID
+        origin = continuation.origin
+        last = continuation.point
+        started = Date()
+    }
 
     mutating func process(_ report: TrackpadReport, at now: Date = Date()) -> Result {
         guard !finished else { return .waiting }
@@ -47,10 +69,39 @@ struct AppExplorerSelection {
         last = point
         let dx = point.x - origin.x, dy = point.y - origin.y
         maximumTravel = max(maximumTravel, hypot(dx, dy))
-        let direction = hypot(dx, dy) >= Self.minimumDistance ? ExplorerSlot.classify(dx: dx, dy: dy, count: slotCount) : nil
+        let distance = hypot(dx, dy)
+        let direction = distance >= Self.minimumDistance
+            ? (fanOrigin.map { DeepSwipeFan.classify(dx: dx, dy: dy, count: slotCount, origin: $0) }
+                ?? ExplorerSlot.classify(dx: dx, dy: dy, count: slotCount))
+            : nil
+        if fanOrigin == nil, let selected, selected == direction, deepSlots.contains(selected),
+           now.timeIntervalSince(selectedAt) >= Self.deepHoldDuration {
+            deepSlots.remove(selected)
+            return .deepen(selected, Continuation(contactID: contactID, origin: origin, point: point))
+        }
         guard selected != direction else { return .waiting }
         selected = direction
+        selectedAt = now
         return .highlight(direction)
+    }
+}
+
+enum DeepSwipeFan {
+    static func span(count: Int) -> Double { min(140, max(72, Double(count) * 14)) }
+    static func angle(for slot: ExplorerSlot, count: Int, origin: ExplorerSlot) -> Double {
+        let slots = ExplorerSlot.slots(count)
+        guard let index = slots.firstIndex(of: slot) else { return origin.angle }
+        let width = span(count: count) / Double(count)
+        return origin.angle - span(count: count) / 2 + width * (Double(index) + 0.5)
+    }
+    static func classify(dx: Double, dy: Double, count: Int, origin: ExplorerSlot) -> ExplorerSlot? {
+        let angle = atan2(dy, dx) * 180 / .pi
+        return ExplorerSlot.slots(count).min {
+            ExplorerSlot.distance(Self.angle(for: $0, count: count, origin: origin), angle) <
+                ExplorerSlot.distance(Self.angle(for: $1, count: count, origin: origin), angle)
+        }.flatMap {
+            ExplorerSlot.distance(Self.angle(for: $0, count: count, origin: origin), angle) <= span(count: count) / 2 ? $0 : nil
+        }
     }
 }
 

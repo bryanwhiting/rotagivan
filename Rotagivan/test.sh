@@ -136,8 +136,8 @@ xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/ActionBindingRuntimeTests.swift 
 "$test_dir/ActionBindingRuntimeTests"
 xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
-  Rotagivan/AppConfiguration.swift Rotagivan/Tests/ConfigurationTests.swift \
-  -framework AppKit -framework Carbon -o "$test_dir/ConfigurationTests"
+  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/ConfigurationTests.swift \
+  -framework AppKit -framework Carbon -framework Security -o "$test_dir/ConfigurationTests"
 "$test_dir/ConfigurationTests"
 xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \

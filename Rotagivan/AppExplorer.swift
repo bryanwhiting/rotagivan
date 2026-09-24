@@ -328,7 +328,7 @@ extension AppExplorerPresenting {
         }
         loadEntries()
         model.selected = nil
-        input = AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount)
+        input = makeSelection(waitingForLift: waitingForLift)
         let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
@@ -344,6 +344,7 @@ extension AppExplorerPresenting {
         panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
+            onDeepSelect: { [weak self] in self?.chooseDeep($0) },
             onBack: { [weak self] in self?.goBack() },
             onSettings: { [weak self] in self?.openSettings() },
             onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
@@ -656,6 +657,7 @@ extension AppExplorerPresenting {
         func activated(_ entry: ExplorerEntry) -> ExplorerEntry {
             var entry = entry
             entry.activationShortcut = favorite.activationShortcut
+            entry.hasDeepChoices = favorite.hasDeepChoices
             return entry
         }
         if let placement = favorite.windowPlacement {
@@ -677,7 +679,7 @@ extension AppExplorerPresenting {
             return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                 icon: nil, url: nil, isWindowManager: favorite.isValidDestination))
         }
-        if favorite.isGroup {
+        if favorite.isPureGroup {
             return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
                 icon: nil, url: nil, isGroup: favorite.isValidDestination && depth < AppExplorerSettings.maximumGroupDepth,
                 isRecentGroup: favorite.isRecentGroup))
@@ -722,10 +724,47 @@ extension AppExplorerPresenting {
         case .highlight(let direction):
             // Publish only a change of sector, not every hardware report.
             if model.selected != direction { model.selected = direction }
-        case .select(let direction): choose(direction)
-        case .back: goBack()
-        case .cancel: dismiss()
+        case .deepen(let direction, let continuation): openDeepFan(direction, continuing: continuation)
+        case .select(let direction):
+            if model.deepFan == nil { choose(direction) } else { chooseDeep(direction) }
+        case .back:
+            if model.deepFan == nil { goBack() } else { closeDeepFan() }
+        case .cancel:
+            if model.deepFan == nil { dismiss() } else { closeDeepFan() }
         }
+    }
+
+    private func makeSelection(waitingForLift: Bool) -> AppExplorerSelection {
+        AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount,
+            deepSlots: Set(model.entries.filter(\.hasDeepChoices).map(\.direction)))
+    }
+
+    private func openDeepFan(_ direction: ExplorerSlot, continuing: AppExplorerSelection.Continuation) {
+        guard model.deepFan == nil, model.entries.first(where: { $0.direction == direction })?.hasDeepChoices == true else { return }
+        let settings = model.showingWindowManager ? windowKeys.resolved(windowConfiguration) : heldKeys.resolved(configuration())
+        let path = (model.showingWindowManager ? windowGroupPath : groupPath) + [direction]
+        guard let parent = settings.favorite(at: path), let children = parent.children, !children.isEmpty else { return }
+        let count = parent.slotCount ?? max(2, min(16, children.count))
+        model.deepFan = ExplorerDeepFan(origin: direction, entries: children.map { makeEntry($0, depth: path.count) }, slotCount: count)
+        model.selected = nil
+        input = AppExplorerSelection(continuing: continuing, slotCount: count, fanOrigin: direction)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    private func chooseDeep(_ direction: ExplorerSlot) {
+        guard let fan = model.deepFan, fan.entries.contains(where: { $0.direction == direction }) else { closeDeepFan(); return }
+        model.deepFan = nil
+        if model.showingWindowManager { windowGroupPath.append(fan.origin) }
+        else { groupPath.append(fan.origin) }
+        loadEntries()
+        model.selected = direction
+        choose(direction)
+    }
+
+    private func closeDeepFan() {
+        model.deepFan = nil
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
     }
 
     private func resetLocalGesture() {
@@ -780,6 +819,13 @@ extension AppExplorerPresenting {
         guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
             replayLocalGesture(); return false
         }
+        let needsOneFingerSequence = gestures.contains { binding in
+            guard let base = binding.trigger.gesture?.baseTapTrigger else { return false }
+            return base == .oneFingerTap || base == .oneFingerDoubleTap || base == .oneFingerTripleTap
+        }
+        // The built-in HUD carousel uses only two-finger swipes. Do not make
+        // ordinary one-finger tile selection wait behind that recognizer.
+        if localGestureReports.isEmpty, contacts.count <= 1, !needsOneFingerSequence { return false }
         let oneTapPairSwipe = localGestureSequenceFingers == 1 && localGestureTapCount == 1 &&
             gestures.contains { $0.trigger.gesture?.rawValue.hasPrefix("oneTapTwo.") == true }
         let joiningPair = (localGestureSequenceFingers == 2 || oneTapPairSwipe) && contacts.count == 1 &&
@@ -963,7 +1009,7 @@ extension AppExplorerPresenting {
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
         if model.showingWindowManager && model.windowFullScreen && entry?.command != .exitFullScreen {
-            input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
+            input = makeSelection(waitingForLift: contactIsDown)
             model.selected = nil; return
         }
         if let index = entry?.windowIndex, windowList.indices.contains(index) {
@@ -1018,7 +1064,7 @@ extension AppExplorerPresenting {
             if let error {
                 model.message = error
                 model.selected = nil
-                input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
+                input = makeSelection(waitingForLift: contactIsDown)
                 deadline = Date().addingTimeInterval(15)
             } else { dismiss() }
             return
@@ -1168,9 +1214,10 @@ extension AppExplorerPresenting {
     private func refreshGroup() {
         resetLocalGesture()
         selectionGeneration &+= 1
+        model.deepFan = nil
         loadEntries()
         model.selected = nil
-        input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: model.slotCount)
+        input = makeSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(15)
     }
 
@@ -1339,6 +1386,7 @@ struct ExplorerEntry {
     var isWebURL: Bool
     var webIconSymbol: String?
     var isGroup: Bool
+    var hasDeepChoices: Bool
     var isRecentGroup: Bool
     var isWindowManager: Bool
     var tilingDirection: SwipeDirection?
@@ -1350,11 +1398,12 @@ struct ExplorerEntry {
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
-    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, activationShortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, hasDeepChoices: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, activationShortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
         self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
         self.isWebURL = isWebURL
         self.webIconSymbol = webIconSymbol
         self.isGroup = isGroup
+        self.hasDeepChoices = hasDeepChoices
         self.isRecentGroup = isRecentGroup
         self.isWindowManager = isWindowManager
         self.tilingDirection = tilingDirection
@@ -1382,6 +1431,34 @@ struct HUDCarouselTransition: Identifiable {
     let id = UUID()
     let direction: HUDNavigationAction
     let outgoing: HUDCarouselPreview
+}
+
+struct ExplorerDeepFan {
+    let origin: ExplorerSlot
+    let entries: [ExplorerEntry]
+    let slotCount: Int
+}
+
+private struct ExplorerDeepFanSector: Shape {
+    let angle: Double
+    let innerRadius: Double
+    let outerRadius: Double
+    let halfAngle: Double
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let start = Angle.degrees(angle - halfAngle), end = Angle.degrees(angle + halfAngle)
+        func point(_ value: Angle, radius: Double) -> CGPoint {
+            CGPoint(x: center.x + cos(value.radians) * radius, y: center.y + sin(value.radians) * radius)
+        }
+        var path = Path()
+        path.move(to: point(start, radius: innerRadius))
+        path.addLine(to: point(start, radius: outerRadius))
+        path.addArc(center: center, radius: outerRadius, startAngle: start, endAngle: end, clockwise: false)
+        path.addLine(to: point(end, radius: innerRadius))
+        path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
+        path.closeSubpath()
+        return path
+    }
 }
 
 private extension HUDNavigationAction {
@@ -1486,6 +1563,7 @@ private struct HUDMiniWheel: View {
     @Published var entries: [ExplorerEntry] = []
     @Published var actionBindings: [ActionBinding] = []
     @Published var selected: ExplorerSlot?
+    @Published var deepFan: ExplorerDeepFan?
     @Published var mode: AppExplorerMode = .favorites
     @Published var groupNames: [String] = []
     @Published var groupDirections: [ExplorerSlot] = []
@@ -1524,6 +1602,7 @@ struct AppExplorerView: View {
     @State private var carouselProgress = 1.0
     var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
+    var onDeepSelect: (ExplorerSlot) -> Void = { _ in }
     var onBack: () -> Void = {}
     var onSettings: () -> Void = {}
     var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
@@ -1823,6 +1902,7 @@ struct AppExplorerView: View {
             ForEach(ExplorerSlot.slots(model.slotCount), id: \.self) { direction in
                 starburstChoice(direction, depth: depth, center: center)
             }
+            if let fan = model.deepFan { deepFan(fan) }
             Button(action: onBack) {
                 VStack(spacing: 3) {
                     Image(systemName: canGoBack ? "arrow.uturn.backward" : "xmark")
@@ -1850,7 +1930,7 @@ struct AppExplorerView: View {
     private func starburstChoice(_ direction: ExplorerSlot, depth: Int, center: CGPoint) -> some View {
         let entry = model.entries.first { $0.direction == direction }
         let available = isAvailable(entry)
-        let selected = model.selected == direction && available
+        let selected = model.deepFan == nil && model.selected == direction && available
         let shape = ExplorerStarburstSector(direction: direction,
             innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: model.theme.isFloating ? 2 : 11,
             halfAngle: 180 / Double(model.slotCount) - 2, roundedRim: model.theme.isFloating)
@@ -1875,6 +1955,11 @@ struct AppExplorerView: View {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
                         Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: model.theme.isFloating ? .semibold : .medium))
                             .lineLimit(entry.shortcut == nil ? 2 : 3).multilineTextAlignment(.center)
+                        if entry.hasDeepChoices {
+                            Image(systemName: "chevron.forward.2")
+                                .font(.system(size: 7, weight: .bold)).foregroundStyle(accent)
+                                .rotationEffect(.degrees(direction.angle))
+                        }
                     } else {
                         Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -1898,6 +1983,51 @@ struct AppExplorerView: View {
         .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .animation(feedback, value: selected)
+    }
+
+    private func deepFan(_ fan: ExplorerDeepFan) -> some View {
+        let width = DeepSwipeFan.span(count: fan.slotCount) / Double(fan.slotCount)
+        let fanCenter = CGPoint(x: 209, y: 195)
+        let originPoint = CGPoint(x: 0.5 + cos(fan.origin.angle * .pi / 180) * 0.34,
+                                  y: 0.5 + sin(fan.origin.angle * .pi / 180) * 0.44)
+        return ZStack {
+            ForEach(ExplorerSlot.slots(fan.slotCount), id: \.self) { slot in
+                let angle = DeepSwipeFan.angle(for: slot, count: fan.slotCount, origin: fan.origin)
+                let entry = fan.entries.first { $0.direction == slot }
+                let selected = model.selected == slot && entry != nil
+                let shape = ExplorerDeepFanSector(angle: angle, innerRadius: 147, outerRadius: 205,
+                    halfAngle: max(3, width / 2 - 1.2))
+                let radians = angle * .pi / 180
+                let point = CGPoint(x: fanCenter.x + cos(radians) * 176, y: fanCenter.y + sin(radians) * 176)
+                Button { onDeepSelect(slot) } label: {
+                    ZStack {
+                        shape.fill(accent.opacity(selected ? 0.40 : entry == nil ? 0.035 : 0.15))
+                        shape.stroke(accent.opacity(selected ? 1 : entry == nil ? 0.12 : 0.58),
+                            lineWidth: selected ? 1.8 : 0.8)
+                        VStack(spacing: 2) {
+                            if let entry {
+                                entrySymbol(entry).scaleEffect(0.38).frame(width: 20, height: 17)
+                                Text(entry.name).font(.system(size: 7, weight: .semibold)).lineLimit(2)
+                            } else {
+                                Image(systemName: "plus").font(.system(size: 9, weight: .light)).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(width: 42, height: 34)
+                        .position(point)
+                    }
+                    .frame(width: 418, height: 390)
+                    .contentShape(shape)
+                }
+                .buttonStyle(.plain).disabled(entry == nil)
+                .accessibilityLabel("Deep choice: \(entry?.name ?? "Empty slot")")
+            }
+        }
+        .frame(width: 418, height: 390)
+        .transition(animates
+            ? .scale(scale: 0.92, anchor: UnitPoint(x: originPoint.x, y: originPoint.y)).combined(with: .opacity)
+            : .identity)
+        .animation(animates ? .easeOut(duration: 0.18) : nil, value: fan.origin)
+        .zIndex(4)
     }
 
     private func isAvailable(_ entry: ExplorerEntry?) -> Bool {

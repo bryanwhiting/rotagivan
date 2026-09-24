@@ -471,8 +471,8 @@ struct ExplorerSlot: RawRepresentable, Codable, Hashable {
     private init(unchecked: String) { rawValue = unchecked }
     init(_ direction: SwipeDirection) { rawValue = direction.rawValue }
     init?(rawValue: String) {
-        guard Self.legacy.contains(where: { $0.rawValue == rawValue }) ||
-            [12, 16].flatMap({ Self.slots($0) }).contains(where: { $0.rawValue == rawValue }) else { return nil }
+        let isGenerated = rawValue.hasPrefix("angle") && Int(rawValue.dropFirst(5)).map { (0..<3600).contains($0) } == true
+        guard Self.legacy.contains(where: { $0.rawValue == rawValue }) || isGenerated else { return nil }
         self.rawValue = rawValue
     }
     init(from decoder: Decoder) throws {
@@ -488,7 +488,7 @@ struct ExplorerSlot: RawRepresentable, Codable, Hashable {
     var swipeDirection: SwipeDirection? { SwipeDirection(rawValue: rawValue) }
     var title: String { swipeDirection?.title ?? "\(Int((angle + 90).rounded()))° clockwise" }
     static func slots(_ count: Int) -> [Self] {
-        let count = [4, 8, 12, 16].contains(count) ? count : 8
+        let count = (2...16).contains(count) ? count : 8
         return (0..<count).map { index in
             let tenths = index * 3600 / count
             return tenths % 450 == 0 ? legacy[tenths / 450] : Self(unchecked: "angle\(tenths)")
@@ -652,6 +652,11 @@ struct AppExplorerFavorite: Codable, Equatable {
     var supportsHoldLayers: Bool { isGroup || isWindowManager }
     var isWindowManager: Bool { action == .windowManager }
     var isGroup: Bool { children != nil }
+    var hasPrimaryDestination: Bool {
+        bundleID != nil || url != nil || action != nil || shortcut != nil || windowPlacement != nil
+    }
+    var hasDeepChoices: Bool { hasPrimaryDestination && children != nil && children?.isEmpty == false }
+    var isPureGroup: Bool { isGroup && !hasPrimaryDestination }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
@@ -660,16 +665,16 @@ struct AppExplorerFavorite: Codable, Equatable {
         guard activationShortcut == nil || activationShortcut!.isValidHUDActionHotkey else { return false }
         guard iconSymbol == nil || (url != nil && WebsiteIconCatalog.symbols.contains(iconSymbol!)) else { return false }
         guard holdLayers == nil || supportsHoldLayers else { return false }
-        guard slotCount == nil || ((isGroup || isWindowManager) && [4, 8, 12, 16].contains(slotCount!)) else { return false }
+        guard slotCount == nil || ((isGroup || isWindowManager) && (2...16).contains(slotCount!)) else { return false }
         if windowPlacement != nil {
-            return bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil && shortcut == nil && holdLayers == nil && slotCount == nil && showsWindows != true
+            return bundleID == nil && url == nil && groupMode == nil && action == nil && shortcut == nil && holdLayers == nil && showsWindows != true
         }
         guard showsWindows != true || (bundleID != nil && action == nil && !isGroup && url == nil && shortcut == nil) else { return false }
         if let shortcut {
-            return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && children == nil && groupMode == nil && action == nil
+            return shortcut.isValidExplorerShortcut && bundleID == nil && url == nil && groupMode == nil && action == nil
         }
-        if action != nil { return bundleID == nil && url == nil && (children == nil || isWindowManager) && groupMode == nil }
-        if isGroup { return bundleID == nil && url == nil }
+        if action != nil { return bundleID == nil && url == nil && groupMode == nil }
+        if isPureGroup { return bundleID == nil && url == nil }
         guard groupMode == nil else { return false }
         if url != nil { return bundleID == nil && resolvedWebURL != nil }
         guard let bundleID else { return false }
@@ -811,7 +816,7 @@ struct AppExplorerSettings: Codable, Equatable {
     }
     func count(at path: [ExplorerSlot]) -> Int { path.isEmpty ? (slotCount ?? 8) : (favorite(at: path)?.slotCount ?? 8) }
     @discardableResult mutating func resize(to count: Int, at path: [ExplorerSlot]) -> Bool {
-        guard [4, 8, 12, 16].contains(count),
+        guard (2...16).contains(count),
               let old = path.isEmpty ? favorites : favorite(at: path)?.children, old.count <= count else { return false }
         var available = ExplorerSlot.slots(count), placed: [AppExplorerFavorite] = []
         // Keep exact positions first, then place remaining tiles in the closest free sector.
@@ -861,7 +866,7 @@ struct AppExplorerSettings: Codable, Equatable {
         return next
     }
     var hasValidFavorites: Bool {
-        guard slotCount == nil || [4, 8, 12, 16].contains(slotCount!) else { return false }
+        guard slotCount == nil || (2...16).contains(slotCount!) else { return false }
         var remaining = Self.maximumFavorites
         var remainingLayers = 128
         let windowCommandKeys = windowManager?.shortcuts.map(\.shortcut) ?? []
@@ -873,7 +878,7 @@ struct AppExplorerSettings: Codable, Equatable {
             for layer in layers {
                 remainingLayers -= 1
                 guard remainingLayers >= 0, !layer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      layer.name.count <= 128, layer.slotCount == nil || [4, 8, 12, 16].contains(layer.slotCount!) else { return false }
+                      layer.name.count <= 128, layer.slotCount == nil || (2...16).contains(layer.slotCount!) else { return false }
                 if let key = layer.holdShortcut {
                     guard key.isPhysicalShortcut, key.keyCode != 53,
                           keys.insert("\(key.keyCode):\(key.modifiers)").inserted else { return false }
@@ -890,7 +895,7 @@ struct AppExplorerSettings: Codable, Equatable {
                    bindings: [ActionBinding] = [], reserved: [RecordedShortcut] = [],
                    commandKeys: [RecordedShortcut] = []) -> Bool {
             guard bindings.isValidBindings(reservedKeys: entries.compactMap(\.activationShortcut) + reserved) else { return false }
-            guard [4, 8, 12, 16].contains(count), depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= count,
+            guard (2...16).contains(count), depth <= Self.maximumGroupDepth, nesting <= 12, entries.count <= count,
                   entries.allSatisfy({ ExplorerSlot.slots(count).contains($0.direction) }),
                   Set(entries.map(\.direction)).count == entries.count else { return false }
             var actionHotkeys = Set<String>()
@@ -1375,9 +1380,9 @@ struct RecordedShortcut: Codable, Equatable {
     var isValidGlobalHotkey: Bool {
         isPhysicalShortcut && keyCode != 53 && (keyCode >= 64 || modifiers & 0x1e0000 != 0)
     }
-    /// Escape closes the HUD; bare S remains its persistent Settings control.
+    /// Escape closes the HUD; bare E/S remain its persistent controls.
     var isValidHUDActionHotkey: Bool {
-        isPhysicalShortcut && keyCode != 53 && !(modifiers & 0x1e0000 == 0 && keyCode == 1)
+        isPhysicalShortcut && keyCode != 53 && !(modifiers & 0x1e0000 == 0 && (keyCode == 1 || keyCode == 14))
     }
 }
 

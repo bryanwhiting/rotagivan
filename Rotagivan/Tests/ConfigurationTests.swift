@@ -341,7 +341,8 @@ struct ConfigurationTests {
         }
         print("Explorer themes passed: legacy fallback, all-theme YAML roundtrip, animation preference, layer inheritance, and invalid input rejection.")
         var invalidGroup = grouped
-        invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down, name: "Mixed", url: "https://example.com", children: []))
+        invalidGroup.settings.appExplorer!.favorites.append(AppExplorerFavorite(direction: .down,
+            bundleID: "com.example.invalid", name: "Mixed", url: "https://example.com", children: []))
         rejected(try ConfigurationYAML.encode(invalidGroup), "group with multiple destination types")
         invalidGroup = grouped
         invalidGroup.settings.appExplorer!.setFavorite(AppExplorerFavorite(direction: .down, name: "Unsafe nested URL", url: "file:///tmp/test"), at: .down, in: [.left, .up])

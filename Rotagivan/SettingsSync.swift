@@ -21,8 +21,15 @@ private struct SyncAPIError: LocalizedError {
 
 @MainActor final class SettingsSync: ObservableObject {
     @Published private(set) var account: SyncAccount?
-    @Published private(set) var status = "Starting local settings…"
-    @Published private(set) var error: String?
+    @Published private(set) var status = "Starting local settings…" {
+        didSet { UserDefaults.standard.set(status, forKey: "debug.lastSyncStatus") }
+    }
+    @Published private(set) var error: String? {
+        didSet {
+            if let error { UserDefaults.standard.set(error, forKey: "debug.lastSyncError") }
+            else { UserDefaults.standard.removeObject(forKey: "debug.lastSyncError") }
+        }
+    }
     @Published private(set) var busy = false
     @Published private(set) var hasConflict = false
     @Published private(set) var localConflict = false
@@ -57,6 +64,7 @@ private struct SyncAPIError: LocalizedError {
         ShortcutSettings.shared.objectWillChange.sink { [weak self] _ in self?.changed() }.store(in: &subscriptions)
         pollingTask = Task { [weak self] in
             guard let self else { return }
+            var localReady = true
             do {
                 // Existing YAML is authoritative on startup. Import is validated and backed up.
                 if let (config, digest) = try await files.read() {
@@ -73,10 +81,24 @@ private struct SyncAPIError: LocalizedError {
                         UserDefaults.standard.set(digest, forKey: "sync.localDigest")
                     }
                 } else { try await saveLocal() }
+            } catch {
+                localReady = false
+                localConflict = true
+                self.error = error.localizedDescription
+                status = "Local configuration needs attention"
+            }
+            do {
                 account = try SyncKeychain.read(server: server)
-                status = account == nil ? "Saved locally • Sign in to sync across Macs" : "Checking cloud…"
-                if account != nil { await sync() }
-            } catch { self.error = error.localizedDescription }
+                if account == nil {
+                    if localReady { status = "Saved locally • Sign in to sync across Macs" }
+                } else if localReady {
+                    status = "Checking cloud…"
+                    await sync()
+                }
+            } catch {
+                self.error = error.localizedDescription
+                status = "Saved locally • Sign in again"
+            }
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(2)) } catch { break }
                 await checkLocalFile()

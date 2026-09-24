@@ -26,7 +26,11 @@ struct RotagivanApp: App {
         _store = StateObject(wrappedValue: store)
         let hid = NavigatorHIDManager(store: store)
         _hid = StateObject(wrappedValue: hid)
-        _sync = StateObject(wrappedValue: SettingsSync(store: store, hid: hid))
+        let sync = SettingsSync(store: store, hid: hid)
+        _sync = StateObject(wrappedValue: sync)
+        // Defer until SwiftUI has installed and retained its state objects, but
+        // do not depend on either the settings window or menu being presented.
+        DispatchQueue.main.async { sync.start() }
     }
 
     var body: some Scene {
@@ -47,6 +51,10 @@ struct RotagivanApp: App {
             NavigatorPanel(store: store, hid: hid)
         } label: {
             RotagivanMenuBarLabel(store: store)
+                // The menu-bar label exists for the lifetime of the app, even
+                // when Settings is never opened. Start the retained sync object
+                // here; the settings-window call remains an idempotent fallback.
+                .onAppear { sync.start() }
         }
         .menuBarExtraStyle(.window)
     }

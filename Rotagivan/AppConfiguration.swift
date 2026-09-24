@@ -58,8 +58,16 @@ struct AppConfiguration: Codable {
 
     func yaml() throws -> String {
         try validate()
-        return "# Rotagivan complete configuration\n# Engine units, not slider percentages. Permissions and signing are excluded.\n"
-            + (try ConfigurationYAML.encode(self))
+        let body = try ConfigurationYAML.encode(self)
+        // Refuse to publish a partial snapshot if a newly added setting is not
+        // represented by the YAML codec. This covers nested HUD-layer actions,
+        // every top-level profile, and shortcuts before local or cloud sync.
+        let roundTrip = try ConfigurationYAML.decode(Self.self, from: body)
+        try roundTrip.validate()
+        guard try roundTrip.syncFingerprint() == syncFingerprint() else {
+            throw ConfigurationError("Configuration export omitted one or more settings.")
+        }
+        return "# Rotagivan complete configuration\n# Engine units, not slider percentages. Permissions and signing are excluded.\n" + body
     }
 
     static func factory(bundle: Bundle = .main) throws -> Self {

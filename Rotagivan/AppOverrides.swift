@@ -7,6 +7,8 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
     case doubleLeft = "double.left", doubleRight = "double.right", doubleUp = "double.up", doubleDown = "double.down"
     case doubleTopLeft = "double.topLeft", doubleTopRight = "double.topRight", doubleBottomLeft = "double.bottomLeft", doubleBottomRight = "double.bottomRight"
     case twoFingerLeft = "twoFinger.left", twoFingerRight = "twoFinger.right"
+    case oneTapTwoLeft = "oneTapTwo.left", oneTapTwoRight = "oneTapTwo.right", oneTapTwoUp = "oneTapTwo.up", oneTapTwoDown = "oneTapTwo.down"
+    case oneTapTwoTopLeft = "oneTapTwo.topLeft", oneTapTwoTopRight = "oneTapTwo.topRight", oneTapTwoBottomLeft = "oneTapTwo.bottomLeft", oneTapTwoBottomRight = "oneTapTwo.bottomRight"
     case twoSingleLeft = "twoSingle.left", twoSingleRight = "twoSingle.right", twoSingleUp = "twoSingle.up", twoSingleDown = "twoSingle.down"
     case twoSingleTopLeft = "twoSingle.topLeft", twoSingleTopRight = "twoSingle.topRight", twoSingleBottomLeft = "twoSingle.bottomLeft", twoSingleBottomRight = "twoSingle.bottomRight"
     case twoDoubleLeft = "twoDouble.left", twoDoubleRight = "twoDouble.right", twoDoubleUp = "twoDouble.up", twoDoubleDown = "twoDouble.down"
@@ -22,8 +24,10 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
     ]
     static let layerActionTriggers: [Self] = baseTapTriggers + swipeCapableTapTriggers.flatMap { tap in
         SwipeDirection.allCases.compactMap { combining(tap: tap, direction: $0) }
-    }
-    static func combining(tap: Self, direction: SwipeDirection) -> Self? {
+    } + SwipeDirection.allCases.compactMap { combining(tap: .oneFingerTap, direction: $0, swipeFingers: 2) }
+    static func combining(tap: Self, direction: SwipeDirection, swipeFingers: Int = 1) -> Self? {
+        if swipeFingers == 2 { return tap == .oneFingerTap ? Self(rawValue: "oneTapTwo.\(direction.rawValue)") : nil }
+        guard swipeFingers == 1 else { return nil }
         let prefix: String
         switch tap {
         case .oneFingerTap: prefix = "single"
@@ -38,6 +42,7 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
         guard direction != nil else { return Self.baseTapTriggers.contains(self) ? self : nil }
         switch rawValue.split(separator: ".").first {
         case "single": return .oneFingerTap
+        case "oneTapTwo": return .oneFingerTap
         case "double": return .oneFingerDoubleTap
         case "twoSingle": return .twoFingerTap
         case "twoDouble": return .twoFingerDoubleTap
@@ -56,6 +61,7 @@ enum AppGestureTrigger: String, Codable, CaseIterable, Identifiable {
             let prefix: String
             switch rawValue.split(separator: ".").first {
             case "single": prefix = "Tap + swipe"
+            case "oneTapTwo": prefix = "One-finger tap + two-finger swipe"
             case "double": prefix = "Double-tap + swipe"
             case "twoSingle": prefix = "Two-finger tap + swipe"
             case "twoDouble": prefix = "Two-finger double-tap + swipe"
@@ -93,6 +99,7 @@ extension ProfileGestures {
             let singleTap: Bool
             switch trigger.rawValue.split(separator: ".").first {
             case "single": key = \.singleTapSwipe; singleTap = true
+            case "oneTapTwo": key = \.oneFingerTapTwoFingerSwipe; singleTap = true
             case "double": key = \.doubleTapSwipe; singleTap = false
             case "twoSingle": key = \.twoFingerSingleTapSwipe; singleTap = true
             case "twoDouble": key = \.twoFingerDoubleTapSwipe; singleTap = false
@@ -125,6 +132,7 @@ extension AppGestureTrigger {
             let swipe: DoubleTapSwipeSettings?
             switch rawValue.split(separator: ".").first {
             case "single": swipe = taps.singleTapSwipe
+            case "oneTapTwo": swipe = taps.oneFingerTapTwoFingerSwipe
             case "double": swipe = taps.doubleTapSwipe
             case "twoSingle": swipe = taps.twoFingerSingleTapSwipe
             case "twoDouble": swipe = taps.twoFingerDoubleTapSwipe
@@ -228,12 +236,13 @@ struct AppGestureOverride: Codable, Equatable, Identifiable {
                 let key: WritableKeyPath<ProfileGestures, DoubleTapSwipeSettings?>
                 switch binding.trigger.rawValue.split(separator: ".").first {
                 case "single": key = \.singleTapSwipe
+                case "oneTapTwo": key = \.oneFingerTapTwoFingerSwipe
                 case "double": key = \.doubleTapSwipe
                 case "twoSingle": key = \.twoFingerSingleTapSwipe
                 case "twoDouble": key = \.twoFingerDoubleTapSwipe
                 default: key = \.twoFingerSwipe
                 }
-                let single = key == \.singleTapSwipe || key == \.twoFingerSingleTapSwipe
+                let single = key == \.singleTapSwipe || key == \.oneFingerTapTwoFingerSwipe || key == \.twoFingerSingleTapSwipe
                 var swipe = result[keyPath: key] ?? (single ? .singleTapDefaults : DoubleTapSwipeSettings())
                 if !swipe.enabled && binding.action != .none {
                     for direction in SwipeDirection.allCases { swipe.setAction(.none, for: direction) }

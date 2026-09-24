@@ -234,12 +234,15 @@ struct TwoFingerTapSwipeRecognizer {
     private var last: [UInt8: CGPoint] = [:]
     private var travel = 0.0
     private var completion: Completion?
+    private var onlyStartWithPair = false
 
     mutating func arm(at now: Date, settings: DoubleTapSwipeSettings, tapDuration: Double?,
-                      tapRadius: Double, tapInterval: Double, maximumDuration: Double) {
+                      tapRadius: Double, tapInterval: Double, maximumDuration: Double,
+                      onlyStartWithPair: Bool = false) {
         self = Self()
         self.settings = settings; self.tapDuration = tapDuration; self.tapRadius = tapRadius
         self.maximumDuration = maximumDuration
+        self.onlyStartWithPair = onlyStartWithPair
         swipeDeadline = now.addingTimeInterval(settings.resolvedWindow)
         tapDeadline = tapDuration == nil ? .distantPast : now.addingTimeInterval(tapInterval)
         deadline = max(swipeDeadline, tapDeadline)
@@ -271,6 +274,7 @@ struct TwoFingerTapSwipeRecognizer {
         if phase == .waiting {
             if now > deadline { phase = .idle; return Result(completion: .fallback) }
             if contacts.isEmpty { return Result() }
+            if onlyStartWithPair && contacts.count < 2 { return Result() }
             started = now; first = contacts.first; phase = .joining
         }
         if phase == .joining {

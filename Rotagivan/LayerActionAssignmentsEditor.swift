@@ -370,7 +370,9 @@ struct AddLayerActionSheet: View {
     let onSave: (AppGestureTrigger, TapAction, RecordedShortcut?) -> Void
     let onCancel: () -> Void
     @State private var tap = AppGestureTrigger.oneFingerTap
-    @State private var direction: SwipeDirection?
+    @State private var swipeEnabled = false
+    @State private var swipeFingers = 1
+    @State private var direction = SwipeDirection.left
     @State private var action = TapAction.none
     @State private var shortcut: RecordedShortcut?
 
@@ -378,12 +380,15 @@ struct AddLayerActionSheet: View {
         tap == .twoFingerLeft || tap == .twoFingerRight
     }
     private var trigger: AppGestureTrigger {
-        direction.flatMap { AppGestureTrigger.combining(tap: tap, direction: $0) } ?? tap
+        guard swipeEnabled, canSwipe else { return tap }
+        return AppGestureTrigger.combining(tap: tap, direction: direction,
+            swipeFingers: tap == .oneFingerTap ? swipeFingers : 1) ?? tap
     }
     private var canSwipe: Bool { AppGestureTrigger.swipeCapableTapTriggers.contains(tap) }
     private var canSave: Bool {
         action != .none && (action != .shortcut || shortcut != nil) &&
-            (direction == nil || action == .shortcut || action == .appExplorer)
+            (!swipeEnabled || canSwipe) &&
+            (!swipeEnabled || action == .shortcut || action == .appExplorer)
     }
 
     var body: some View {
@@ -391,7 +396,7 @@ struct AddLayerActionSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Add tap action")
                     .font(.title3.weight(.semibold))
-                Text("Choose the tap first. Add a direction only when the action should run after a swipe.")
+                Text("Choose a tap. Optionally add a one- or two-finger swipe and its direction.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -414,34 +419,60 @@ struct AddLayerActionSheet: View {
                     .frame(width: 220)
                     .onChange(of: tap) { _, value in
                         if !AppGestureTrigger.swipeCapableTapTriggers.contains(value) {
-                            direction = nil
+                            swipeEnabled = false
+                        }
+                        if value != .oneFingerTap {
+                            swipeFingers = 1
                         }
                     }
                 }
                 Divider().padding(.leading, 42)
                 selectionRow(number: "2", title: "Swipe (optional)") {
-                    Picker("Swipe direction", selection: $direction) {
-                        Text("No swipe").tag(nil as SwipeDirection?)
-                        ForEach(SwipeDirection.allCases, id: \.self) { direction in
-                            Label(direction.title, systemImage: direction.symbolName)
-                                .tag(direction as SwipeDirection?)
+                    Toggle("Add swipe", isOn: $swipeEnabled)
+                        .toggleStyle(.checkbox)
+                        .disabled(!canSwipe || standaloneSwipe)
+                        .onChange(of: swipeEnabled) { _, enabled in
+                            guard enabled, action != .none, action != .shortcut, action != .appExplorer else { return }
+                            shortcut = .assigned(.tap(action))
+                            action = .shortcut
                         }
+                }
+                if swipeEnabled && canSwipe {
+                    if tap == .oneFingerTap {
+                        HStack {
+                            Text("Swipe with")
+                            Spacer()
+                            Picker("Swipe fingers", selection: $swipeFingers) {
+                                Text("One finger").tag(1)
+                                Text("Two fingers").tag(2)
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(width: 220)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
                     }
-                    .labelsHidden()
-                    .frame(width: 220)
-                    .disabled(!canSwipe || standaloneSwipe)
-                    .onChange(of: direction) { _, value in
-                        guard value != nil, action != .none, action != .shortcut, action != .appExplorer else { return }
-                        shortcut = .assigned(.tap(action))
-                        action = .shortcut
+                    HStack {
+                        Text("Direction")
+                        Spacer()
+                        Picker("Swipe direction", selection: $direction) {
+                            ForEach(SwipeDirection.allCases, id: \.self) { direction in
+                                Label(direction.title, systemImage: direction.symbolName).tag(direction)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
                 }
                 Divider().padding(.leading, 42)
                 selectionRow(number: "3", title: "Action") {
                     UnifiedLayerActionPicker(
                         action: $action,
                         shortcut: $shortcut,
-                        shortcutsOnly: direction != nil
+                        shortcutsOnly: swipeEnabled
                     )
                     .frame(width: 220)
                 }
@@ -477,7 +508,7 @@ struct AddLayerActionSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 470)
+        .frame(width: 520)
     }
 
     private func selectionRow<Content: View>(number: String, title: String,
@@ -544,6 +575,12 @@ struct LayerSwipeRecognitionEditor: View {
                 settings: setting(\.singleTapSwipe, fallback: .singleTapDefaults),
                 showTiming: false,
                 showQuickDuration: false
+            )
+            family(
+                "One-finger tap + two-finger swipe",
+                settings: setting(\.oneFingerTapTwoFingerSwipe, fallback: .singleTapDefaults),
+                showTiming: true,
+                showQuickDuration: true
             )
             family(
                 "One-finger double-tap + swipe",

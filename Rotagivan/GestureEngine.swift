@@ -69,6 +69,9 @@ final class GestureEngine {
     private var deferredDoubleTap: DeferredDoubleTap?
     private var swipeRecognizer = DoubleTapSwipeRecognizer()
     private var twoFingerNavigation = TwoFingerNavigationRecognizer()
+    private var tapPairSwipe: DoubleTapSwipeSettings?
+    private var tapPairConfiguration: ProfileGestures?
+    private var tapPairRecognizer = TwoFingerTapSwipeRecognizer()
     private var swipeTimer: Timer?
     private var singleSwipe: DoubleTapSwipeSettings?
     private var singleSwipeConfiguration: ProfileGestures?
@@ -141,6 +144,7 @@ final class GestureEngine {
 
     func reset() {
         twoFingerNavigation = TwoFingerNavigationRecognizer()
+        clearTapPairSwipe()
         clearSingleSwipe()
         singleSwipeBlocked = false
         cancelTapSwipe(blockUntilLift: false)
@@ -215,6 +219,34 @@ final class GestureEngine {
         if tapDragCandidate, tapDragProfileID != store.activeProfileID { cancelTapDragCandidate() }
 
         handlePhysicalButton(report.buttonDown)
+
+        if let candidate = tapPairSwipe {
+            if report.contacts.contains(where: { $0.touching && !$0.confident }) ||
+                tapPairConfiguration != activeGestures || !activeGestures.gestures.tapToClick ||
+                pendingTap?.profileID != store.activeProfileID {
+                cancelPendingTap()
+            } else {
+                let result = tapPairRecognizer.update(current, at: now)
+                if let completion = result.completion {
+                    clearTapPairSwipe()
+                    if case .swipe(let direction) = completion,
+                       candidate.action(for: direction) != .none {
+                        cancelPendingTap()
+                        dispatchTap(candidate.action(for: direction), shortcut: candidate[direction])
+                    } else if let pending = pendingTap {
+                        cancelPendingTap()
+                        flushPendingTap(pending)
+                    }
+                }
+                if result.consumed {
+                    clearSingleSwipe()
+                    cancelTapDragCandidate()
+                    previousContacts.removeAll()
+                    endCursorTelemetry()
+                    return
+                }
+            }
+        }
 
         if singleSwipe != nil && (current.count > 1 ||
             report.contacts.contains(where: { $0.touching && !$0.confident }) ||
@@ -338,7 +370,8 @@ final class GestureEngine {
         let taps = activeGestures
         let hasTapAction = taps.oneFingerTap != .none || (taps.oneFingerDoubleTap ?? .none) != .none ||
             (taps.oneFingerTripleTap ?? .none) != .none ||
-            taps.doubleTapSwipe?.isConfigured == true || taps.singleTapSwipe?.isConfigured == true
+            taps.doubleTapSwipe?.isConfigured == true || taps.singleTapSwipe?.isConfigured == true ||
+            taps.oneFingerTapTwoFingerSwipe?.isConfigured == true
         holdingTapMotion = synthesizesPointerEvents && contacts.count == 1 && !syntheticDragActive &&
             hasTapAction && taps.gestures.tapToClick && taps.gestures.resolvedKeepCursorStillForTaps
         maximumMovement = 0
@@ -590,11 +623,14 @@ final class GestureEngine {
         let secondInterval = active.gestures.resolvedTripleTapSecondInterval
         let swipeSettings = (fingerCount == 2 ? active.twoFingerDoubleTapSwipe : active.doubleTapSwipe) ?? DoubleTapSwipeSettings()
         let singleSettings = fingerCount == 2 ? active.twoFingerSingleTapSwipe : active.singleTapSwipe
+        let pairSettings = fingerCount == 1 ? active.oneFingerTapTwoFingerSwipe : nil
         let canSwipe = swipeSettings.isConfigured
         let canSingleSwipe = singleSettings?.isConfigured == true
+        let canPairSwipe = pairSettings?.isConfigured == true
 
         if let pendingTap {
             if pendingTap.fingerCount == fingerCount, now.timeIntervalSince(pendingTap.date) <= (pendingTap.tapCount == 2 ? secondInterval : firstInterval) {
+                clearTapPairSwipe()
                 pendingTapTimer?.invalidate()
                 self.pendingTap = nil
                 pendingTapTimer = nil
@@ -640,7 +676,7 @@ final class GestureEngine {
             pendingTapTimer = nil
         }
 
-        guard doubleAction != .none || tripleAction != .none || canSwipe || canSingleSwipe else {
+        guard doubleAction != .none || tripleAction != .none || canSwipe || canSingleSwipe || canPairSwipe else {
             performTap(action, shortcut: shortcut, at: now)
             return
         }
@@ -666,10 +702,18 @@ final class GestureEngine {
             RunLoop.main.add(timer, forMode: .common)
             return
         }
-        let wait = canSingleSwipe ? max(singleSettings!.resolvedWindow,
-            doubleAction != .none || tripleAction != .none || canSwipe ? firstInterval : 0) : firstInterval
+        let firstTapWait = doubleAction != .none || tripleAction != .none || canSwipe ? firstInterval : 0
+        let wait = max(firstTapWait, canSingleSwipe ? singleSettings!.resolvedWindow : 0,
+            canPairSwipe ? pairSettings!.resolvedWindow : 0)
         schedulePendingTap(PendingTap(profileID: store.activeProfileID, fingerCount: fingerCount,
             action: action, shortcut: shortcut, date: now), interval: wait)
+        if canPairSwipe, let pairSettings {
+            tapPairSwipe = pairSettings
+            tapPairConfiguration = active
+            tapPairRecognizer.arm(at: now, settings: pairSettings, tapDuration: nil,
+                tapRadius: 0, tapInterval: 0, maximumDuration: pairSettings.resolvedFastDuration,
+                onlyStartWithPair: true)
+        }
     }
 
     private func flushPendingTap(_ pending: PendingTap) {
@@ -687,6 +731,7 @@ final class GestureEngine {
                 guard let self, let pending = self.pendingTap else { return }
                 self.pendingTap = nil
                 self.pendingTapTimer = nil
+                self.clearTapPairSwipe()
                 if self.store.settings.enabled, pending.profileID == self.store.activeProfileID,
                    pending.configuration == self.activeGestures, self.activeGestures.gestures.tapToClick {
                     self.flushPendingTap(pending)
@@ -735,6 +780,13 @@ final class GestureEngine {
         pendingTapTimer?.invalidate()
         pendingTapTimer = nil
         pendingTap = nil
+        clearTapPairSwipe()
+    }
+
+    private func clearTapPairSwipe() {
+        tapPairSwipe = nil
+        tapPairConfiguration = nil
+        tapPairRecognizer = TwoFingerTapSwipeRecognizer()
     }
 
     private func cancelTapSwipe(blockUntilLift: Bool = true) {

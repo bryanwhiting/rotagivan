@@ -725,12 +725,14 @@ extension AppExplorerPresenting {
         guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
             replayLocalGesture(); return false
         }
-        let joiningPair = localGestureSequenceFingers == 2 && contacts.count == 1 &&
+        let oneTapPairSwipe = localGestureSequenceFingers == 1 && localGestureTapCount == 1 &&
+            gestures.contains { $0.trigger.gesture?.rawValue.hasPrefix("oneTapTwo.") == true }
+        let joiningPair = (localGestureSequenceFingers == 2 || oneTapPairSwipe) && contacts.count == 1 &&
             (localGestureFingerCount == 0 ||
              (localGestureFingerCount == 1 && now.timeIntervalSince(localGestureStarted) <= 0.12))
         if localGestureTapCount > 0, !contacts.isEmpty,
            (now.timeIntervalSince(localGestureLastLift) > localGesturePendingWindow ||
-            (contacts.count != localGestureSequenceFingers && !joiningPair)) {
+            (contacts.count != localGestureSequenceFingers && !(oneTapPairSwipe && contacts.count == 2) && !joiningPair)) {
             let prior: AppGestureTrigger = localGestureSequenceFingers == 2
                 ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
                 : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
@@ -779,14 +781,15 @@ extension AppExplorerPresenting {
         }
         guard localGestureFingerCount > 0, let origin = localGestureOrigin else { return true }
         let fingers = localGestureFingerCount
-        if localGestureTapCount > 0 && fingers != localGestureSequenceFingers {
+        if localGestureTapCount > 0 && fingers != localGestureSequenceFingers && !(oneTapPairSwipe && fingers == 2) {
             replayLocalGesture()
             return true
         }
         let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
         let duration = now.timeIntervalSince(localGestureStarted)
         let swipeSettings: DoubleTapSwipeSettings? = fingers == 2
-            ? (localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe : profile.twoFingerDoubleTapSwipe)
+            ? (oneTapPairSwipe ? profile.oneFingerTapTwoFingerSwipe :
+               localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe : profile.twoFingerDoubleTapSwipe)
             : (localGestureTapCount == 1 ? profile.singleTapSwipe : profile.doubleTapSwipe)
         let swipeDistance = localGestureTapCount == 0 && fingers == 2 ? 80 : (swipeSettings?.resolvedDistance ?? 60)
         let swipeDuration = localGestureTapCount == 0 ? 0.35 : (swipeSettings?.resolvedFastDuration ?? 0.18)
@@ -806,6 +809,8 @@ extension AppExplorerPresenting {
             let trigger: AppGestureTrigger?
             if fingers == 2 && localGestureTapCount == 0 {
                 trigger = direction == .left ? .twoFingerLeft : direction == .right ? .twoFingerRight : nil
+            } else if oneTapPairSwipe && fingers == 2 {
+                trigger = .combining(tap: .oneFingerTap, direction: direction, swipeFingers: 2)
             } else {
                 let base: AppGestureTrigger = fingers == 2
                     ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
@@ -823,6 +828,13 @@ extension AppExplorerPresenting {
         guard duration <= profile.gestures.tapMaxDuration,
               localGestureMaxTravel <= profile.gestures.tapMaxMovement else {
             replayLocalGesture(from: localGestureStrokeStart)
+            return true
+        }
+        if oneTapPairSwipe && fingers == 2 {
+            if let binding = gestures.first(where: { $0.trigger.gesture == .oneFingerTap }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+            } else { replayLocalGesture() }
             return true
         }
         localGestureTapCount += 1
@@ -846,7 +858,10 @@ extension AppExplorerPresenting {
         }
         let swipeWindow = fingers == 2
             ? (localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe?.resolvedWindow : profile.twoFingerDoubleTapSwipe?.resolvedWindow)
-            : (localGestureTapCount == 1 ? profile.singleTapSwipe?.resolvedWindow : profile.doubleTapSwipe?.resolvedWindow)
+            : (localGestureTapCount == 1
+                ? max(profile.singleTapSwipe?.resolvedWindow ?? 0,
+                      profile.oneFingerTapTwoFingerSwipe?.resolvedWindow ?? 0)
+                : profile.doubleTapSwipe?.resolvedWindow)
         let hasSwipeFollowup = gestures.contains { $0.trigger.gesture?.baseTapTrigger == trigger && $0.trigger.gesture?.direction != nil }
         let hasTapFollowup = gestures.contains { binding in
             guard let candidate = binding.trigger.gesture else { return false }

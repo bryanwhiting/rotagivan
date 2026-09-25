@@ -65,6 +65,8 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/MediaControls.swift" \
   "$script_dir/BindingEditor.swift" \
   "$script_dir/HUDLayerHotkeyEditor.swift" \
+  "$script_dir/VoiceActions.swift" \
+  "$script_dir/VoiceRecognition.swift" \
   "$script_dir/AppExplorer.swift" \
   "$script_dir/AppExplorerSettingsView.swift" \
   "$script_dir/GestureEngine.swift" \

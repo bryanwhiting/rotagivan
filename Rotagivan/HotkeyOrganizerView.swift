@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct HotkeyOrganizerView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var keys = ShortcutSettings.shared
+    @ObservedObject private var voiceApps = VoiceApplicationIndex.shared
     @State private var tab = "Dictionary"
     @State private var search = ""
     @State private var searchShortcut: RecordedShortcut?
@@ -177,6 +178,24 @@ struct HotkeyOrganizerView: View {
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
     }
 
+    private var voiceActionCatalog: some View {
+        let records = VoiceActionRegistry.make(settings: store.settings, applications: voiceApps.applications)
+        return DisclosureGroup("Voice action catalog · \(records.count) actions") {
+            Text("Voice matching uses these action IDs and descriptions. Tap the Main HUD center to listen, then confirm with Space or Enter. Audio goes to OpenRouter/xAI; transcripts and descriptions go to Jev. The API key stays in ~/.env and is never synced.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ForEach(records.filter { textMatches($0.title + " " + $0.detail) }) { record in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(record.title).fontWeight(.medium)
+                        Text(record.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Assign…") { assign(record.action) }
+                }.padding(8)
+            }
+        }.task { await voiceApps.load() }
+    }
+
     private var builtInActions: some View {
         VStack(alignment: .leading, spacing: 12) {
             actionGroup("Common Mac shortcuts", actions: CommonMacShortcut.all.map(\.action))
@@ -216,6 +235,7 @@ struct HotkeyOrganizerView: View {
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 12) {
             builtInActions
+            voiceActionCatalog
             HStack {
                 Text("Macros: \(store.settings.resolvedHotkeyDictionary.count)").foregroundStyle(.secondary)
                 Spacer()

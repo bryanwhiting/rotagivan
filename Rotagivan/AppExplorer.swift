@@ -48,6 +48,10 @@ extension AppExplorerPresenting {
     private var localGestureFingerLast: [UInt8: CGPoint] = [:]
     private var localGestureTimer: Timer?
     private let model = ExplorerModel()
+    private var voicePreparation: Task<Void, Never>?
+    var voiceCatalog: (() -> [VoiceRegisteredAction])?
+    var prepareVoice: ((VoiceSession, [VoiceRegisteredAction]) -> Void)?
+    var displayedVoiceSession: VoiceSession? { model.voiceSession }
     // Prepared on presentation and reused across rotations; never retain stale
     // configuration or machine-local app icons across separate HUD sessions.
     private var entryCache: [(favorite: AppExplorerFavorite, depth: Int, entry: ExplorerEntry)] = []
@@ -171,6 +175,7 @@ extension AppExplorerPresenting {
     /// Switch the open panel's scope without changing its source application or
     /// releasing the trackpad that owns its pointer lock.
     func switchLayer(_ id: UUID?) {
+        if model.voiceSession != nil { endVoiceMode() }
         guard isVisible, !isEditing else { return }
         if let id {
             guard let layer = configuration().holdLayers?.first(where: { $0.id == id }),
@@ -327,7 +332,10 @@ extension AppExplorerPresenting {
             onBack: { [weak self] in self?.centerTap() },
             onSettings: { [weak self] in self?.openSettings() },
             onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
-            onWindowPage: { [weak self] in self?.changeWindowPage($0) }))
+            onWindowPage: { [weak self] in self?.changeWindowPage($0) },
+            onVoiceExit: { [weak self] in self?.endVoiceMode() },
+            onVoiceRetry: { [weak self] in self?.beginVoiceMode() },
+            onVoiceConfirm: { [weak self] in self?.confirmVoiceAction() }))
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
@@ -424,6 +432,21 @@ extension AppExplorerPresenting {
 
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
         guard isVisible, !isEditing, contextIsValid?() != false else { return false }
+        if let voice = model.voiceSession {
+            if event.type == .keyDown && !event.isARepeat {
+                if event.keyCode == 53 { endVoiceMode(); return true }
+                guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return true }
+                switch event.keyCode {
+                case 36, 49, 76: confirmVoiceAction()
+                case 126: voice.select(.up)
+                case 124: voice.select(.right)
+                case 125: voice.select(.down)
+                case 123: voice.select(.left)
+                default: break
+                }
+            }
+            return true
+        }
         if event.type == .keyDown && event.keyCode == 53 { return false }
         if model.showingAppWindows {
             if event.type == .keyDown && [123, 124].contains(event.keyCode) {
@@ -712,6 +735,20 @@ extension AppExplorerPresenting {
         contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
         guard contextIsValid?() != false else { dismiss(); return }
         guard !isEditing else { return }
+        if let voice = model.voiceSession {
+            // Lifting after a swipe never executes a voice match.
+            switch input.process(report) {
+            case .highlight(let direction): if let direction { voice.select(direction) }
+            case .select(let direction):
+                voice.select(direction); input = AppExplorerSelection(waitingForLift: false, slotCount: 4)
+            case .back:
+                if voice.phase == .listening { voice.finishListening() }
+                input = AppExplorerSelection(waitingForLift: false, slotCount: 4)
+            case .cancel: input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: 4)
+            default: break
+            }
+            return
+        }
         if !input.waitingForLift && processLocalGesture(report) { return }
         applySelection(report)
     }
@@ -1257,11 +1294,57 @@ extension AppExplorerPresenting {
     func centerTap() {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
+        if let voice = model.voiceSession { if voice.phase == .listening { voice.finishListening() }; return }
+        if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingMediaControls {
+            beginVoiceMode(); return
+        }
         guard model.showingMediaControls else { goBack(); return }
         performMedia(.playPause)
         model.selected = nil
         input = makeSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(15)
+    }
+
+    private func currentVoiceCatalog() -> [VoiceRegisteredAction] {
+        if let voiceCatalog { return voiceCatalog() }
+        guard let store = editingStore else { return [] }
+        return VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications)
+    }
+
+    func beginVoiceMode() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        endVoiceMode()
+        resetLocalGesture()
+        let voice = VoiceSession()
+        model.voiceSession = voice
+        input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: 4)
+        deadline = Date().addingTimeInterval(120)
+        if let prepareVoice { prepareVoice(voice, currentVoiceCatalog()); return }
+        voicePreparation = Task { [weak self, weak voice] in
+            await VoiceApplicationIndex.shared.load()
+            guard !Task.isCancelled, let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                  self.contextIsValid?() != false else { return }
+            voice.start(catalog: self.currentVoiceCatalog())
+        }
+    }
+
+    func endVoiceMode() {
+        voicePreparation?.cancel(); voicePreparation = nil
+        model.voiceSession?.cancel(); model.voiceSession = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    func confirmVoiceAction() {
+        guard let voice = model.voiceSession, contextIsValid?() != false else { return }
+        if voice.selected == .left { endVoiceMode(); return }
+        if voice.phase == .listening { voice.finishListening(); return }
+        guard let match = voice.selectedMatch else { return }
+        guard let action = currentVoiceCatalog().first(where: { $0.id == match.id })?.action, action.isValid else {
+            voice.fail(VoiceError.message("This action changed or was removed. Please try again.")); return
+        }
+        endVoiceMode()
+        performBoundAction(action, fromKeyboard: true)
     }
 
     func goBack() {
@@ -1324,6 +1407,7 @@ extension AppExplorerPresenting {
     }
 
     func beginEditing() {
+        if model.voiceSession != nil { endVoiceMode() }
         guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingMediaControls, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
@@ -1411,6 +1495,7 @@ extension AppExplorerPresenting {
     }
 
     func dismiss() {
+        endVoiceMode()
         entryCache.removeAll(keepingCapacity: true)
         entryCacheSettings = nil
         resetLocalGesture()
@@ -1645,6 +1730,7 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
+    @Published var voiceSession: VoiceSession?
     // MRU starts at the left and proceeds clockwise. Positions freeze on open.
     static let directions = AppExplorerSettings.recentDirections
     @Published var entries: [ExplorerEntry] = []
@@ -1698,6 +1784,9 @@ struct AppExplorerView: View {
     var onSettings: () -> Void = {}
     var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
     var onWindowPage: (Int) -> Void = { _ in }
+    var onVoiceExit: () -> Void = {}
+    var onVoiceRetry: () -> Void = {}
+    var onVoiceConfirm: () -> Void = {}
     // Previews/tests may enforce reduced motion; they cannot override macOS's
     // accessibility preference in the opposite direction.
     var forceReduceMotion = false
@@ -1708,6 +1797,10 @@ struct AppExplorerView: View {
     var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
+    private var canActivateVoice: Bool {
+        !isPreview && !model.isEditing && model.layerName == nil && model.groupNames.isEmpty &&
+            !model.showingWindowManager && !model.showingMediaControls && !model.showingAppWindows && !model.showingRecents
+    }
     private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
     private var animates: Bool {
         ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
@@ -1729,6 +1822,15 @@ struct AppExplorerView: View {
     }
 
     var body: some View {
+        Group {
+            if let voice = model.voiceSession {
+                VoiceHUDView(session: voice, onExit: onVoiceExit, onRetry: onVoiceRetry, onConfirm: onVoiceConfirm)
+                    .frame(width: 950, height: 850)
+            } else { normalHUD }
+        }
+    }
+
+    private var normalHUD: some View {
         VStack(spacing: 18) {
             if model.showingWindowManager && model.windowFullScreen {
                 VStack(spacing: 20) {
@@ -1759,15 +1861,15 @@ struct AppExplorerView: View {
                                                         .frame(width: 57, height: 57)
                                                         .rotationEffect(.degrees(reticleRotation))
                                                 }
-                                                Image(systemName: model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari")))
+                                                Image(systemName: canActivateVoice ? "mic.fill" : (model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))))
                                                     .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
                                             }.frame(height: model.theme.isHUD ? 57 : 30)
                                         }
-                                        Text(model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close"))
+                                        Text(canActivateVoice ? "Tap for voice" : (model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close")))
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")"))
+                                    .accessibilityLabel(canActivateVoice ? "Start voice mode" : (model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")))
                             }
                         }
                     }
@@ -1986,7 +2088,7 @@ struct AppExplorerView: View {
             if let fan = model.deepFan { deepFan(fan) }
             Button(action: onBack) {
                 VStack(spacing: 3) {
-                    Image(systemName: model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark"))
+                    Image(systemName: canActivateVoice ? "mic.fill" : (model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark")))
                         .font(.system(size: 13, weight: .medium))
                     Text(String(format: "%02d", depth + 1))
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -2001,8 +2103,8 @@ struct AppExplorerView: View {
             }
             .buttonStyle(.plain)
             .position(center)
-            .help(model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close"))
-            .accessibilityLabel("\(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+            .help(canActivateVoice ? "Tap for voice mode" : (model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")))
+            .accessibilityLabel(canActivateVoice ? "Start voice mode" : "\(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
         }
         .frame(width: 418, height: 310)
         .animation(feedback, value: names)

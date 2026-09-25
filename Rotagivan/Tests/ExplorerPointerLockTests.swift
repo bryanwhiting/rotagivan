@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -11,6 +12,18 @@ import Foundation
                      .tapDisabledByTimeout, .tapDisabledByUserInput] {
             precondition(!ExplorerPointerLock.suppresses(type), "Never swallow buttons, Escape, or system disable notifications")
         }
+        let gesture = ExplorerPointerLock.gestureEventType
+        let smartZoom = ExplorerPointerLock.smartZoomEventType
+        precondition(ExplorerPointerLock.suppresses(gesture, nativeType: .smartMagnify))
+        precondition(ExplorerPointerLock.suppresses(smartZoom))
+        for native: NSEvent.EventType? in [nil, .gesture, .magnify, .rotate, .swipe, .pressure, .directTouch] {
+            precondition(!ExplorerPointerLock.suppresses(gesture, nativeType: native),
+                "Only Smart Zoom is consumed; other native gestures and unknown payloads pass through")
+        }
+        for type in [gesture, smartZoom, .mouseMoved, .scrollWheel] {
+            precondition(ExplorerPointerLock.eventMask & (CGEventMask(1) << type.rawValue) != 0)
+        }
+        precondition(ExplorerPointerLock.eventMask & (CGEventMask(1) << CGEventType.keyDown.rawValue) == 0)
         for enabled in [true, false] {
             for apple in [true, false] {
                 for visible in [true, false] {
@@ -65,6 +78,6 @@ import Foundation
         noPosition.position = { nil }
         noPosition.hide = { preconditionFailure("No position: do not hide") }
         precondition(!noPosition.acquire())
-        print("Pointer lock passed: HUD motion/scroll suppression, pinning, hide/restore pairing, repeated teardown, failed capture, and deallocation. No live pointer capture used.")
+        print("Pointer lock passed: HUD Smart Zoom/motion/scroll suppression, pinning, hide/restore pairing, repeated teardown, failed capture, and deallocation. No live pointer capture used.")
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -45,7 +46,7 @@ final class ExplorerCursorHold {
 }
 
 /// Scoped to a visible, non-editing Apple-controlled HUD. In addition to
-/// swallowing motion and scroll events, pin the actual WindowServer cursor and
+/// swallowing motion, scroll, and Smart Zoom events, pin the WindowServer cursor and
 /// balance one hide/show pair. Never change native pointer preferences or app focus.
 @MainActor final class ExplorerPointerLock: ExplorerPointerControlling {
     var onInterruption: (() -> Void)?
@@ -53,7 +54,19 @@ final class ExplorerCursorHold {
     private var source: CFRunLoopSource?
     private let cursor = ExplorerCursorHold()
 
-    nonisolated static func suppresses(_ type: CGEventType) -> Bool {
+    // Quartz transports native gestures as NSEvent's generic gesture type;
+    // decode through AppKit rather than guessing private gesture field values.
+    nonisolated static let gestureEventType = CGEventType(rawValue: UInt32(NSEvent.EventType.gesture.rawValue))!
+    nonisolated static let smartZoomEventType = CGEventType(rawValue: UInt32(NSEvent.EventType.smartMagnify.rawValue))!
+    nonisolated static var eventMask: CGEventMask {
+        [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+         .scrollWheel, gestureEventType, smartZoomEventType]
+            .reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+    }
+
+    nonisolated static func suppresses(_ type: CGEventType, nativeType: NSEvent.EventType? = nil) -> Bool {
+        if type == smartZoomEventType { return true }
+        if type == gestureEventType { return nativeType == .smartMagnify }
         switch type {
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel: return true
         default: return false
@@ -72,10 +85,8 @@ final class ExplorerCursorHold {
         // the disabled-tap callback clears the handle if macOS interrupts capture.
         if tap != nil { return true }
         release()
-        let mask = [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel]
-            .reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
         guard let tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
-            options: .defaultTap, eventsOfInterest: mask, callback: Self.callback,
+            options: .defaultTap, eventsOfInterest: Self.eventMask, callback: Self.callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return false }
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
@@ -115,7 +126,13 @@ final class ExplorerCursorHold {
                 owner.onInterruption?()
                 return Unmanaged.passUnretained(event)
             }
-            guard owner.tap != nil && suppresses(type) else { return Unmanaged.passUnretained(event) }
+            guard owner.tap != nil else { return Unmanaged.passUnretained(event) }
+            let nativeType = type == gestureEventType ? NSEvent(cgEvent: event)?.type : nil
+            guard suppresses(type, nativeType: nativeType) else { return Unmanaged.passUnretained(event) }
+            // A double two-finger tap belongs to HUD layer navigation while
+            // this scoped tap is installed. Do not forward Smart Zoom to Chrome
+            // (or any underlying app), or mutate it as though it were motion.
+            if type == gestureEventType || type == smartZoomEventType { return nil }
             // Dropping an event alone can leave the on-screen cursor moving.
             // Update its real position as well, without posting another event.
             guard owner.cursor.pin() else {

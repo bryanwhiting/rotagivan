@@ -126,7 +126,7 @@ struct NativeTrackpadGestureTests {
                 touching: true, confident: false)], buttonDown: false, scanTime: 0))
             f.send(0.22, points: [(500, 500)]); f.send(0.24)
             precondition(f.poster.taps.isEmpty, "An uncertain/palm contact cancels and drains the whole gesture")
-            f.tap(0.5)
+            f.tap(0.5, twoFingers: true)
             precondition(f.poster.taps.count == 1 && f.poster.pointerOutputCount == 0)
         }
         check { f in
@@ -181,84 +181,96 @@ struct NativeTrackpadGestureTests {
         print("Native pointer isolation passed for taps, movement, scrolling, buttons, drag, editing, reset, and delayed callbacks.")
 
         check { f in
-            f.update {
-                $0.oneFingerTap = .shortcut
-                $0.oneFingerShortcut = shortcut
-            }
+            f.update { $0.oneFingerTap = .appExplorer; $0.twoFingerTap = .shortcut; $0.twoFingerShortcut = shortcut }
+            var explorerShows = 0
+            f.engine.onAppExplorer = { explorerShows += 1 }
             f.tap(0)
-            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut && f.poster.taps[0].1 == shortcut)
-            precondition(f.poster.pointerOutputCount == 0)
+            precondition(explorerShows == 0 && f.poster.taps.isEmpty,
+                         "A single native finger cannot open the HUD or dispatch a keyboard action")
+            f.tap(0.3, twoFingers: true)
+            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut)
         }
-
         for action in [TapAction.enter, .optionF19] {
             check { f in
-                f.update { $0.oneFingerTap = action }
-                f.tap(0)
-                precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == action && f.poster.taps[0].1 == nil)
+                f.update { $0.twoFingerTap = action }
+                f.tap(0, twoFingers: true)
+                precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == action)
                 precondition(f.poster.pointerOutputCount == 0)
             }
         }
+        check { f in
+            f.update { $0.twoFingerTap = .shortcut; $0.twoFingerShortcut = shortcut }
+            f.send(0, points: [(500, 500)])
+            f.send(0.04, points: [(500, 500), (700, 500)])
+            f.send(0.06, points: [(500, 500), (700, 500)])
+            f.send(0.08)
+            precondition(f.poster.taps.count == 1, "A near-simultaneous, close pair qualifies")
+        }
+        check { f in
+            f.update { $0.twoFingerTap = .shortcut; $0.twoFingerShortcut = shortcut }
+            f.send(0, points: [(500, 500), (1_700, 500)])
+            f.send(0.02)
+            precondition(f.poster.taps.isEmpty, "Wide palm contacts cannot qualify as a close pair")
+            f.send(0.3, points: [(500, 500)])
+            f.send(0.39, points: [(500, 500), (700, 500)])
+            f.send(0.41)
+            precondition(f.poster.taps.isEmpty, "Late second-finger landing cannot qualify")
+            f.send(0.44, points: [(500, 500)])
+            f.now = Date(timeIntervalSince1970: 1_000.47)
+            f.engine.process(TrackpadReport(contacts: [FingerContact(id: 2, x: 700, y: 500,
+                touching: true, confident: true)], buttonDown: false, scanTime: 0))
+            f.send(0.49)
+            precondition(f.poster.taps.isEmpty, "Sequential replacement fingers cannot masquerade as a pair")
+            f.send(0.6, points: [(500, 500), (700, 500)])
+            f.send(0.81)
+            precondition(f.poster.taps.isEmpty, "Long resting contacts cannot qualify")
+            f.update { $0.gestures.tapMaxMovement = 300 }
+            f.send(1.0, points: [(500, 500), (700, 500)])
+            f.send(1.03, points: [(500, 500), (770, 500)])
+            f.send(1.06, points: [(500, 500), (700, 500)])
+            f.send(1.08)
+            precondition(f.poster.taps.isEmpty, "Scroll movement returning to its start cannot become a tap")
+            f.tap(1.3, twoFingers: true)
+            precondition(f.poster.taps.count == 1, "A rejected contact must not poison the next close pair")
+        }
+        check { f in
+            f.update { $0.twoFingerTap = .shortcut; $0.twoFingerShortcut = shortcut }
+            f.send(0, points: [(500, 500), (700, 500)])
+            f.send(0.02, points: [(500, 500)])
+            f.send(0.04)
+            precondition(f.poster.taps.count == 1, "A staggered lift keeps its qualified pair identity")
+            f.engine.reset()
+            f.send(0.2, points: [(500, 500)])
+            f.send(0.22)
+            precondition(f.poster.taps.count == 1, "Reset does not make a single contact a pair")
+        }
+        print("Native keyboard actions require a short, stationary, close two-finger pair; palms, scrolling, rests, delayed landings, and one finger are rejected.")
 
         check { f in
             f.update {
-                $0.oneFingerTap = .leftClick
-                $0.oneFingerDoubleTap = .shortcut
-                $0.oneFingerDoubleShortcut = shortcut
+                $0.twoFingerTap = .leftClick
+                $0.twoFingerDoubleTap = .shortcut
+                $0.twoFingerDoubleShortcut = shortcut
             }
-            f.tap(0)
-            precondition(f.poster.taps.isEmpty)
-            f.tap(0.08)
+            f.tap(0, twoFingers: true)
+            f.tap(0.08, twoFingers: true)
             precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut && f.poster.taps[0].1 == shortcut,
-                         "An ignored native single-click binding must still participate in double-tap recognition")
+                         "Qualified native pairs still support double-tap actions")
             precondition(f.poster.pointerOutputCount == 0)
         }
-
         check { f in
             f.update {
-                $0.oneFingerTap = .leftClick
-                $0.oneFingerDoubleTap = .rightClick
-                $0.oneFingerTripleTap = .shortcut
-                $0.oneFingerTripleShortcut = shortcut
+                $0.twoFingerTap = .leftClick
+                $0.twoFingerDoubleTap = .rightClick
+                $0.twoFingerTripleTap = .shortcut
+                $0.twoFingerTripleShortcut = shortcut
             }
-            f.tap(0); f.tap(0.06); f.tap(0.12)
+            f.tap(0, twoFingers: true)
+            f.tap(0.06, twoFingers: true)
+            f.tap(0.12, twoFingers: true)
             precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut && f.poster.taps[0].1 == shortcut)
-            precondition(f.poster.pointerOutputCount == 0)
         }
-        print("Native keyboard action routing passed for legacy keys and custom single, double, and triple taps while click bindings remained ignored.")
-
-        check { f in
-            var swipe = DoubleTapSwipeSettings.singleTapDefaults
-            swipe.enabled = true
-            swipe.left = shortcut
-            f.update {
-                $0.oneFingerTap = .leftClick
-                $0.singleTapSwipe = swipe
-            }
-            f.tap(0)
-            f.send(0.07, points: [(500, 500)])
-            f.send(0.10, points: [(400, 500)])
-            f.send(0.12)
-            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut && f.poster.taps[0].1 == shortcut)
-            precondition(f.poster.pointerOutputCount == 0)
-        }
-
-        check { f in
-            var swipe = DoubleTapSwipeSettings()
-            swipe.enabled = true
-            swipe.left = shortcut
-            f.update {
-                $0.oneFingerTap = .leftClick
-                $0.oneFingerDoubleTap = .rightClick
-                $0.doubleTapSwipe = swipe
-            }
-            f.tap(0); f.tap(0.06)
-            f.send(0.12, points: [(500, 500)])
-            f.send(0.15, points: [(400, 500)])
-            f.send(0.17)
-            precondition(f.poster.taps.count == 1 && f.poster.taps[0].0 == .shortcut && f.poster.taps[0].1 == shortcut)
-            precondition(f.poster.pointerOutputCount == 0)
-        }
-        print("Native single- and double-tap swipe shortcuts passed without cursor or click leakage.")
+        print("Qualified native pair double and triple actions passed without synthetic clicks.")
 
         check { f in
             f.update {
@@ -314,10 +326,10 @@ struct NativeTrackpadGestureTests {
         print("Native two-finger taps, movement suppression, and navigation shortcuts passed without synthetic scrolling.")
 
         check { f in
-            f.update { $0.oneFingerTap = .appExplorer }
+            f.update { $0.twoFingerTap = .appExplorer }
             var explorerShows = 0
             f.engine.onAppExplorer = { explorerShows += 1 }
-            f.tap(0)
+            f.tap(0, twoFingers: true)
             precondition(explorerShows == 1 && f.poster.pointerOutputCount == 0 && f.poster.taps.isEmpty)
         }
 

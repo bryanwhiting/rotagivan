@@ -105,6 +105,17 @@ final class GestureEngine {
     private var physicalButtonDown = false
     private var touchHadPhysicalButton = false
     private var nativeContactBlocked = false
+    // Apple reports locations on the same 2,048-unit / 55 mm scale as Navigator.
+    // A deliberate two-finger tap must be a short, stationary, close pair.
+    private static let nativeUnitsPerMillimeter = 2_048.0 / 55.0
+    private static let nativePairMaxSeparation = 28.0 * nativeUnitsPerMillimeter
+    private static let nativeFingerMaxTravel = 1.5 * nativeUnitsPerMillimeter
+    private static let nativeLandingWindow = 0.07
+    private static let nativeTapDuration = 0.18
+    private var nativeFirstLanding: Date?
+    private var nativeTapOrigins: [UInt8: CGPoint] = [:]
+    private var nativePairIDs: Set<UInt8> = []
+    private var nativeTapRejected = false
     private var keyboardDrag = false
     // A tap-and-hold drag ends with its finger lift. Re-grip only applies to
     // a physical-button drag; otherwise the synthetic left button can linger.
@@ -172,6 +183,7 @@ final class GestureEngine {
         physicalButtonDown = false
         touchHadPhysicalButton = false
         nativeContactBlocked = false
+        resetNativeTap()
         lastTap = .distantPast
         lastTapProfileID = nil
         scrollVelocity = .zero
@@ -214,6 +226,7 @@ final class GestureEngine {
         }
         let now = clock()
         let current = report.contacts.filter { $0.touching && $0.confident }
+        if !synthesizesPointerEvents { updateNativeTap(current, at: now) }
         let previousCount = previousContacts.values.filter(\.touching).count
 
         if tapDragCandidate, tapDragProfileID != store.activeProfileID { cancelTapDragCandidate() }
@@ -242,6 +255,7 @@ final class GestureEngine {
                     clearSingleSwipe()
                     cancelTapDragCandidate()
                     previousContacts.removeAll()
+                    if !synthesizesPointerEvents && current.isEmpty { resetNativeTap() }
                     endCursorTelemetry()
                     return
                 }
@@ -284,7 +298,7 @@ final class GestureEngine {
             case .tap:
                 let deferred = deferredDoubleTap
                 cancelTapSwipe()
-                if let deferred {
+                if let deferred, synthesizesPointerEvents || nativeTapIsValid(at: now) {
                     if deferred.isSingleTapSwipe {
                         // The follow-up was a second tap, not a swipe. Restore
                         // the first tap so normal double/triple arbitration runs.
@@ -303,6 +317,7 @@ final class GestureEngine {
         }
         if swipe.consumed {
             previousContacts.removeAll()
+            if !synthesizesPointerEvents && current.isEmpty { resetNativeTap() }
             momentumTimer?.invalidate(); momentumTimer = nil
             cursorDecelerationTimer?.invalidate(); cursorDecelerationTimer = nil
             cursorVelocity = .zero
@@ -324,6 +339,7 @@ final class GestureEngine {
                 endCursorTelemetry()
                 maximumMovement = max(maximumMovement, twoFingerNavigation.travel)
                 previousContacts = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+                if !synthesizesPointerEvents && current.isEmpty { resetNativeTap() }
                 if let direction = navigation.direction, let settings {
                     cancelPendingTap()
                     dispatchTap(settings.action(for: direction), shortcut: settings[direction])
@@ -342,6 +358,7 @@ final class GestureEngine {
             }
             if previousCount > 0 { finishTouch(at: now) }
             previousContacts.removeAll()
+            if !synthesizesPointerEvents { resetNativeTap() }
             return
         }
 
@@ -561,7 +578,8 @@ final class GestureEngine {
         let duration = now.timeIntervalSince(touchStart)
         let isTap = gestures.tapToClick && touchProfileID == store.activeProfileID &&
             (synthesizesPointerEvents || !touchHadPhysicalButton) &&
-            duration <= gestures.tapMaxDuration && maximumMovement <= gestures.tapMaxMovement
+            duration <= gestures.tapMaxDuration && maximumMovement <= gestures.tapMaxMovement &&
+            (synthesizesPointerEvents || nativeTapIsValid(at: now))
         holdingTapMotion = false
 
         // A quick second tap is still a double tap, not a drag.
@@ -943,6 +961,58 @@ final class GestureEngine {
 
     private func endCursorTelemetry() {
         if synthesizesPointerEvents { store.cursorTelemetry.endTouch() }
+    }
+
+    private func resetNativeTap() {
+        nativeFirstLanding = nil
+        nativeTapOrigins.removeAll()
+        nativePairIDs.removeAll()
+        nativeTapRejected = false
+    }
+
+    private func updateNativeTap(_ contacts: [FingerContact], at now: Date) {
+        guard !contacts.isEmpty else { return } // Keep the verdict through finishTouch.
+        guard !nativeTapRejected else { return }
+        if nativeFirstLanding == nil { nativeFirstLanding = now }
+        guard let first = nativeFirstLanding,
+              now.timeIntervalSince(first) <= Self.nativeTapDuration,
+              contacts.count <= 2 else { nativeTapRejected = true; return }
+
+        for contact in contacts {
+            let position = CGPoint(x: contact.x, y: contact.y)
+            if let origin = nativeTapOrigins[contact.id] {
+                if hypot(position.x - origin.x, position.y - origin.y) > Self.nativeFingerMaxTravel {
+                    nativeTapRejected = true
+                    return
+                }
+            } else {
+                guard nativeTapOrigins.count < 2,
+                      nativeTapOrigins.isEmpty || contacts.contains(where: { nativeTapOrigins[$0.id] != nil }),
+                      now.timeIntervalSince(first) <= Self.nativeLandingWindow else {
+                    nativeTapRejected = true
+                    return
+                }
+                nativeTapOrigins[contact.id] = position
+            }
+        }
+        if nativeTapOrigins.count == 2 {
+            let ids = Set(nativeTapOrigins.keys)
+            guard nativePairIDs.isEmpty || nativePairIDs == ids,
+                  contacts.allSatisfy({ ids.contains($0.id) }) else {
+                nativeTapRejected = true
+                return
+            }
+            if contacts.count == 2 { nativePairIDs = ids }
+            if contacts.count == 2,
+               hypot(contacts[0].x - contacts[1].x, contacts[0].y - contacts[1].y) > Self.nativePairMaxSeparation {
+                nativeTapRejected = true
+            }
+        }
+    }
+
+    private func nativeTapIsValid(at now: Date) -> Bool {
+        guard !nativeTapRejected, nativePairIDs.count == 2, let first = nativeFirstLanding else { return false }
+        return now.timeIntervalSince(first) <= Self.nativeTapDuration
     }
 
     private func centroid(_ contacts: [FingerContact]) -> CGPoint {

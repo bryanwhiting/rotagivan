@@ -198,15 +198,15 @@ private final class CalibrationPoster: GestureEventPosting {
             f.store.updateGestures(taps, for: 1)
             f.store.settings.devices = ProfileDevices(navigatorEnabled: false, appleEnabled: true, shareTapActions: false)
             var apple = taps
-            apple.oneFingerTap = .appExplorer
+            apple.twoFingerTap = .appExplorer
             f.store.updateAppleGestures(apple, for: 1)
             f.send(1, x: 500); f.send(1.03)
             precondition(!f.explorer.isVisible && f.poster.actions == 0, "Disabled Navigator must not dispatch actions")
-            f.sendApple(2, x: 500); f.sendApple(2.03)
+            f.sendApple(2, x: 500, twoFingers: true); f.sendApple(2.03)
             precondition(f.explorer.isVisible && f.applePoster.actions == 0, "Apple engine must use its layer override, not the shared Enter action")
             f.explorer.dismiss()
             f.store.settings.devices?.appleEnabled = false
-            f.sendApple(3, x: 500); f.sendApple(3.03)
+            f.sendApple(3, x: 500, twoFingers: true); f.sendApple(3.03)
             precondition(!f.explorer.isVisible, "Profile-level Apple disable suppresses custom actions")
         }
         check { f in
@@ -288,12 +288,53 @@ private final class CalibrationPoster: GestureEventPosting {
             f.sendApple(2.2)
         }
         print("Native click arbitration and Navigator priority/momentum regression tests passed.")
+        do {
+            let f = CalibrationFixture(appleActionsEnabled: true, appleHUDDelay: 0.08)
+            defer { f.finish() }
+            var taps = f.store.activeGestures
+            taps.twoFingerTap = .appExplorer
+            taps.twoFingerDoubleTap = TapAction.none
+            taps.twoFingerTripleTap = TapAction.none
+            taps.twoFingerSingleTapSwipe = nil
+            taps.twoFingerDoubleTapSwipe = nil
+            f.store.updateGestures(taps, for: 1)
+
+            f.sendApple(1, x: 500, twoFingers: true)
+            f.hid.nativeKeyboardObserved()
+            f.sendApple(1.03)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+            precondition(!f.explorer.isVisible, "Typing while fingers rest on Apple trackpad drains that contact")
+
+            // The old Apple contact can lose input ownership to Navigator.
+            // Its eventual lift still must clear the typing drain.
+            f.sendApple(1.2, x: 500, twoFingers: true)
+            f.hid.nativeKeyboardObserved()
+            f.send(1.21, x: 500); f.send(1.24)
+            f.sendApple(1.25)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            f.sendApple(2, x: 500, twoFingers: true); f.sendApple(2.03)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+            precondition(f.explorer.isVisible, "A fresh close pair works after typing and source handoff")
+            f.explorer.dismiss()
+
+            f.sendApple(3, x: 500, twoFingers: true); f.sendApple(3.03)
+            f.hid.nativeKeyboardObserved()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+            precondition(!f.explorer.isVisible, "Typing after lift cancels the pending Apple HUD open")
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            f.sendApple(4, x: 500, twoFingers: true); f.sendApple(4.03)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.12))
+            precondition(f.explorer.isVisible, "A later intentional pair still opens the HUD")
+        }
+        print("Apple typing veto passed for resting palms, source handoff, delayed opens, and recovery.")
+
         for action in [TapAction.appExplorer, .windowManager] {
             let f = CalibrationFixture(appleActionsEnabled: true)
             var taps = f.store.activeGestures
+            taps.twoFingerTap = action
             taps.oneFingerTap = action
             f.store.updateGestures(taps, for: 1)
-            f.sendApple(1, x: 500); f.sendApple(1.03)
+            f.sendApple(1, x: 500, twoFingers: true); f.sendApple(1.03)
             precondition(f.pointer.locked && f.explorer.isVisible, "Apple-opened HUD holds the pointer still")
             f.explorer.isEditing = true
             precondition(!f.pointer.locked, "Editing always restores pointer control")
@@ -301,15 +342,15 @@ private final class CalibrationPoster: GestureEventPosting {
             precondition(f.pointer.locked, "Returning to the gesture HUD recaptures the pointer")
             f.sendApple(1.1, x: 500); f.sendApple(1.14, x: 600); f.sendApple(1.18)
             precondition(f.explorer.selections == [.right] && !f.pointer.locked, "Selection releases capture")
-            f.sendApple(2, x: 500); f.sendApple(2.03)
+            f.sendApple(2, x: 500, twoFingers: true); f.sendApple(2.03)
             f.pointer.locked = false; f.pointer.onInterruption?()
             precondition(!f.explorer.isVisible, "System tap disable cancels the HUD without recapturing")
             f.pointer.failCapture = true
-            f.sendApple(3, x: 500); f.sendApple(3.03)
+            f.sendApple(3, x: 500, twoFingers: true); f.sendApple(3.03)
             precondition(!f.explorer.isVisible && !f.pointer.locked)
             precondition(f.hid.appleTrackpadStatus.contains("Could not hold"))
             f.pointer.failCapture = false
-            f.sendApple(4, x: 500); f.sendApple(4.03)
+            f.sendApple(4, x: 500, twoFingers: true); f.sendApple(4.03)
             precondition(f.pointer.locked)
             f.hid.stop()
             precondition(!f.pointer.locked)
@@ -321,9 +362,9 @@ private final class CalibrationPoster: GestureEventPosting {
         do {
             let f = CalibrationFixture(appleActionsEnabled: true)
             var taps = f.store.activeGestures
-            taps.oneFingerTap = .appExplorer
+            taps.twoFingerTap = .appExplorer
             f.store.updateGestures(taps, for: 1)
-            f.sendApple(1, x: 500); f.sendApple(1.03)
+            f.sendApple(1, x: 500, twoFingers: true); f.sendApple(1.03)
             precondition(f.pointer.locked)
             f.hid.setAppleTrackpadEnabled(false)
             precondition(!f.pointer.locked && !f.explorer.isVisible, "Disabling Apple actions releases capture immediately")
@@ -333,9 +374,9 @@ private final class CalibrationPoster: GestureEventPosting {
         for action in [TapAction.appExplorer, .windowManager] {
             check { f in
                 var taps = f.store.activeGestures
-                taps.oneFingerTap = action
+                taps.twoFingerTap = action
                 f.store.updateGestures(taps, for: 1)
-                f.sendApple(1, x: 500); f.sendApple(1.03)
+                f.sendApple(1, x: 500, twoFingers: true); f.sendApple(1.03)
                 precondition(f.explorer.isVisible, "Apple tap must open the shared HUD")
                 precondition(f.explorer.windowManagerShows == (action == .windowManager ? 1 : 0))
                 f.send(1.1, x: 500); f.send(1.14, x: 600); f.send(1.18)
@@ -385,14 +426,14 @@ private final class CalibrationPoster: GestureEventPosting {
         print("Direct HUD-layer HID handoff and global launch migration passed")
         check { f in
             var taps = f.store.activeGestures
-            taps.oneFingerTap = .appExplorer
+            taps.twoFingerTap = .appExplorer
             f.store.updateGestures(taps, for: 1)
             f.sendApple(1, x: 500)
             f.sendApple(1.1, x: 650)
             f.hid.navigatorDisconnected()
             f.sendApple(1.11, x: 650); f.sendApple(1.14)
             precondition(!f.explorer.isVisible, "Navigator unplug must not turn a moved Apple contact into a fresh tap")
-            f.sendApple(2, x: 500); f.sendApple(2.03)
+            f.sendApple(2, x: 500, twoFingers: true); f.sendApple(2.03)
             precondition(f.explorer.isVisible)
             f.hid.navigatorDisconnected()
             f.sendApple(2.1, x: 500); f.sendApple(2.14, x: 600); f.sendApple(2.18)

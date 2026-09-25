@@ -50,6 +50,7 @@ final class NavigatorHIDManager: ObservableObject {
     private var localClickMonitor: Any?
     private var pendingAppleHUD: Timer?
     private var appleClickVetoUntil: TimeInterval = 0
+    private var appleTypingVetoUntil: TimeInterval = 0
     private var appleClickDraining = false
     private let appleHUDDelay: TimeInterval
     private var nextAppleTrustCheck: TimeInterval = 0
@@ -368,16 +369,16 @@ final class NavigatorHIDManager: ObservableObject {
     // macOS a short arbitration window before presenting a touch-triggered HUD.
     private func scheduleAppleHUD(windowManager: Bool = false, layerID: UUID? = nil) {
         guard let source = inputRouting.source, source.isApple,
-              ProcessInfo.processInfo.systemUptime >= appleClickVetoUntil else { return }
+              ProcessInfo.processInfo.systemUptime >= max(appleClickVetoUntil, appleTypingVetoUntil) else { return }
         cancelAppleHUD()
         let profile = store.activeProfileID
         let configuration = store.activeGestures(for: .apple)
         let open = { [weak self] in
             guard let self else { return }
             self.pendingAppleHUD = nil
-            guard self.inputRouting.source == source, self.store.activeProfileID == profile,
+            guard self.inputRouting.source == source, !self.contactsDown, self.store.activeProfileID == profile,
                   self.store.activeGestures(for: .apple) == configuration,
-                  ProcessInfo.processInfo.systemUptime >= self.appleClickVetoUntil else { return }
+                  ProcessInfo.processInfo.systemUptime >= max(self.appleClickVetoUntil, self.appleTypingVetoUntil) else { return }
             self.openAppExplorer(windowManager: windowManager, layerID: layerID)
         }
         if appleHUDDelay == 0 { open(); return } // Deterministic input-fixture seam.
@@ -398,14 +399,40 @@ final class NavigatorHIDManager: ObservableObject {
         appleGestures.reset()
     }
 
+    // Observe only event type/timing, never the typed key or text. A contact
+    // already resting while typing remains drained until every finger lifts.
+    func nativeKeyboardObserved() {
+        guard appleTrackpadEnabled else { return }
+        appleTypingVetoUntil = ProcessInfo.processInfo.systemUptime + 0.35
+        appleClickDraining = inputRouting.source?.isApple == true && contactsDown
+        cancelAppleHUD()
+        appleGestures.reset()
+    }
+
+    private func observeNativeEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            // Our shortcut outputs are not physical typing. Otherwise a
+            // repeated volume/key action could suppress its own next tap.
+            guard event.cgEvent?.getIntegerValueField(.eventSourceUnixProcessID)
+                    != Int64(ProcessInfo.processInfo.processIdentifier) else { return }
+            nativeKeyboardObserved()
+        } else {
+            nativeClickObserved()
+        }
+    }
+
     private func startClickObservation() {
         guard globalClickMonitor == nil, localClickMonitor == nil else { return }
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
-            MainActor.assumeIsolated { self?.nativeClickObserved() }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.observeNativeEvent(event)
+            }
         }
         localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            MainActor.assumeIsolated { self?.nativeClickObserved() }
+            MainActor.assumeIsolated {
+                self?.observeNativeEvent(event)
+            }
             return event
         }
     }
@@ -741,6 +768,9 @@ final class NavigatorHIDManager: ObservableObject {
         }
         guard inputRouting.accept(source, touching: touching, lockedTo: lock) else { return }
         if previousSource != inputRouting.source {
+            // Routing owns the old device's drain until its lift. Do not carry
+            // this extra click/typing drain onto a fresh device/session.
+            appleClickDraining = false
             // The two engines have separate contact state. An Apple touch must
             // not cancel Navigator cursor falloff or scroll momentum. Discrete
             // pending taps still cancel rather than firing under a new owner.
@@ -749,6 +779,8 @@ final class NavigatorHIDManager: ObservableObject {
             appleGestures.reset()
         }
         contactsDown = inputRouting.contactsDown
+        // A lift inside an open HUD also finishes a typing/click drain.
+        if source.isApple && !touching { appleClickDraining = false }
         updateDistanceScale(source.isApple ? appleDistanceScale : navigatorDistanceScale)
         if explorer?.isVisible == true {
             if explorerSource == nil {
@@ -774,7 +806,7 @@ final class NavigatorHIDManager: ObservableObject {
             return
         }
         if source.isApple {
-            if report.buttonDown || ProcessInfo.processInfo.systemUptime < appleClickVetoUntil {
+            if report.buttonDown || ProcessInfo.processInfo.systemUptime < max(appleClickVetoUntil, appleTypingVetoUntil) {
                 cancelAppleHUD()
                 appleGestures.reset()
                 appleClickDraining = touching

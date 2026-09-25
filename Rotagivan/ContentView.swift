@@ -642,7 +642,7 @@ struct ContentView: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Use Apple trackpad actions", isOn: deviceBinding(\.appleEnabled))
-                    Text("Built-in and Magic Trackpads. Native pointer and scrolling remain controlled by macOS; Rotagivan adds HUD actions.")
+                    Text("Built-in and Magic Trackpads. Tap actions require two nearby fingers landing together and lifting quickly without sliding. Typing briefly blocks activation. Native pointer and scrolling remain controlled by macOS.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Allow Apple input on this Mac", isOn: Binding(get: { hid.appleTrackpadEnabled }, set: { hid.setAppleTrackpadEnabled($0) }))
                     Text(hid.appleTrackpadStatus).font(.caption).foregroundStyle(.secondary)

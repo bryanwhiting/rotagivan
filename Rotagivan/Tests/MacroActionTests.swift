@@ -64,30 +64,53 @@ private final class MacroPoster: GestureEventPosting {
                 let contacts = (0..<fingers).map { FingerContact(id: UInt8($0), x: 500 + Double($0 * 30), y: 500, touching: true, confident: true) }
                 engine.process(TrackpadReport(contacts: contacts, buttonDown: false, scanTime: 0), receivedAt: 1000 + t)
             }
-            send(0, 1); send(0.03, 0)
+            if mode == .nativeActions {
+                taps.twoFingerTap = .shortcut; taps.twoFingerShortcut = reference
+                taps.twoFingerDoubleTap = TapAction.none
+                store.updateGestures(taps, for: 1)
+                send(0, 2); send(0.03, 0)
+            } else {
+                send(0, 1); send(0.03, 0)
+            }
             precondition(poster.sent == [copy, paste], "Macro steps must dispatch in order for both devices")
+            taps.twoFingerTap = .none; taps.twoFingerDoubleTap = .shortcut
+            store.updateGestures(taps, for: 1)
             engine.reset(); poster.sent = []
             var opened: [UUID] = []; engine.onHUDLayer = { opened.append($0) }
             send(1, 2); send(1.03, 0); send(1.12, 2); send(1.15, 0)
             precondition(opened == [layer.id] && poster.sent.isEmpty, "Two-finger double tap must open its target HUD layer")
             engine.reset()
             store.settings.hotkeyDictionary = []
-            send(2, 1); send(2.03, 0)
+            if mode == .nativeActions {
+                taps.twoFingerTap = .shortcut; taps.twoFingerShortcut = reference
+                taps.twoFingerDoubleTap = TapAction.none
+                store.updateGestures(taps, for: 1)
+            }
+            send(2, mode == .nativeActions ? 2 : 1); send(2.03, 0)
             precondition(poster.sent.isEmpty, "Deleted macros fail closed")
             engine.reset()
             taps.oneFingerShortcut = .hudLayer(layer)
             taps.oneFingerDoubleTap = TapAction.none
+            if mode == .nativeActions {
+                taps.twoFingerTap = .shortcut; taps.twoFingerShortcut = .hudLayer(layer)
+                taps.twoFingerDoubleTap = TapAction.none
+            }
             store.updateGestures(taps, for: 1)
             opened = []
-            send(3, 1); send(3.03, 0)
-            precondition(opened == [layer.id] && poster.sent.isEmpty, "Single tap must open a HUD layer without a keyboard event")
+            send(3, mode == .nativeActions ? 2 : 1); send(3.03, 0)
+            precondition(opened == [layer.id] && poster.sent.isEmpty, "Qualified tap must open a HUD layer without a keyboard event")
             engine.reset()
             taps.oneFingerTap = .none
             taps.oneFingerDoubleTap = .shortcut; taps.oneFingerDoubleShortcut = .hudLayer(layer)
+            if mode == .nativeActions {
+                taps.twoFingerTap = .none; taps.twoFingerDoubleTap = .shortcut
+                taps.twoFingerDoubleShortcut = .hudLayer(layer)
+            }
             store.updateGestures(taps, for: 1)
             opened = []
-            send(4, 1); send(4.03, 0); send(4.12, 1); send(4.15, 0)
-            precondition(opened == [layer.id] && poster.sent.isEmpty, "One-finger double tap must open a HUD layer without a keyboard event")
+            let fingers = mode == .nativeActions ? 2 : 1
+            send(4, fingers); send(4.03, 0); send(4.12, fingers); send(4.15, 0)
+            precondition(opened == [layer.id] && poster.sent.isEmpty, "Double tap must open a HUD layer without a keyboard event")
             store.settings.hotkeyDictionary = [macro]; engine.reset()
         }
         print("Macro action tests passed: ordered dispatch on both devices, two-finger double-tap HUD targets, global HUD launch, sticky direct launch, legacy decoding and invalid/reference output rejection. No real events posted.")

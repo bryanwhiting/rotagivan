@@ -78,7 +78,7 @@ struct CalibrationSettingsView: View {
                     .font(.callout.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
             }
             if device == .apple && store.settings.resolvedDevices.shareTapActions {
-                Label("Timing is calibrated for Apple trackpads; recognition thresholds are shared with ZSA Navigator.",
+                Label("Timing is calibrated for Apple trackpads. Apple tap actions also require a close, stationary two-finger tap.",
                       systemImage: "link")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -47,6 +47,19 @@ schema before upload and before application. Malformed/unsupported remote YAML
 never replaces local settings. Request body fields cannot select another user.
 Atomic conditional writes prevent lost updates, including racing first uploads.
 
+## Encrypted API-key vault
+
+Migration 0003 adds a separate client-encrypted vault. GET/PUT `/v1/vault`
+load/save signed ciphertext; POST `/v1/vault/devices` requests access, and
+POST `/v1/vault/approve` stores a signed, recipient-bound encrypted grant.
+Every route requires an account session. Vault writes and approvals also
+require Ed25519 signatures. The Worker never receives decryption keys or
+plaintext API keys. See the [protocol and limitations](../Rotagivan/VAULT.md).
+
+The native VaultLiveSmoke test checks CryptoKit interoperability using a
+disposable production account. Delete exactly its test account afterward
+using both ID and email from the cleanup receipt.
+
 ## Development and deployment
 
 Requires Node 22+, npm, and your Cloudflare account ID/token in `~/.env`.

@@ -14,7 +14,7 @@ The transcript updates from short, coalesced audio uploads, not a true word-by-w
 
 - Transcription: `x-ai/grok-stt-1.0` via OpenRouter's `/api/v1/audio/transcriptions`.
 - Matching: `typesafe/jev-1.13` via OpenRouter's `/api/alpha/decisions` Choice primitive.
-- Read `OPENROUTER_API_KEY` from the process environment or `~/.env`. The dotenv file is parsed as literal text, never executed. The key is not copied into configuration, the app bundle, logs, or cloud settings.
+- Prefer the locally unlocked Keychain vault, then fall back to `OPENROUTER_API_KEY` in the process environment or `~/.env`. The dotenv file is parsed as literal text, never executed. Keys never enter YAML, the app bundle, or logs. Optional [encrypted API-key sync](VAULT.md) uploads only client-encrypted ciphertext, separately from ordinary settings.
 
 In **Actions → Voice action catalog**, you can inspect every registered action and its semantic description, including installed apps, macros, built-in commands and configured HUD actions. IDs are hashes of the local action's portable identity. Only locally registered, still-valid IDs can execute; Jev cannot return an arbitrary executable command or URL.
 

@@ -112,7 +112,7 @@ xcrun swiftc "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster
 "$test_dir/PointerLayerIsolationTests"
 ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
-  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/AppExplorer.swift \
+  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/WebsiteFavicon.swift \
@@ -125,6 +125,12 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift)
+xcrun swiftc Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
+"$test_dir/VaultCryptoTests"
+xcrun swiftc "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift \
+  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/Tests/CredentialVaultTests.swift \
+  -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/CredentialVaultTests"
+"$test_dir/CredentialVaultTests" "$test_dir"
 xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/VoiceTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceTests"
 "$test_dir/VoiceTests" "$test_dir"

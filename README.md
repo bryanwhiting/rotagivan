@@ -332,6 +332,13 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 ### Local YAML and account sync
 
+**General → Account & Sync → Encrypted API keys** shares your OpenRouter key
+between Macs without iCloud. Import/save on the first Mac, request access on
+the second, compare its code and approve on the first, then load on the second.
+Save the recovery code somewhere safe. Keys are encrypted before upload and
+unlocked locally using device-only Keychain storage. See the [vault guide and
+security boundaries](Rotagivan/VAULT.md). Ordinary settings are not end-to-end encrypted.
+
 **General → Account & Sync** has **Save**, **Load**, and **Last save**.
 Transfers are manual: edits, launch, sign-in, external YAML changes, and quit
 never save or load the sync copy. There is no polling, automatic retry, or

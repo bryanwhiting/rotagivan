@@ -60,7 +60,10 @@ struct SyncCredentials {
 }
 
 @MainActor final class SettingsSync: ObservableObject {
-    @Published private(set) var account: SyncAccount?
+    @Published private(set) var account: SyncAccount? {
+        didSet { vault.setAccount(account.map { VaultAccount(token: $0.token, userID: $0.userID) }) }
+    }
+    lazy var vault = CredentialVault(server: server)
     @Published private(set) var lastSave: Date?
     @Published private(set) var error: String?
     @Published private(set) var busy = false
@@ -280,6 +283,7 @@ struct SyncCredentials {
 
     func prepareToQuit() async {
         shuttingDown = true
+        vault.shutdown()
         session.invalidateAndCancel()
         // No final save, upload, or import on quit.
     }

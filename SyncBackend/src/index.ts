@@ -1,3 +1,4 @@
+import { routeVault, VaultError } from './vault';
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 
 const PASSWORD_COST = { N: 16384, r: 8, p: 5, maxmem: 32 * 1024 * 1024 };
@@ -115,6 +116,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
   const user = await session(request, env);
   await limit(env, `user:${user.id}`, 120);
+  if (path === '/v1/vault' || path.startsWith('/v1/vault/')) return routeVault(request, env, user.id, body);
   if (request.method === 'POST' && path === '/v1/logout') {
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(user.tokenHash).run();
     return json({ ok: true });
@@ -156,7 +158,7 @@ export default {
   async fetch(request, env): Promise<Response> {
     try { return await route(request, env); }
     catch (error) {
-      if (error instanceof HTTPError) return json({ error: error.message }, error.status);
+      if (error instanceof HTTPError || error instanceof VaultError) return json({ error: error.message }, error.status);
       // Never log request bodies, emails, credentials, SQL errors or tokens.
       console.error(JSON.stringify({ event: 'request_failed', requestID: crypto.randomUUID() }));
       return json({ error: 'Sync is temporarily unavailable. Local settings are safe.' }, 500);

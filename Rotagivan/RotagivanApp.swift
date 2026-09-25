@@ -30,7 +30,19 @@ struct RotagivanApp: App {
         _sync = StateObject(wrappedValue: sync)
         // Defer until SwiftUI has installed and retained its state objects, but
         // do not depend on either the settings window or menu being presented.
-        DispatchQueue.main.async { sync.start() }
+        DispatchQueue.main.async {
+            sync.start()
+            // Explicit local maintenance action, never a startup sync default.
+            // Emits only a non-secret receipt; private material remains Keychain-only.
+            if ProcessInfo.processInfo.arguments.contains("--initialize-voice-vault") {
+                UserDefaults.standard.set("pending", forKey: "vault.bootstrapStatus")
+                Task { @MainActor in
+                    await sync.vault.save(importEnvironment: true)
+                    let receipt = sync.vault.error.map { "failed: " + $0 } ?? (sync.vault.hasKey ? "uploaded-encrypted" : "not-uploaded")
+                    UserDefaults.standard.set(receipt, forKey: "vault.bootstrapStatus")
+                }
+            }
+        }
     }
 
     var body: some Scene {

@@ -3,6 +3,8 @@ import { SELF } from 'cloudflare:test';
 import { beforeAll, beforeEach, expect, it } from 'vitest';
 import schema from '../migrations/0001_accounts.sql?raw';
 import sessionVersions from '../migrations/0002_session_versions.sql?raw';
+import vaultSchema from '../migrations/0003_vault.sql?raw';
+import { vaultMessage, grantMessage } from '../src/vault';
 
 type Login = { token: string; userID: string; email: string };
 const password = 'a test password that is never used elsewhere';
@@ -17,7 +19,7 @@ async function register(email = `${crypto.randomUUID()}@example.test`): Promise<
   return response.json<Login>();
 }
 beforeAll(async () => {
-  for (const sql of (schema + sessionVersions).split(';').map(s => s.trim()).filter(Boolean)) await env.DB.prepare(sql).run();
+  for (const sql of (schema + sessionVersions + vaultSchema).split(';').map(s => s.trim()).filter(Boolean)) await env.DB.prepare(sql).run();
 });
 beforeEach(async () => {
   await env.DB.batch(['sessions','settings','users','auth_limits'].map(table => env.DB.prepare(`DELETE FROM ${table}`)));
@@ -99,4 +101,62 @@ it('rejects oversized and malformed input, browser origins, and weak passwords',
   const a = await register();
   expect((await call('settings','PUT',{yaml:'x',baseRevision:-1},a.token)).status).toBe(400);
   expect((await call('settings','PUT',{yaml:'x'.repeat(1_048_577),baseRevision:0},a.token)).status).toBe(400);
+});
+
+async function vaultSigner() {
+  const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  return {
+    publicKey: Buffer.from(await crypto.subtle.exportKey('raw', keys.publicKey)).toString('base64'),
+    sign: async (message: string) => Buffer.from(await crypto.subtle.sign('Ed25519', keys.privateKey, new TextEncoder().encode(message))).toString('base64')
+  };
+}
+const cipher = () => Buffer.from(crypto.getRandomValues(new Uint8Array(80))).toString('base64');
+it('keeps vault ciphertext isolated and requires root signatures, immutable identity and CAS', async () => {
+  const a = await register(), b = await register(), signer = await vaultSigner();
+  const vaultID = crypto.randomUUID(), ciphertext = cipher();
+  const create = { vaultID, publicKey: signer.publicKey, ciphertext, baseRevision: 0,
+    signature: await signer.sign(vaultMessage(a.userID, vaultID, 1, ciphertext)) };
+  expect((await call('vault')).status).toBe(401);
+  expect((await call('vault','PUT',{...create,apiKey:'plaintext-forbidden'},a.token)).status).toBe(400);
+  expect((await call('vault','PUT',create,b.token)).status).toBe(403);
+  expect((await call('vault','PUT',create,a.token)).status).toBe(200);
+  expect(await (await call('vault','GET',undefined,b.token)).json()).toEqual({vault:null,devices:[]});
+  expect((await call('vault','PUT',create,a.token)).status).toBe(409);
+  const next = cipher();
+  const update = {...create, ciphertext: next, baseRevision: 1, signature: await signer.sign(vaultMessage(a.userID,vaultID,2,next))};
+  expect((await call('vault','PUT',{...update,ciphertext:cipher()},a.token)).status).toBe(403);
+  const race = await Promise.all([call('vault','PUT',update,a.token),call('vault','PUT',update,a.token)]);
+  expect(race.map(r=>r.status).sort()).toEqual([200,409]);
+  const row = await env.DB.prepare('SELECT * FROM vaults WHERE user_id=?').bind(a.userID).first();
+  expect(row?.ciphertext).toBe(next);
+  expect(JSON.stringify(row)).not.toContain('plaintext-forbidden');
+  const stranger = await vaultSigner();
+  expect((await call('vault','PUT',{...update,baseRevision:2,publicKey:stranger.publicKey},a.token)).status).toBe(409);
+  const response = await call('vault','GET',undefined,a.token);
+  expect(response.headers.get('cache-control')).toBe('no-store');
+});
+it('relays only signed grants bound to the account and recipient; requests expire', async () => {
+  const a = await register(), b = await register(), signer = await vaultSigner();
+  const vaultID = crypto.randomUUID(), ciphertext = cipher();
+  await call('vault','PUT',{vaultID,publicKey:signer.publicKey,ciphertext,baseRevision:0,
+    signature:await signer.sign(vaultMessage(a.userID,vaultID,1,ciphertext))},a.token);
+  const publicKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+  const response = await call('vault/devices','POST',{publicKey,name:'Home'},a.token);
+  expect(response.status).toBe(200);
+  const device = await response.json<{id:string;publicKey:string;grant:null}>();
+  expect(device.grant).toBeNull();
+  expect((await call('vault/devices','POST',{publicKey,name:'Home',deviceID:'replace'},a.token)).status).toBe(400);
+  const grantCipher = Buffer.from(crypto.getRandomValues(new Uint8Array(60))).toString('base64');
+  const ephemeralKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+  const signature = await signer.sign(grantMessage(a.userID,vaultID,device.id,publicKey,ephemeralKey,grantCipher));
+  const grant = {deviceID:device.id,ephemeralKey,ciphertext:grantCipher,signature};
+  expect((await call('vault/approve','POST',{...grant,signature:Buffer.alloc(64).toString('base64')},a.token)).status).toBe(403);
+  expect((await call('vault/approve','POST',grant,b.token)).status).toBe(404);
+  expect((await call('vault/approve','POST',grant,a.token)).status).toBe(200);
+  expect((await call('vault/approve','POST',grant,a.token)).status).toBe(200);
+  const saved = await env.DB.prepare('SELECT grant_json FROM vault_devices WHERE user_id=? AND device_id=?').bind(a.userID,device.id).first<{grant_json:string}>();
+  expect(JSON.parse(saved!.grant_json).ciphertext).toBe(grantCipher);
+  const pending = await (await call('vault/devices','POST',{publicKey:Buffer.alloc(32,7).toString('base64'),name:'Expired'},a.token)).json<{id:string}>();
+  await env.DB.prepare('UPDATE vault_devices SET created_at=0 WHERE user_id=? AND device_id=?').bind(a.userID,pending.id).run();
+  expect((await call('vault/approve','POST',{...grant,deviceID:pending.id},a.token)).status).toBe(404);
 });

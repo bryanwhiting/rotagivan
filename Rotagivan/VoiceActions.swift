@@ -77,6 +77,10 @@ enum OpenRouterCredential {
         !value.isEmpty && value.count <= 1024 && !value.contains(where: { $0.isWhitespace || $0.isNewline })
     }
     static func load() throws -> String {
+        if let key = try VaultKeychain.currentAPIKey() { return key }
+        return try loadEnvironment()
+    }
+    static func loadEnvironment() throws -> String {
         if let value = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], valid(value) { return value }
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".env")
         if let text = try? String(contentsOf: url, encoding: .utf8), let key = parse(text) { return key }

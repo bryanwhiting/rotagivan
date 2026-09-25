@@ -54,7 +54,7 @@ struct SyncSettingsView: View {
             LabeledContent("Last save", value: sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "—")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("Save") { Task { await sync.save() } }
+                Button("Save") { Task { await sync.save(); if sync.error == nil && sync.vault.unlocked { await sync.vault.save() } } }
                     .help(sync.account == nil ? "Save current app settings to settings.yaml." : "Save current app settings to the cloud and settings.yaml.")
                 Button("Load") {
                     cloudLoadPreview = nil
@@ -74,6 +74,7 @@ struct SyncSettingsView: View {
                 ? "Save and Load use settings.yaml on this Mac. Replaced copies are backed up."
                 : "Save writes to your cloud account and settings.yaml. Load uses the cloud copy. Replaced copies are backed up.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            CredentialVaultView(vault: sync.vault)
             if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             Text("Passwords and login tokens never go in YAML. Cloud sync doesn't change Accessibility, Input Monitoring, launch-at-login, or this Mac's enable switch.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -82,7 +83,7 @@ struct SyncSettingsView: View {
         .confirmationDialog(sync.account == nil ? "Load settings.yaml?" : "Load your saved cloud settings?", isPresented: $confirmLoad) {
             Button("Back up current settings and load") {
                 let preview = cloudLoadPreview
-                Task { await sync.load(expectedCloudSave: preview) }
+                Task { await sync.load(expectedCloudSave: preview); if sync.error == nil && sync.account != nil { await sync.vault.load() } }
             }
         } message: {
             Text(cloudLoadPreview?.confirmationMessage ?? "This replaces this Mac's current settings. A backup will be kept.")

@@ -181,7 +181,7 @@ struct HotkeyOrganizerView: View {
     private var voiceActionCatalog: some View {
         let records = VoiceActionRegistry.make(settings: store.settings, applications: voiceApps.applications)
         return DisclosureGroup("Voice action catalog · \(records.count) actions") {
-            Text("Voice matching uses these action IDs and descriptions. Tap the Main HUD center to listen, then confirm with Space or Enter. Audio goes to OpenRouter/xAI; transcripts and descriptions go to Jev. The API key stays in ~/.env and is never synced.")
+            Text("Voice matching uses these action IDs and descriptions. Tap the Main HUD center to listen, then confirm with Space or Enter. Audio goes to OpenRouter/xAI; transcripts and descriptions go to Jev. API keys use local Keychain when available. Optional account-vault sync encrypts them before upload; ~/.env remains a local import source.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach(records.filter { textMatches($0.title + " " + $0.detail) }) { record in
                 HStack(alignment: .top) {

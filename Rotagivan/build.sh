@@ -35,6 +35,7 @@ xcrun swiftc -O -parse-as-library \
   -framework Security \
   "$script_dir/Models.swift" \
   "$script_dir/HotkeyOrganizer.swift" \
+  "$script_dir/ActionTableRow.swift" \
   "$script_dir/HotkeyOrganizerView.swift" \
   "$script_dir/AppOverrides.swift" \
   "$script_dir/AppOverridesView.swift" \

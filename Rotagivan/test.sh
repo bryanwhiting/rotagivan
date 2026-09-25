@@ -125,6 +125,11 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift)
+xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/Tests/ActionTableTests.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionTableTests"
+"$test_dir/ActionTableTests" "$test_dir"
 xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/ActionPickerTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionPickerTests"
 "$test_dir/ActionPickerTests" "$test_dir"

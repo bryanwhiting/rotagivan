@@ -6,6 +6,8 @@ struct HotkeyOrganizerView: View {
     @ObservedObject private var keys = ShortcutSettings.shared
     @ObservedObject private var voiceApps = VoiceApplicationIndex.shared
     @State private var tab = "Dictionary"
+    @AppStorage("actions.showIDs") private var showActionIDs = false
+    @State private var actionGroupFilter = "All groups"
     @State private var search = ""
     @State private var searchShortcut: RecordedShortcut?
     @State private var tapFilter: AppGestureTrigger?
@@ -52,7 +54,7 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Create reusable actions, app launchers and macros. Search every keyboard and trackpad assignment, then review conflicts and overrides in one place.")
+            Text("Browse actions and their keybindings. Search or filter by group, then use a row’s menu to assign or edit.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("View", selection: $tab) {
                 Text("Actions").tag("Dictionary")
@@ -178,110 +180,71 @@ struct HotkeyOrganizerView: View {
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
     }
 
-    private var voiceActionCatalog: some View {
-        let records = VoiceActionRegistry.make(settings: store.settings, applications: voiceApps.applications)
-        return DisclosureGroup("Voice action catalog · \(records.count) actions") {
-            Text("Voice matching uses these action IDs and descriptions. Tap the Main HUD center to listen, then confirm with Space or Enter. Audio goes to OpenRouter/xAI; transcripts and descriptions go to Jev. API keys use local Keychain when available. Optional account-vault sync encrypts them before upload; ~/.env remains a local import source.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            ForEach(records.filter { textMatches($0.title + " " + $0.detail) }) { record in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.title).fontWeight(.medium)
-                        Text(record.detail).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Assign…") { assign(record.action) }
-                }.padding(8)
-            }
-        }.task { await voiceApps.load() }
-    }
-
-    private var builtInActions: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            actionGroup("Common Mac shortcuts", actions: CommonMacShortcut.all.map(\.action))
-            actionGroup("Mac controls", actions: AppExplorerAction.macOSCommands.map { BindingAction(kind: .command, command: $0) })
-            actionGroup("Windows", actions: AppExplorerAction.windowCommands.map { BindingAction(kind: .command, command: $0) })
-            actionGroup("Window layouts", actions: ExplorerWindowLayout.allCases.flatMap { layout in
-                SwipeDirection.allCases.map { BindingAction(kind: .windowPlacement, windowPlacement: ExplorerWindowPlacement(direction: $0, layout: layout)) }
-            })
-            actionGroup("Audio and media", actions: ExplorerMediaAction.allCases.map { BindingAction(kind: .media, media: $0) })
-            actionGroup("HUDs", actions: [AppExplorerAction.windowManager, .mediaControls].map { BindingAction(kind: .command, command: $0) }
-                + HUDNavigationAction.allCases.map { BindingAction(kind: .hudNavigation, hudNavigation: $0) })
-            actionGroup("Pointer and keys", actions: TapAction.allCases.filter { $0 != .none && $0 != .shortcut }.map { BindingAction(kind: .tap, tap: $0) })
-        }
-    }
-
-    private func actionGroup(_ title: String, actions: [BindingAction]) -> some View {
-        let visible = actions.filter { textMatches($0.title + " " + $0.description) }
-        return Group {
-            if !visible.isEmpty {
-                DisclosureGroup(title) {
-                    ForEach(visible, id: \.identity) { action in
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(action.title).fontWeight(.medium)
-                                Text(action.description).font(.caption).foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer()
-                            Button("Assign…") { assign(action) }.help("Assign a keybinding or gesture to this action")
-                        }.padding(8)
-                    }
-                }
-            }
-        }
-    }
-
     private var dictionary: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            builtInActions
-            voiceActionCatalog
+        let rows = ActionTableRow.make(settings: store.settings, applications: voiceApps.applications, audit: audit)
+        let visible = rows.filter { row in
+            (actionGroupFilter == "All groups" || row.group == actionGroupFilter) &&
+                textMatches(row.id + " " + row.group + " " + row.name + " " + row.detail + " " + row.keybindings)
+        }
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Macros: \(store.settings.resolvedHotkeyDictionary.count)").foregroundStyle(.secondary)
+                Picker("Group", selection: $actionGroupFilter) {
+                    Text("All groups").tag("All groups")
+                    ForEach(Array(Set(rows.map(\.group))).sorted(), id: \.self) { Text($0).tag($0) }
+                }.frame(maxWidth: 220)
+                Toggle("Show action IDs", isOn: $showActionIDs).toggleStyle(.checkbox)
                 Spacer()
+                Text("\(visible.count) actions").foregroundStyle(.secondary)
                 Menu {
                     Button("Add keyboard action or macro") { beginNewAction() }
+                        .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
                     Button("Add application hotkey…") { chooseApplicationHotkey() }
+                    Button("Add assignment…") { assign(.hudLayer(nil)) }
                 } label: { Label("Add action", systemImage: "plus") }
-                .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
             }
-            Text("Macros are reusable actions made of ordered steps. Assign keybindings or gestures to an action, or choose it in a HUD tile.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            let entries = store.settings.resolvedHotkeyDictionary.filter(dictionaryMatches)
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            if store.settings.resolvedHotkeyDictionary.isEmpty {
-                Label("No saved actions yet. Add an application hotkey, keybinding or macro.", systemImage: "book.closed")
-                    .padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-            }
-            ForEach(entries) { entry in
-                HStack(spacing: 12) {
-                    Image(systemName: entry.resolvedSequence.contains { $0.kind == .openApp } ? "app.badge" : "keyboard")
-                        .foregroundStyle(.secondary).frame(width: 18)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.name).fontWeight(.medium)
-                        if let shortcut = entry.activationShortcut {
-                            Label(shortcut.readableCombination, systemImage: "globe").font(.caption).foregroundStyle(Color.accentColor)
-                        } else {
-                            Text("No global hotkey").font(.caption).foregroundStyle(.tertiary)
-                        }
+            Table(visible) {
+                if showActionIDs {
+                    TableColumn("Action ID") { row in
+                        Text(row.id).font(.system(size: 10, design: .monospaced)).textSelection(.enabled).help(row.id)
+                    }.width(min: 160, ideal: 190)
+                }
+                TableColumn("Action group", value: \.group).width(min: 85, ideal: 110, max: 150)
+                TableColumn("Action name", value: \.name).width(min: 125, ideal: 170)
+                TableColumn("Action description") { row in
+                    Text(row.detail).lineLimit(2).help(row.detail)
+                }.width(min: 160, ideal: 290)
+                TableColumn("Keybindings") { row in
+                    HStack(spacing: 6) {
+                        Text(row.keybindings.isEmpty ? "—" : row.keybindings)
+                            .foregroundStyle(row.keybindings.isEmpty ? .tertiary : .secondary)
+                            .lineLimit(2).help(row.keybindings)
+                        Spacer(minLength: 0)
+                        Menu {
+                            Button("Add keybinding or gesture…") { assign(row.action) }
+                            ForEach((store.settings.actionBindings ?? []).filter { $0.action.identity == row.action.identity }) { binding in
+                                Button("Edit \(binding.trigger.title)…") { editingBinding = binding }
+                                Button("Remove \(binding.trigger.title)", role: .destructive) {
+                                    store.settings.actionBindings?.removeAll { $0.id == binding.id }
+                                }
+                            }
+                            if let macro = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == row.action.macroID }) {
+                                Divider()
+                                Button("Edit action…") { editing = macro }
+                                Button("Remove action…", role: .destructive) { deleting = macro }
+                            }
+                        } label: { Image(systemName: "ellipsis") }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .accessibilityLabel("Manage \(row.name)")
                     }
-                    Spacer()
-                    Text(entry.summary).monospaced().foregroundStyle(.secondary).lineLimit(2)
-                    Button("Assign…") { assign(.macro(entry)) }
-                    Button("Edit") { editing = entry }
-                    Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove saved action")
-                }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }.width(min: 135, ideal: 200)
             }
-            globalBindings
-            let taps = audit.displayAssignments.filter { $0.kind == "Tap or gesture" && $0.enabled && assignmentMatches($0) }
-            if !taps.isEmpty {
-                Divider().padding(.vertical, 2)
-                Text("Tap and gesture assignments · \(taps.count)").font(.headline)
-                Text("These are first-class assignments for the selected layer and device. Search them by gesture name or by the shortcut they send.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(taps) { assignmentCard($0) }
-            }
+            .frame(height: 520)
+            .accessibilityIdentifier("actions-table")
+            if visible.isEmpty { Text("No actions match this search.").foregroundStyle(.secondary) }
+            Text("Keybindings show input shortcuts and their scope. Use the row menu to assign or edit. Full descriptions are available on hover.")
+                .font(.caption).foregroundStyle(.secondary)
         }
+        .task { await voiceApps.load() }
     }
 
     private func findings(_ audit: HotkeyAudit) -> some View {

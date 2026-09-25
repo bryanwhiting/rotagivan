@@ -330,6 +330,17 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 ## Configuration and defaults
 
+### Actions table
+
+The Actions tab is a single table: Action group, Action name, Action description,
+and Keybindings. **Show action IDs** reveals the optional ID column; IDs match
+the voice registry. Search includes IDs, groups, descriptions and bindings.
+Filter by group or use each row's menu to assign a trigger, edit/remove a global
+assignment, or edit/remove a macro. The Keybindings column lists actual keyboard
+inputs with their scope, not the keys a macro sends. Local bindings can be
+changed in their owning HUD. Conflicts, All assignments and Keyboard remain
+available as separate views, including gesture assignment details.
+
 ### Shared action picker
 
 HUD assignments, tile editors and gesture controls use one searchable action

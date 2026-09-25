@@ -9,6 +9,7 @@ struct HotkeyAudit {
         let action: String
         let shortcut: RecordedShortcut?
         let enabled: Bool
+        var boundAction: BindingAction? = nil
         var precedence: String = ""
         // nil: output action; empty string: globally registered input; otherwise HUD-local input.
         var inputScope: String? = nil
@@ -113,7 +114,7 @@ struct HotkeyAudit {
             guard let shortcut = entry.activationShortcut else { continue }
             assignments.append(Assignment(id: "dictionary.hotkey.\(entry.id)", scope: "Global keyboard hotkeys",
                 trigger: shortcut.readableCombination, action: "Run \(entry.name): \(entry.summary)", shortcut: shortcut,
-                enabled: settings.enabled, precedence: "Registered globally by Rotagivan", inputScope: "", kind: "Hotkey"))
+                enabled: settings.enabled, boundAction: .macro(entry), precedence: "Registered globally by Rotagivan", inputScope: "", kind: "Hotkey"))
             for (index, step) in entry.resolvedSequence.enumerated() {
                 guard let output = step.shortcut else { continue }
                 assignments.append(Assignment(id: "dictionary.hotkey.\(entry.id).step.\(index)", scope: "Global keyboard hotkeys",
@@ -144,7 +145,7 @@ struct HotkeyAudit {
                 let key = binding.trigger.keyboard
                 assignments.append(Assignment(id: path + ".binding." + binding.id.uuidString,
                     scope: path, trigger: binding.trigger.title, action: dictionary.title(for: binding.action),
-                    shortcut: key, enabled: active && (binding.trigger.gesture == nil || deviceEnabled),
+                    shortcut: key, enabled: active && (binding.trigger.gesture == nil || deviceEnabled), boundAction: binding.action,
                     precedence: global ? "Global binding; app gesture rules take precedence" : "Runs while this HUD layer is visible; assigned gestures take precedence over HUD navigation",
                     inputScope: global ? "" : path, kind: binding.trigger.gesture == nil ? "Hotkey" : "Tap or gesture",
                     gesture: binding.trigger.gesture))
@@ -186,6 +187,7 @@ struct HotkeyAudit {
             if let key = layer.launchShortcut {
                 assignments.append(Assignment(id: "hud.launch.\(layer.id)", scope: "Global keyboard hotkeys", trigger: key.readableCombination,
                     action: "Open HUD layer: \(layer.name)", shortcut: key, enabled: settings.enabled,
+                    boundAction: explorer.hudActionDestinations().first { $0.windowOwnerPath == nil && $0.path == [.layer(layer.id)] }.map { .hudDestination($0) },
                     precedence: "Global HUD launcher", inputScope: ""))
             }
         }
@@ -194,7 +196,7 @@ struct HotkeyAudit {
                 bindings(layer.actionBindings ?? [], path: path + " / " + layer.name, global: false, active: active)
                 if let key = layer.holdShortcut {
                     assignments.append(Assignment(id: path + ".key." + layer.id.uuidString, scope: path, trigger: key.readableCombination,
-                        action: "Open HUD layer: \(layer.name)", shortcut: key, enabled: active, inputScope: path))
+                        action: "Open HUD layer: \(layer.name)", shortcut: key, enabled: active, boundAction: explorer.hudActionDestinations().first { $0.path.last == .layer(layer.id) }.map { .hudDestination($0) }, inputScope: path))
                 }
                 tiles(layer.favorites, path: path + " / " + layer.name, depth: depth + 1, count: layer.slotCount ?? 8, active: active)
             }
@@ -208,7 +210,7 @@ struct HotkeyAudit {
                 if let key = tile.activationShortcut {
                     assignments.append(Assignment(id: location + ".activation", scope: path,
                         trigger: key.readableCombination, action: "Run \(tile.name)", shortcut: key,
-                        enabled: enabled, precedence: "Available while this HUD layer is visible",
+                        enabled: enabled, boundAction: BindingAction.from(favorite: tile), precedence: "Available while this HUD layer is visible",
                         inputScope: path, kind: "Hotkey"))
                 }
                 if let key = tile.shortcut {
@@ -228,7 +230,7 @@ struct HotkeyAudit {
             layers(window.layers, path: "Window Manager", depth: 0, active: settings.enabled)
             for binding in window.shortcuts {
                 assignments.append(Assignment(id: "window.command.\(binding.command.rawValue)", scope: "Window Manager", trigger: binding.shortcut.readableCombination,
-                    action: binding.command.title, shortcut: binding.shortcut, enabled: settings.enabled, inputScope: "Window Manager"))
+                    action: binding.command.title, shortcut: binding.shortcut, enabled: settings.enabled, boundAction: .command(binding.command), inputScope: "Window Manager"))
             }
         }
         for row in assignments {

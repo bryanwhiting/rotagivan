@@ -341,7 +341,10 @@ first-login import. Ordinary app preferences still persist locally as you edit.
   ~/.config/rotagivan/settings.yaml and, when signed in, uploads that snapshot
   to your account. Edits made during the save wait for your next Save.
 - **Load** reads your cloud copy when signed in, or settings.yaml when signed out.
-  Confirm before replacing the app's current settings. Loading never uploads.
+  Cloud Load first shows the save timestamp and saving computer before confirmation.
+  Computer names are attached to new cloud saves as a YAML comment; older saves
+  show “Unknown computer.” Confirmed loads recheck the revision and stop if it
+  changed, so a different save cannot be loaded silently. Loading never uploads.
   Changes made while a load is in flight are kept; press Load again when ready.
 - **Last save** shows the saved copy's timestamp for the current account or local
   file. Cloud timestamps are refreshed only by Save or Load, not background checks.

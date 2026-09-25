@@ -11,6 +11,7 @@ struct SyncSettingsView: View {
     @State private var newPassword = ""
     @State private var confirmNewPassword = ""
     @State private var confirmLoad = false
+    @State private var cloudLoadPreview: CloudLoadPreview?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -55,7 +56,18 @@ struct SyncSettingsView: View {
             HStack {
                 Button("Save") { Task { await sync.save() } }
                     .help(sync.account == nil ? "Save current app settings to settings.yaml." : "Save current app settings to the cloud and settings.yaml.")
-                Button("Load") { confirmLoad = true }
+                Button("Load") {
+                    cloudLoadPreview = nil
+                    if sync.account == nil { confirmLoad = true }
+                    else {
+                        Task {
+                            if let preview = await sync.prepareCloudLoad() {
+                                cloudLoadPreview = preview
+                                confirmLoad = true
+                            }
+                        }
+                    }
+                }
                     .help(sync.account == nil ? "Load settings.yaml into this app." : "Load your saved cloud settings into this app.")
             }.disabled(sync.busy)
             Text(sync.account == nil
@@ -68,9 +80,12 @@ struct SyncSettingsView: View {
         }
         .textFieldStyle(.roundedBorder)
         .confirmationDialog(sync.account == nil ? "Load settings.yaml?" : "Load your saved cloud settings?", isPresented: $confirmLoad) {
-            Button("Back up current settings and load") { Task { await sync.load() } }
+            Button("Back up current settings and load") {
+                let preview = cloudLoadPreview
+                Task { await sync.load(expectedCloudSave: preview) }
+            }
         } message: {
-            Text("This replaces this Mac's current settings. A backup will be kept.")
+            Text(cloudLoadPreview?.confirmationMessage ?? "This replaces this Mac's current settings. A backup will be kept.")
         }
         .sheet(isPresented: $changingPassword) {
             VStack(alignment: .leading, spacing: 14) {

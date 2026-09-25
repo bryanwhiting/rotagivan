@@ -12,7 +12,35 @@ struct CloudSettings: Codable {
     var yaml: String?
     var revision: Int
     var updatedAt: Double?
+    // Optional YAML comment keeps provenance compatible with older servers/apps.
+    private static let computerPrefix = "# rotagivan-saved-by-v1: "
+    static func uploadYAML(_ yaml: String, computer: String) -> String {
+        let name = String(computer.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+            .map(String.init).joined().prefix(256))
+        return computerPrefix + Data(name.utf8).base64EncodedString() + "\n" + yaml
+    }
+    var savedByComputer: String? {
+        guard let yaml else { return nil }
+        let header = String(yaml.prefix(1500).prefix { $0 != "\n" })
+        guard header.hasPrefix(Self.computerPrefix),
+              let data = Data(base64Encoded: String(header.dropFirst(Self.computerPrefix.count))),
+              let name = String(data: data, encoding: .utf8), !name.isEmpty, name.count <= 256,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return name
+    }
 }
+
+struct CloudLoadPreview {
+    let accountID: String
+    let revision: Int
+    let savedAt: Date?
+    let computer: String?
+    var confirmationMessage: String {
+        let timestamp = savedAt?.formatted(date: .complete, time: .standard) ?? "Unknown save time"
+        return "Saved: \(timestamp)\nComputer: \(computer ?? "Unknown computer (older save)")\n\nThis replaces this Mac’s current settings. A backup will be kept."
+    }
+}
+
 private struct SyncAPIError: LocalizedError {
     var status: Int
     var message: String
@@ -46,6 +74,7 @@ struct SyncCredentials {
     private let session: URLSession
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
     private let snapshot: () -> AppConfiguration
+    private let computerName: () -> String
     private let applyOverride: ((AppConfiguration) -> Void)?
     private var started = false
     private var shuttingDown = false
@@ -54,7 +83,8 @@ struct SyncCredentials {
          defaults: UserDefaults = .standard, server: String? = nil,
          credentials: SyncCredentials = .keychain,
          transport: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
-         snapshot: (() -> AppConfiguration)? = nil, apply: ((AppConfiguration) -> Void)? = nil) {
+         snapshot: (() -> AppConfiguration)? = nil, apply: ((AppConfiguration) -> Void)? = nil,
+         computerName: @escaping () -> String = { Host.current().localizedName ?? ProcessInfo.processInfo.hostName }) {
         self.store = store; self.hid = hid; self.files = files
         self.defaults = defaults; self.credentials = credentials
         self.server = server ?? Bundle.main.object(forInfoDictionaryKey: "RotagivanSyncURL") as? String ?? ""
@@ -63,6 +93,7 @@ struct SyncCredentials {
         self.transport = transport ?? { try await session.data(for: $0) }
         self.snapshot = snapshot ?? { AppConfiguration(store: store) }
         applyOverride = apply
+        self.computerName = computerName
     }
 
     /// Startup restores only the login and cached timestamp. No settings file
@@ -108,7 +139,8 @@ struct SyncCredentials {
                 if let yaml = remote.yaml { try await files.backup(AppConfiguration.parse(yaml)) }
                 guard !shuttingDown else { return }
                 let result: CloudSettings = try await request("settings", method: "PUT",
-                    payload: ["yaml": try captured.yaml(), "baseRevision": remote.revision], token: signed.token)
+                    payload: ["yaml": CloudSettings.uploadYAML(try captured.yaml(), computer: computerName()),
+                              "baseRevision": remote.revision], token: signed.token)
                 guard !shuttingDown else { return }
                 rememberSave(result.updatedAt.map { Date(timeIntervalSince1970: $0) } ?? Date(), for: signed)
             }
@@ -117,19 +149,44 @@ struct SyncCredentials {
         }
     }
 
+    /// Fetch only after the user presses Load; preview never applies or saves.
+    func prepareCloudLoad() async -> CloudLoadPreview? {
+        guard !busy, !shuttingDown, let signed = account else { return nil }
+        busy = true; error = nil
+        defer { busy = false }
+        do {
+            let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
+            guard !shuttingDown else { return nil }
+            guard let yaml = remote.yaml else {
+                throw ConfigurationError("No saved cloud settings. Press Save on the Mac you want to copy first.")
+            }
+            _ = try AppConfiguration.parse(yaml)
+            return CloudLoadPreview(accountID: signed.userID, revision: remote.revision,
+                savedAt: remote.updatedAt.map { Date(timeIntervalSince1970: $0) },
+                computer: remote.savedByComputer)
+        } catch { handle(error); return nil }
+    }
+
     /// Load never uploads, and never silently replaces edits made while the
     /// read/request or backup was in flight. The previous app state is backed up.
-    func load() async {
+    func load(expectedCloudSave: CloudLoadPreview? = nil) async {
         guard !busy, !shuttingDown else { return }
         busy = true; error = nil
         defer { busy = false }
         do {
+            if let expectedCloudSave, expectedCloudSave.accountID != account?.userID {
+                throw ConfigurationError("The sync account changed. Press Load again to review its saved settings.")
+            }
             let before = snapshot()
+
             let fingerprint = try before.syncFingerprint()
             let config: AppConfiguration
             let savedAt: Date?
             if let signed = account {
                 let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
+                if let expectedCloudSave, expectedCloudSave.revision != remote.revision {
+                    throw ConfigurationError("The cloud save changed after you opened the confirmation. Nothing was loaded. Press Load again to review the new save.")
+                }
                 guard let yaml = remote.yaml else { throw ConfigurationError("No saved cloud settings. Press Save on the Mac you want to copy first.") }
                 config = try AppConfiguration.parse(yaml)
                 savedAt = remote.updatedAt.map { Date(timeIntervalSince1970: $0) }

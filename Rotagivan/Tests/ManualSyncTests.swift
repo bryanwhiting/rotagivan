@@ -78,7 +78,7 @@ import SwiftUI
         func makeSync() -> SettingsSync {
             SettingsSync(store: store, hid: hid, files: files, defaults: defaults, server: "https://sync.test",
                 credentials: credentials, transport: { try await cloud.send($0) },
-                snapshot: { working }, apply: { working = $0; applications += 1 })
+                snapshot: { working }, apply: { working = $0; applications += 1 }, computerName: { "Studio Mac" })
         }
         func check(_ value: Bool, _ message: String) { precondition(value, message) }
         _ = try await files.save(edited, expectedDigest: nil)
@@ -97,6 +97,34 @@ import SwiftUI
         check(try await files.rawDigest() == externalDisk, "No debounced automatic file save")
         check(try working.syncFingerprint() == newer.syncFingerprint(), "External YAML edits must not auto-import")
 
+        let legacyPreview = await sync.prepareCloudLoad()
+        check(legacyPreview?.savedAt == Date(timeIntervalSince1970: 1_700_000_000),
+              "Confirmation displays server save time")
+        check(legacyPreview?.computer == nil &&
+              legacyPreview?.confirmationMessage.contains("Unknown computer") == true,
+              "Older saves must not guess their source computer")
+        let previewDisk = try await files.rawDigest()
+        check(applications == 0 && previewDisk == externalDisk,
+              "Preview must not apply or export settings")
+        let metadataYAML = CloudSettings.uploadYAML(try edited.yaml(), computer: "Bryan’s Mac Studio")
+        cloud.remote.yaml = metadataYAML
+        let namedPreview = await sync.prepareCloudLoad()
+        check(namedPreview?.computer == "Bryan’s Mac Studio", "Unicode computer names round-trip")
+        check(try AppConfiguration.parse(metadataYAML).syncFingerprint() == edited.syncFingerprint(),
+              "Provenance must not change settings")
+        cloud.remote.revision += 1
+        await sync.load(expectedCloudSave: namedPreview)
+        check(applications == 0 && sync.error?.contains("cloud save changed") == true,
+              "Do not load a different revision from the confirmed one")
+        cloud.remote.revision -= 1
+        let wrongAccount = CloudLoadPreview(accountID: "other", revision: cloud.remote.revision,
+            savedAt: nil, computer: nil)
+        let callsBeforeAccountCheck = cloud.calls.count
+        await sync.load(expectedCloudSave: wrongAccount)
+        check(applications == 0 && cloud.calls.count == callsBeforeAccountCheck,
+              "Do not load from a different account than the confirmed one")
+        cloud.remote.yaml = try edited.yaml()
+        cloud.calls = []
         await sync.load()
         check(cloud.calls == ["GET settings"] && applications == 1, "Load must download exactly once and never upload")
         check(try working.syncFingerprint() == edited.syncFingerprint(), "Load applies the requested cloud copy")
@@ -108,6 +136,7 @@ import SwiftUI
         cloud.beforeGet = { working = newer }
         await sync.save()
         check(cloud.calls == ["GET settings", "PUT settings"], "Save performs one revision read and one upload")
+        check(cloud.remote.savedByComputer == "Studio Mac", "Explicit saves include the saving computer")
         let uploaded = try AppConfiguration.parse(cloud.remote.yaml!)
         check(try uploaded.syncFingerprint() == base.syncFingerprint(), "Save uploads the snapshot from the button press")
         check(try working.syncFingerprint() == newer.syncFingerprint(), "Save must not overwrite later app edits")

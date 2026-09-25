@@ -491,7 +491,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
-    case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop
+    case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop, lockScreen
     case maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
     var title: String {
         switch self {
@@ -502,6 +502,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "Previous desktop"
         case .nextDesktop: return "Next desktop"
         case .showDesktop: return "Show Desktop"
+        case .lockScreen: return "Lock Screen"
         case .maximize: return "Fill desktop"
         case .toggleFullScreen: return "Toggle full screen"
         case .exitFullScreen: return "Exit full screen"
@@ -518,6 +519,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "arrow.left.square"
         case .nextDesktop: return "arrow.right.square"
         case .showDesktop: return "menubar.dock.rectangle"
+        case .lockScreen: return "lock.display"
         case .maximize: return "arrow.up.left.and.arrow.down.right"
         case .toggleFullScreen: return "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
         case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
@@ -526,13 +528,16 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         }
     }
     static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
-    static let macOSCommands: [Self] = [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop]
+    static let macOSCommands: [Self] = [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop, .lockScreen]
     /// Uses the current System Settings shortcut when present, then the macOS default.
     /// App windows uses Rotagivan's accessible window picker instead.
     var macOSShortcut: RecordedShortcut? {
         resolvedMacOSShortcut(symbolicHotKeys: Self.symbolicHotKeys())
     }
     func resolvedMacOSShortcut(symbolicHotKeys: [String: Any]?) -> RecordedShortcut? {
+        if self == .lockScreen {
+            return RecordedShortcut(keyCode: 12, modifiers: UInt64((1 << 18) | (1 << 20)), keyLabel: "Q")
+        }
         let ids: [Int]
         switch self {
         case .missionControl: ids = [32, 34]

@@ -86,7 +86,7 @@ import Foundation
         precondition(!AppExplorerSettings(favorites: [keyedAction,
             AppExplorerFavorite(direction: .left, name: "Duplicate", url: "https://example.com/other",
                 activationShortcut: actionKey)]).hasValidFavorites)
-        precondition(AppExplorerAction.macOSCommands == [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop])
+        precondition(AppExplorerAction.macOSCommands == [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop, .lockScreen])
         precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: nil) == RecordedShortcut(keyCode: 126,
             modifiers: UInt64(1 << 18), keyLabel: "Up Arrow"))
         let customized: [String: Any] = ["32": ["enabled": NSNumber(value: true), "value": ["parameters": [
@@ -95,6 +95,13 @@ import Foundation
         precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: customized) == RecordedShortcut(
             keyCode: 34, modifiers: 917_504, keyLabel: "Mission Control"))
         precondition(AppExplorerAction.showDesktop.resolvedMacOSShortcut(symbolicHotKeys: nil)?.keyCode == 103)
+        precondition(AppExplorerAction.lockScreen.resolvedMacOSShortcut(symbolicHotKeys: nil) ==
+            RecordedShortcut(keyCode: 12, modifiers: UInt64((1 << 18) | (1 << 20)), keyLabel: "Q"))
+        precondition(BindingAction.command(.lockScreen).isValid)
+        let lockTile = AppExplorerFavorite(direction: .up, name: "Lock Screen", action: .lockScreen)
+        precondition(lockTile.isValidDestination)
+        let restoredLock = try! JSONDecoder().decode(AppExplorerFavorite.self, from: JSONEncoder().encode(lockTile))
+        precondition(restoredLock == lockTile)
         precondition(AppExplorerAction.appWindows.macOSShortcut == nil, "App windows uses Rotagivan's window picker")
         print("Explorer shortcut destinations passed: nested persistence, swaps, invalid keys/modifiers/labels and mixed-type rejection.")
         try testSlotSwaps()

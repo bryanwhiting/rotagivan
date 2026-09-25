@@ -1545,10 +1545,11 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     }
     func body(content: Content) -> some View {
         let angle = phase * .pi / 2
+        let depth = cos(angle)
         content
-            .scaleEffect(0.56 + 0.44 * cos(angle))
-            .rotation3DEffect(.degrees(-phase * 36),
-                axis: (x: Double(position.y), y: Double(position.x), z: 0), perspective: 0.35)
+            .scaleEffect(0.56 + 0.44 * depth)
+            .brightness(-0.16 * (1 - depth))
+            .opacity(0.84 + 0.16 * depth)
             .offset(x: Double(position.x) * sin(angle) * 340,
                     y: Double(-position.y) * sin(angle) * 290)
     }

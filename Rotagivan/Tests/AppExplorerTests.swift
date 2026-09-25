@@ -142,7 +142,14 @@ import Foundation
         precondition(lockTile.isValidDestination)
         let restoredLock = try! JSONDecoder().decode(AppExplorerFavorite.self, from: JSONEncoder().encode(lockTile))
         precondition(restoredLock == lockTile)
-        precondition(AppExplorerAction.appWindows.macOSShortcut == nil, "App windows uses Rotagivan's window picker")
+        precondition(AppExplorerAction.appWindows.resolvedMacOSShortcut(symbolicHotKeys: nil) ==
+            RecordedShortcut(keyCode: 125, modifiers: UInt64(1 << 18), keyLabel: "Down Arrow"))
+        for id in ["33", "35"] {
+            let prefs: [String: Any] = [id: ["enabled": true, "value": ["parameters": [105, 34, 917_504]]]]
+            let shortcut = AppExplorerAction.appWindows.resolvedMacOSShortcut(symbolicHotKeys: prefs)
+            precondition(shortcut?.keyCode == 34 && shortcut?.modifiers == 917_504,
+                "Application Windows honors the macOS shortcut")
+        }
         print("Explorer shortcut destinations passed: nested persistence, swaps, invalid keys/modifiers/labels and mixed-type rejection.")
         try testSlotSwaps()
         var settings = AppExplorerSettings()

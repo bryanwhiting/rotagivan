@@ -170,7 +170,7 @@ import SwiftUI
         controller.listWindows = { _ in (0..<20).map { index in
             WindowTiling.AppWindow(title: "Document \(index + 1)", minimized: index == 19, activate: { selectedWindows.append(index); return nil })
         } }
-        store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "App windows", action: .appWindows)])
+        store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, bundleID: "com.apple.finder", name: "App windows", showsWindows: true)])
         controller.show(waitingForLift: false); swipe(.up)
         precondition(controller.displayedEntries.count == 16)
         key(124)
@@ -183,7 +183,7 @@ import SwiftUI
         }
         precondition(selectedWindows == [19] && !controller.isVisible, "Window selection: \(selectedWindows), visible: \(controller.isVisible)")
         controller.show(waitingForLift: false); swipe(.up); controller.goBack()
-        precondition(controller.displayedEntries.first?.command == .appWindows)
+        precondition(controller.displayedEntries.first?.showsWindows == true)
         controller.dismiss()
         for command in [AppExplorerAction.closeWindow, .minimize] {
             store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: command.title, action: command)])
@@ -192,7 +192,7 @@ import SwiftUI
         }
         var macCommands: [AppExplorerAction] = []
         controller.performMacCommand = { macCommands.append($0) }
-        for command in [AppExplorerAction.missionControl, .previousDesktop, .nextDesktop, .showDesktop] {
+        for command in [AppExplorerAction.appWindows, .appExpose, .missionControl, .previousDesktop, .nextDesktop, .showDesktop] {
             store.settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: command.title, action: command)])
             controller.show(waitingForLift: false); swipe(.up)
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))

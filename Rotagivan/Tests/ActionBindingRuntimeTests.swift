@@ -168,10 +168,6 @@ private final class BindingPoster: GestureEventPosting {
         controller.showBuiltIn(.mediaControls)
         precondition(controller.displayedEntries.contains { $0.name == ExplorerMediaAction.mute.title },
             "Media Controls action opens the media HUD")
-        controller.listWindows = { _ in [WindowTiling.AppWindow(title: "Document", minimized: false, activate: { nil })] }
-        controller.showBuiltIn(.appWindows)
-        precondition(controller.displayedEntries.map(\.name) == ["Document"],
-            "App Windows action opens the current app's window picker")
         controller.dismiss()
 
         // HUD tiles use the same action catalog and must run assigned-action
@@ -556,7 +552,7 @@ private final class BindingPoster: GestureEventPosting {
                 "Keyboard-opened HUD must wait for the next trackpad owner")
             explorerStub.dismiss()
         }
-        for action in [BindingAction.command(.windowManager), .command(.appWindows),
+        for action in [BindingAction.command(.windowManager),
                        .command(.mediaControls), .tap(.appExplorer), .tap(.windowManager)] {
             hid.executeBindingAction(action, fromKeyboard: true)
             precondition(explorerStub.isVisible && hid.explorerInputSource == nil,
@@ -572,7 +568,7 @@ private final class BindingPoster: GestureEventPosting {
                 "Trackpad-opened HUD retains its input owner")
             explorerStub.dismiss()
         }
-        for action in [BindingAction.command(.windowManager), .command(.appWindows),
+        for action in [BindingAction.command(.windowManager),
                        .command(.mediaControls), .tap(.appExplorer), .tap(.windowManager)] {
             hid.executeBindingAction(action)
             precondition(explorerStub.isVisible && hid.explorerInputSource == .navigator,

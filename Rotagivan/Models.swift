@@ -641,7 +641,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .moveWindowNextDesktop: return "Move only the focused window to the adjacent normal desktop on the right, on the same display. Does not switch desktops or wrap; full-screen and all-desktop windows are not supported."
         case .windowManager: return "Open the HUD for arranging the current app’s window."
         case .mediaControls: return "Open volume, playback, and track controls. A single tap plays or pauses."
-        case .appWindows: return "Open Rotagivan’s window picker for the current app; choosing a window brings it forward."
+        case .appWindows: return "Show macOS Application Windows for the current app using its configured shortcut or Control–Down."
         case .missionControl: return "Show Mission Control using your configured macOS shortcut, or Control–Up."
         case .previousDesktop: return "Switch to the desktop or full-screen Space on the left using your macOS shortcut."
         case .nextDesktop: return "Switch to the desktop or full-screen Space on the right using your macOS shortcut."
@@ -662,7 +662,6 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     }
 
     /// Uses the current System Settings shortcut when present, then the macOS default.
-    /// App windows uses Rotagivan's accessible window picker instead.
     var macOSShortcut: RecordedShortcut? {
         resolvedMacOSShortcut(symbolicHotKeys: Self.symbolicHotKeys())
     }
@@ -683,7 +682,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         let ids: [Int]
         switch self {
         case .missionControl: ids = [32, 34]
-        case .appExpose: ids = [33, 35]
+        case .appExpose, .appWindows: ids = [33, 35]
         // Verified in Apple KeyboardSettings DefaultShortcutsTable.xml; no default key.
         case .toggleStageManager: ids = [222]
         case .previousDesktop: ids = [79, 80]
@@ -707,7 +706,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         }
         let control = UInt64(1 << 18)
         switch self {
-        case .appExpose: return RecordedShortcut(keyCode: 125, modifiers: control, keyLabel: "Down Arrow")
+        case .appExpose, .appWindows: return RecordedShortcut(keyCode: 125, modifiers: control, keyLabel: "Down Arrow")
         case .missionControl: return RecordedShortcut(keyCode: 126, modifiers: control, keyLabel: "Up Arrow")
         case .previousDesktop: return RecordedShortcut(keyCode: 123, modifiers: control, keyLabel: "Left Arrow")
         case .nextDesktop: return RecordedShortcut(keyCode: 124, modifiers: control, keyLabel: "Right Arrow")

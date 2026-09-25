@@ -270,13 +270,6 @@ extension AppExplorerPresenting {
     func showBuiltIn(_ command: AppExplorerAction) {
         guard isVisible, !isEditing, contextIsValid?() != false else { return }
         switch command {
-        case .appWindows:
-            windowList = sourcePID.map(listWindows) ?? []
-            windowPage = 0
-            model.showingAppWindows = true
-            model.showingMediaControls = false
-            controlDirection = nil
-            refreshGroup()
         case .mediaControls:
             model.showingMediaControls = true
             model.showingAppWindows = false
@@ -412,7 +405,7 @@ extension AppExplorerPresenting {
         }
         let dispatch = fromKeyboard ? (onKeyboardBindingAction ?? onBindingAction) : onBindingAction
         if action.kind == .hudLayer ||
-           (action.kind == .command && [.appWindows, .mediaControls].contains(action.command)) {
+           (action.kind == .command && action.command == .mediaControls) {
             dispatch?(action)
             return
         }
@@ -1098,7 +1091,7 @@ extension AppExplorerPresenting {
             }
             return
         }
-        if entry?.command == .appWindows || entry?.showsWindows == true {
+        if entry?.showsWindows == true {
             let pid = entry?.bundleID.flatMap { id in workspace.runningApplications.first { $0.bundleIdentifier == id && !$0.isTerminated }?.processIdentifier } ?? (entry?.showsWindows == true ? nil : sourcePID)
             controlDirection = direction
             windowList = pid.map(listWindows) ?? []; windowPage = 0

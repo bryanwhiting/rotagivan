@@ -571,7 +571,7 @@ extension AppExplorerPresenting {
         model.windowLayout = layer?.windowLayout ?? .halves
         model.layerHint = settings.layers(at: settings.layerScope(at: layerScopePath))
             .filter { $0.isAvailable(in: sourceBundleID) }
-            .compactMap { layer in layer.holdShortcut.map { "\($0.displayName): \(layer.name)" } }.joined(separator: " · ")
+            .compactMap { layer in layer.holdShortcut.map { "\(layer.activation == .toggle ? "Press" : "Hold") \($0.displayName) → \(layer.name)" } }.joined(separator: " · ")
         model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
         if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
@@ -619,7 +619,7 @@ extension AppExplorerPresenting {
             if wasFullScreen && !model.windowFullScreen { model.message = nil }
             model.layerHint = model.windowFullScreen ? "" : window.layers(at: window.layerScope(at: windowGroupPath)).compactMap {
                 guard $0.isAvailable(in: sourceBundleID), let key = $0.holdShortcut else { return nil }
-                return "\(key.displayName): \($0.name) (\($0.activation == .toggle ? "toggle" : "hold"))"
+                return "\($0.activation == .toggle ? "Press" : "Hold") \(key.displayName) → \($0.name)"
             }.joined(separator: " · ")
             model.groupNames.append("Window Manager")
             model.groupNames += windowGroupPath.indices.compactMap { window.favorite(at: Array(windowGroupPath.prefix($0 + 1)))?.name }
@@ -1770,6 +1770,9 @@ struct AppExplorerView: View {
 
     private var settingsFooter: some View {
         HStack(spacing: 4) {
+            Text("HUD: \(model.groupNames.last ?? model.layerName ?? "Main HUD")")
+                .lineLimit(1).truncationMode(.middle)
+            Text("·")
             Text("Press")
             footerKey("S", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")

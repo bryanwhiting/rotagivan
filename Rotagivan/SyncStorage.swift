@@ -148,6 +148,9 @@ actor SyncFiles {
         return (try AppConfiguration.parse(yaml), Self.digest(data))
     }
     func rawDigest() throws -> String? { try readData(file).map(Self.digest) }
+    func modificationDate() throws -> Date? {
+        try attributesIfPresent(file)?[.modificationDate] as? Date
+    }
     func save(_ config: AppConfiguration, expectedDigest: String?, force: Bool = false) throws -> String {
         try prepare()
         let current = try readData(file)

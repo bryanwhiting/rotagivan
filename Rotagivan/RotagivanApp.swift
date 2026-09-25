@@ -52,8 +52,8 @@ struct RotagivanApp: App {
         } label: {
             RotagivanMenuBarLabel(store: store)
                 // The menu-bar label exists for the lifetime of the app, even
-                // when Settings is never opened. Start the retained sync object
-                // here; the settings-window call remains an idempotent fallback.
+                // when Settings is never opened. Restore the saved sync login
+                // here without transferring settings; the window call is an idempotent fallback.
                 .onAppear { sync.start() }
         }
         .menuBarExtraStyle(.window)

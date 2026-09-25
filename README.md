@@ -332,30 +332,33 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 ### Local YAML and account sync
 
-**General → Account & Sync** adds email/password registration and login. The app
-saves a complete configuration to `~/.config/rotagivan/settings.yaml` first, then
-syncs it to a per-user Cloudflare D1 record when signed in. Changes are debounced
-for 500 ms; external YAML edits are checked about every two seconds, and cloud
-updates/retries about every 30 seconds. **Sync now** checks immediately.
+**General → Account & Sync** has **Save**, **Load**, and **Last save**.
+Transfers are manual: edits, launch, sign-in, external YAML changes, and quit
+never save or load the sync copy. There is no polling, automatic retry, or
+first-login import. Ordinary app preferences still persist locally as you edit.
 
-On another Mac, install Rotagivan and sign in to the same account. Its cloud
-configuration is loaded on first login, with a local backup before replacement.
-Concurrent offline edits produce a choice: keep this Mac's settings or the cloud
-copy. Neither version is silently discarded. Account switching never silently
-uploads the previous account's settings to a different existing account.
+- **Save** captures the current configuration in
+  ~/.config/rotagivan/settings.yaml and, when signed in, uploads that snapshot
+  to your account. Edits made during the save wait for your next Save.
+- **Load** reads your cloud copy when signed in, or settings.yaml when signed out.
+  Confirm before replacing the app's current settings. Loading never uploads.
+  Changes made while a load is in flight are kept; press Load again when ready.
+- **Last save** shows the saved copy's timestamp for the current account or local
+  file. Cloud timestamps are refreshed only by Save or Load, not background checks.
+  Signing in restores the cached timestamp; an unknown time is shown as a dash.
 
-Local YAML works without an account or internet connection. Invalid YAML pauses
-sync and leaves the working app settings intact. **Reload YAML** imports a fixed
-file; **Save app settings** backs up and replaces a conflicting local file.
-Conflicts immediately preserve the working settings (and any differing local YAML)
-in `~/.config/rotagivan/backup/`, before you choose which copy to keep.
-Replacements also preserve the previous settings there. Filenames use UTC with
-six-digit microseconds, e.g. `settings-20260922-181530-123456Z.yaml`.
-Existing backups are never overwritten; older `settings-backup-*.yaml` files
-remain untouched in the config directory.
-`sync-state.json` stores per-account revision metadata, not credentials. Keep or
-remove old backups as desired. Config files are owner-only (0600), in a private
-directory (0700). Symlink config files/directories are rejected.
+To move settings to another Mac, press Save on the source Mac, sign in on the
+other Mac, then press Load. Account switching alone never transfers settings.
+A concurrent cloud save is rejected rather than overwritten; retry explicitly.
+If a cloud save fails, the error distinguishes the saved local YAML from the
+unchanged cloud copy.
+
+Previous app settings and replaced local/cloud copies are backed up in
+~/.config/rotagivan/backup/. Backup names use UTC with microseconds and never
+overwrite existing backups. Config files are owner-only (0600), in a private
+directory (0700). Symlink config files/directories are rejected. Invalid imports
+leave the working settings intact. Existing backups and legacy sync metadata
+remain untouched.
 
 Passwords never go in YAML or preferences; D1 stores salted scrypt hashes and
 Keychain stores the device's login token. Permissions, launch-at-login and this
@@ -619,7 +622,7 @@ positions. Drop onto an empty slot to move it. URLs and whole groups move the
 same way, including inside nested groups; dropping onto a group swaps its slot,
 not its contents. Targets highlight while dragging, and dropping outside a slot
 or onto the center cancels. The **••• → Move or swap with** menu offers the same
-operation without dragging. Changes save and sync automatically. Recent-app
+operation without dragging. Changes persist in the app; press Save under Account & Sync to update the sync copy. Recent-app
 contents remain automatically ordered, but their group tile can be moved.
 
 While editing, the HUD stays open without its navigation timeout. Trackpad taps

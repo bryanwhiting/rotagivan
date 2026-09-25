@@ -144,4 +144,10 @@ xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYam
   Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/SyncStorageTests.swift \
   -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncStorageTests"
 "$test_dir/SyncStorageTests"
+xcrun swiftc -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \
+  Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift Rotagivan/Tests/ManualSyncTests.swift \
+  -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -framework Security \
+  -o "$test_dir/ManualSyncTests"
+"$test_dir/ManualSyncTests" "$test_dir"
 echo "All tests passed. Test binaries: $test_dir"

@@ -10,9 +10,7 @@ struct SyncSettingsView: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmNewPassword = ""
-    @State private var overwriteFile = false
-    @State private var useCloud = false
-    @State private var useLocal = false
+    @State private var confirmLoad = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -21,7 +19,7 @@ struct SyncSettingsView: View {
                 Spacer()
                 if sync.busy { ProgressView().controlSize(.small) }
             }
-            Text("Settings save on this Mac first. Sign in on another Mac to sync your layers and shortcuts.")
+            Text("Save and load only when you choose. Nothing syncs automatically.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("~/.config/rotagivan/settings.yaml").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
@@ -31,7 +29,6 @@ struct SyncSettingsView: View {
             if let account = sync.account {
                 LabeledContent("Signed in as", value: account.email)
                 HStack {
-                    Button("Sync now") { Task { await sync.sync() } }.disabled(sync.hasConflict || sync.localConflict)
                     Button("Change password…") { changingPassword = true }
                     Button("Sign out") { Task { await sync.signOut() } }
                 }.disabled(sync.busy)
@@ -41,7 +38,7 @@ struct SyncSettingsView: View {
                     .textContentType(creating ? .newPassword : .password)
                 if creating { SecureField("Confirm password", text: $confirmPassword).textContentType(.newPassword) }
                 HStack {
-                    Button(creating ? "Create account & sync" : "Sign in") {
+                    Button(creating ? "Create account" : "Sign in") {
                         let submitted = password
                         password = ""; confirmPassword = ""
                         Task { await sync.authenticate(email: email, password: submitted, create: creating) }
@@ -50,33 +47,30 @@ struct SyncSettingsView: View {
                         creating.toggle(); password = ""; confirmPassword = ""
                     }.disabled(sync.busy)
                 }
-                Text("Email is your login name. Verification and password-reset emails aren't available yet; save your password in a password manager. First sign-in on a new Mac loads your cloud settings and backs up this Mac's settings.")
+                Text("Email is your login name. Verification and password-reset emails aren't available yet; save your password in a password manager. Signing in does not save or load settings.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Text(sync.status).font(.caption).foregroundStyle(.secondary)
-            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
-            if sync.hasConflict {
-                HStack {
-                    Button("Use this Mac's settings…") { useLocal = true }
-                    if sync.hasCloudCopy { Button("Use cloud settings…") { useCloud = true } }
-                }.disabled(sync.busy)
-            }
+            LabeledContent("Last save", value: sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("Reload YAML") { Task { await sync.reloadLocal() } }
-                if sync.localConflict { Button("Save app settings…") { overwriteFile = true } }
+                Button("Save") { Task { await sync.save() } }
+                    .help(sync.account == nil ? "Save current app settings to settings.yaml." : "Save current app settings to the cloud and settings.yaml.")
+                Button("Load") { confirmLoad = true }
+                    .help(sync.account == nil ? "Load settings.yaml into this app." : "Load your saved cloud settings into this app.")
             }.disabled(sync.busy)
+            Text(sync.account == nil
+                ? "Save and Load use settings.yaml on this Mac. Replaced copies are backed up."
+                : "Save writes to your cloud account and settings.yaml. Load uses the cloud copy. Replaced copies are backed up.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             Text("Passwords and login tokens never go in YAML. Cloud sync doesn't change Accessibility, Input Monitoring, launch-at-login, or this Mac's enable switch.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .textFieldStyle(.roundedBorder)
-        .confirmationDialog("Replace settings.yaml with this app's settings? The existing file will be backed up.", isPresented: $overwriteFile) {
-            Button("Back up file and save app settings") { Task { await sync.overwriteLocal() } }
-        }
-        .confirmationDialog("Replace this Mac's settings with the cloud copy? Your local configuration will be backed up.", isPresented: $useCloud) {
-            Button("Use cloud settings") { Task { await sync.sync(resolution: .download) } }
-        }
-        .confirmationDialog("Replace the cloud copy with this Mac's settings? Other signed-in Macs will receive this version.", isPresented: $useLocal) {
-            Button("Use this Mac's settings") { Task { await sync.sync(resolution: .upload) } }
+        .confirmationDialog(sync.account == nil ? "Load settings.yaml?" : "Load your saved cloud settings?", isPresented: $confirmLoad) {
+            Button("Back up current settings and load") { Task { await sync.load() } }
+        } message: {
+            Text("This replaces this Mac's current settings. A backup will be kept.")
         }
         .sheet(isPresented: $changingPassword) {
             VStack(alignment: .leading, spacing: 14) {

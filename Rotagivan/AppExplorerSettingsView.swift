@@ -932,32 +932,11 @@ struct AppExplorerSettingsView: View {
                     .padding(10)
                     .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
 
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("HOTKEY FOR THIS ACTION")
-                            .font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            ShortcutRecorder(title: favorite.activationShortcut?.readableCombination ?? "Assign hotkey…") { shortcut in
-                                var updated = favorite
-                                updated.activationShortcut = shortcut
-                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                            if favorite.activationShortcut != nil {
-                                Button("Clear") {
-                                    var updated = favorite
-                                    updated.activationShortcut = nil
-                                    edit { $0.setFavorite(updated, at: direction, in: groupPath) }
-                                }
-                            }
-                        }
-                        Text("Works while this HUD layer is open. Escape and bare E/S stay reserved for HUD controls.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Button("Assign tap or swipe to this action…") {
-                            guard let assigned = tileBindingAction(favorite, at: direction) else { return }
-                            editingTileBinding = ActionBinding(trigger: BindingTrigger(), action: assigned)
-                        }
-                        .disabled(tileBindingAction(favorite, at: direction) == nil)
+                    Button("Assign tap or swipe to this action…") {
+                        guard let assigned = tileBindingAction(favorite, at: direction) else { return }
+                        editingTileBinding = ActionBinding(trigger: BindingTrigger(), action: assigned)
                     }
+                    .disabled(tileBindingAction(favorite, at: direction) == nil)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {

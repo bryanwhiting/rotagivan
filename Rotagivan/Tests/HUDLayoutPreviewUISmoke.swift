@@ -144,6 +144,22 @@ private struct PreviewFixture: View {
         send(.leftMouseUp, x: 475 + left.offsetX, y: 425 - 38 + left.offsetY, fullLayout: true)
         precondition(state.selectedLayerID == nil, "The Main HUD is selectable from another layer")
         try snapshot("hud-preview-main-return")
+        // The fixed orbit canvas must not impose its width on the viewport.
+        state.editingEnabled = false
+        for width: CGFloat in [600, 740, 1100] {
+            panel.setContentSize(NSSize(width: width, height: 850))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            precondition(abs(host.bounds.width - width) < 1, "Preview must fit the requested viewport width")
+            for selectedID in [nil, Optional(layer.id)] {
+                state.selectedLayerID = selectedID
+                state.selection = .up
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                send(.leftMouseDown, x: width / 2 - 116, y: 387, fullLayout: true)
+                send(.leftMouseUp, x: width / 2 - 116, y: 387, fullLayout: true)
+                precondition(state.selection == .left, "Selected HUD tiles must stay centered at every viewport width")
+            }
+            try snapshot("hud-preview-centered-\(Int(width))")
+        }
         panel.orderOut(nil); panel.close()
         let suite = "Rotagivan.VisualHUDSettings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

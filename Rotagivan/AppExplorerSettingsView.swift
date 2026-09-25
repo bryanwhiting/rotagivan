@@ -1628,6 +1628,9 @@ struct ExplorerHUDSettingsPreview: View {
     @StateObject private var model = ExplorerModel()
 
     var body: some View {
+        // Keep the fixed orbit canvas from imposing its 950-point ideal width
+        // on the settings scroll view. The selected HUD stays at viewport center.
+        GeometryReader { viewport in
         AppExplorerView(model: model, onSelect: { slot in
             if !model.showingRecents { selection = slot; if editor != nil { editingTile.wrappedValue = slot } }
         }, onCancel: {}, onBack: onBack, isPreview: true,
@@ -1660,6 +1663,10 @@ struct ExplorerHUDSettingsPreview: View {
             .onChange(of: rootSettings) { _, _ in refresh() }
             .onChange(of: selectedLayerID) { _, _ in refresh() }
             .onChange(of: selection) { _, selected in model.selected = selected }
+            .position(x: viewport.size.width / 2, y: viewport.size.height / 2)
+        }
+        .frame(height: 850)
+        .clipped()
     }
 
     private func refresh() {

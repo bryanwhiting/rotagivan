@@ -81,6 +81,7 @@ extension AppExplorerPresenting {
     private let cursorCentering = ExplorerCursorCentering()
     var cursorPosition: () -> CGPoint? = { CGEvent(source: nil)?.location }
     var centerApplication: ((pid_t, CGPoint?, @escaping () -> Bool) -> Void)?
+    var focusApplicationWindow: (pid_t) -> Void = { WindowTiling.focusApplicationWindow(pid: $0) }
     private var tilingTarget: WindowTilingTarget?
     private var controlDirection: ExplorerSlot?
     var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
@@ -1208,7 +1209,15 @@ extension AppExplorerPresenting {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false else { return }
             self.openApplication(url, Self.activationConfiguration()) { [weak self] pid in
-                guard let self, let pid, center else { return }
+                guard let self, let pid,
+                      self.selectionGeneration == generation, !self.isVisible,
+                      self.contextIsValid?() != false,
+                      self.editingStore?.settings.enabled != false,
+                      self.editingStore?.activeConfigurationID == configurationID else { return }
+                // Activating the process alone can leave its window on another
+                // Space. Focus/raise its actual window independently of cursor warping.
+                self.focusApplicationWindow(pid)
+                guard center else { return }
                 let isValid: () -> Bool = { [weak self] in
                     guard let self else { return false }
                     return self.selectionGeneration == generation && !self.isVisible &&

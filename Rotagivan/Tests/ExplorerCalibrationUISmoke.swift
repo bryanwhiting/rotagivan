@@ -186,6 +186,11 @@ import SwiftUI
         controller.dismiss()
         var completion: (@MainActor (pid_t?) -> Void)?
         var centered: [pid_t] = []
+        var focusedWindows: [pid_t] = []
+        controller.focusApplicationWindow = { pid in
+            precondition(!controller.isVisible, "Window focus must follow HUD teardown")
+            focusedWindows.append(pid)
+        }
         let originalPointer = CGPoint(x: -350, y: 240)
         controller.cursorPosition = { originalPointer }
         controller.openApplication = { _, _, finished in completion = finished }
@@ -197,17 +202,21 @@ import SwiftUI
         chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         completion?(42)
         precondition(centered.isEmpty, "Centering defaults off")
+        precondition(focusedWindows == [42], "Focus the target window even with cursor centering off")
         settings.centerCursorOnAppSwitch = true
         chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         completion?(nil)
         precondition(centered.isEmpty, "Failed app launch never centers")
+        precondition(focusedWindows == [42], "Failed launch must not raise a window")
         chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         completion?(42)
         precondition(centered == [42])
+        precondition(focusedWindows == [42, 42])
         chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         controller.show(waitingForLift: false)
         completion?(43)
         precondition(centered == [42], "A newer HUD cancels pending centering")
+        precondition(focusedWindows == [42, 42], "A newer HUD cancels pending window activation")
         controller.dismiss()
         chooseLeft(); RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         settings.centerCursorOnAppSwitch = false
@@ -215,7 +224,8 @@ import SwiftUI
         precondition(centered == [42], "Turning the flag off cancels pending centering")
         settings.centerCursorOnAppSwitch = nil
         controller.openApplication = { url, _, _ in openedApps.append(url) }
-        print("App selection centering passed: opt-in, successful PID, restored origin, failed launch, newer HUD and changed setting.")
+        print("App selection activation passed: window focus with centering off/on, successful PID, failed launch, newer HUD cancellation, and cursor centering guards.")
+        if CommandLine.arguments.contains("--activation-only") { return }
         controller.show(waitingForLift: false)
         controller.setAlternateHeld(true)
         precondition(!controller.isVisible, "Changing modes cancels any partial selection")

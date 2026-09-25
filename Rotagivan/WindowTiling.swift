@@ -56,6 +56,42 @@ enum WindowTile {
         var minimized: Bool
         var activate: () -> String?
     }
+    /// Follow an existing application's window without moving it between Spaces.
+    /// AX window enumeration includes windows that are not on the current desktop.
+    static func focusApplicationWindow(pid: pid_t) {
+        guard pid != ProcessInfo.processInfo.processIdentifier,
+              let running = NSRunningApplication(processIdentifier: pid),
+              !running.isTerminated else { return }
+        guard AXIsProcessTrusted() else {
+            _ = running.activate(options: [.activateAllWindows])
+            return
+        }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.15)
+        func window(_ key: String) -> AXUIElement? {
+            guard let value = attribute(app, key), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+            return unsafeBitCast(value, to: AXUIElement.self)
+        }
+        let windows = (attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).filter {
+            AXUIElementSetMessagingTimeout($0, 0.15)
+            return (attribute($0, kAXRoleAttribute) as? String) == kAXWindowRole
+        }
+        let target = window(kAXFocusedWindowAttribute) ?? window(kAXMainWindowAttribute)
+            ?? windows.first { (attribute($0, kAXMinimizedAttribute) as? Bool) != true } ?? windows.first
+        guard let target else {
+            _ = running.activate(options: [.activateAllWindows])
+            return
+        }
+        AXUIElementSetMessagingTimeout(target, 0.15)
+        if (attribute(target, kAXMinimizedAttribute) as? Bool) == true {
+            _ = AXUIElementSetAttributeValue(target, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        _ = AXUIElementSetAttributeValue(target, kAXMainAttribute as CFString, kCFBooleanTrue)
+        _ = running.activate(options: [.activateAllWindows])
+        _ = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+    }
+
     static func windows(pid: pid_t) -> [AppWindow] {
         guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return [] }
         let app = AXUIElementCreateApplication(pid)

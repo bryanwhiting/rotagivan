@@ -585,6 +585,22 @@ private final class BindingPoster: GestureEventPosting {
                                              key: (key.keyCode, key.modifiers)),
             "Queued Carbon keydowns cannot invoke HUD actions during shortcut recording")
         controller.dismiss()
+        let mediaController = AppExplorerController(defaults: defaults)
+        mediaController.configuration = { AppExplorerSettings(favorites: []) }
+        mediaController.contextIsValid = { true }
+        var mediaActions: [ExplorerMediaAction] = []
+        mediaController.performMedia = { mediaActions.append($0) }
+        mediaController.show(waitingForLift: false)
+        mediaController.showBuiltIn(.mediaControls)
+        mediaController.process(report(true))
+        mediaController.process(report(false))
+        precondition(mediaActions == [.playPause], "Single media tap toggles playback once")
+        precondition(mediaController.isVisible, "Media tap keeps controls open")
+        mediaController.centerTap()
+        precondition(mediaActions == [.playPause, .playPause], "Center button also toggles playback")
+        mediaController.dismiss()
+        mediaController.centerTap()
+        precondition(mediaActions.count == 2, "Hidden HUD does not send media commands")
         print("Action binding runtime tests passed: empty-layer keyboard, HUD gesture and navigation, legacy tap action, and global override precedence.")
     }
 }

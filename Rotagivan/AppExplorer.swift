@@ -320,7 +320,7 @@ extension AppExplorerPresenting {
         panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
             onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
             onDeepSelect: { [weak self] in self?.chooseDeep($0) },
-            onBack: { [weak self] in self?.goBack() },
+            onBack: { [weak self] in self?.centerTap() },
             onSettings: { [weak self] in self?.openSettings() },
             onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
             onWindowPage: { [weak self] in self?.changeWindowPage($0) }))
@@ -701,7 +701,7 @@ extension AppExplorerPresenting {
         case .select(let direction):
             if model.deepFan == nil { choose(direction) } else { chooseDeep(direction) }
         case .back:
-            if model.deepFan == nil { goBack() } else { closeDeepFan() }
+            if model.deepFan == nil { centerTap() } else { closeDeepFan() }
         case .cancel:
             if model.deepFan == nil { dismiss() } else { closeDeepFan() }
         }
@@ -1209,7 +1209,18 @@ extension AppExplorerPresenting {
         refreshGroup()
     }
 
+    func centerTap() {
+        guard isVisible, !isEditing else { return }
+        guard contextIsValid?() != false else { dismiss(); return }
+        guard model.showingMediaControls else { goBack(); return }
+        performMedia(.playPause)
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
     func goBack() {
+
         guard isVisible, !isEditing else { return }
         if model.showingAppWindows {
             model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
@@ -1656,7 +1667,7 @@ struct AppExplorerView: View {
         if let slot = model.selected, model.slotCount > 8,
            let entry = model.entries.first(where: { $0.direction == slot }) { return "\(entry.name) · lift to choose" }
         if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
-        if model.showingMediaControls { return "Swipe to control · repeat to adjust · center tap to go back" }
+        if model.showingMediaControls { return "Tap to play / pause · swipe to control · Esc to close" }
         if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
         if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
         return model.groupNames.isEmpty ? "Swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
@@ -1693,15 +1704,15 @@ struct AppExplorerView: View {
                                                         .frame(width: 57, height: 57)
                                                         .rotationEffect(.degrees(reticleRotation))
                                                 }
-                                                Image(systemName: canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))
+                                                Image(systemName: model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari")))
                                                     .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
                                             }.frame(height: model.theme.isHUD ? 57 : 30)
                                         }
-                                        Text(canGoBack ? "Tap to go back" : "Tap to close")
+                                        Text(model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close"))
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")
+                                    .accessibilityLabel(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")"))
                             }
                         }
                     }
@@ -1903,7 +1914,7 @@ struct AppExplorerView: View {
             if let fan = model.deepFan { deepFan(fan) }
             Button(action: onBack) {
                 VStack(spacing: 3) {
-                    Image(systemName: canGoBack ? "arrow.uturn.backward" : "xmark")
+                    Image(systemName: model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark"))
                         .font(.system(size: 13, weight: .medium))
                     Text(String(format: "%02d", depth + 1))
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -1918,8 +1929,8 @@ struct AppExplorerView: View {
             }
             .buttonStyle(.plain)
             .position(center)
-            .help(canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")
-            .accessibilityLabel("\(canGoBack ? "Back to previous HUD layer" : "Close HUD"). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+            .help(model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close"))
+            .accessibilityLabel("\(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
         }
         .frame(width: 418, height: 310)
         .animation(feedback, value: names)

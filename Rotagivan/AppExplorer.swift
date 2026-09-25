@@ -47,6 +47,11 @@ extension AppExplorerPresenting {
     private var localGestureFingerLast: [UInt8: CGPoint] = [:]
     private var localGestureTimer: Timer?
     private let model = ExplorerModel()
+    // Prepared on presentation and reused across rotations; never retain stale
+    // configuration or machine-local app icons across separate HUD sessions.
+    private var entryCache: [(favorite: AppExplorerFavorite, depth: Int, entry: ExplorerEntry)] = []
+    private var entryCacheSettings: AppExplorerSettings?
+    private var entryCacheDictionary: [NamedHotkey] = []
     private var sourcePID: pid_t?
     private let shortcutPoster = EventPoster()
     var sendShortcut: ((RecordedShortcut) -> Void)?
@@ -555,6 +560,11 @@ extension AppExplorerPresenting {
     private func loadEntries() {
         let original = configuration()
         let dictionary = hotkeyDictionary()
+        if entryCacheSettings != original || entryCacheDictionary != dictionary {
+            entryCache.removeAll(keepingCapacity: true)
+            entryCacheSettings = original
+            entryCacheDictionary = dictionary
+        }
         model.actionBindings = visibleActionBindings.map { binding in
             var display = binding
             if display.action.kind == .macro {
@@ -643,7 +653,12 @@ extension AppExplorerPresenting {
     }
 
     private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
-        Self.makeEntry(favorite, depth: depth, dictionary: hotkeyDictionary(), applicationURL: applicationURL)
+        if let cached = entryCache.first(where: { $0.depth == depth && $0.favorite == favorite }) {
+            return cached.entry
+        }
+        let entry = Self.makeEntry(favorite, depth: depth, dictionary: entryCacheDictionary, applicationURL: applicationURL)
+        entryCache.append((favorite, depth, entry))
+        return entry
     }
 
     /// Shared by the live HUD and its inert settings preview.
@@ -923,7 +938,11 @@ extension AppExplorerPresenting {
             let generation = model.orbitGeneration
             model.orbitSettling = true
             let animate = configuration().resolvedAnimationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            withAnimation(animate ? .easeOut(duration: 0.24) : nil) { model.orbitProgress = commit ? 1 : 0 }
+            let remaining = commit ? 1 - model.orbitProgress : model.orbitProgress
+            let settleDuration = animate ? 0.18 * remaining : 0
+            withAnimation(settleDuration > 0 ? .easeOut(duration: settleDuration) : nil) {
+                model.orbitProgress = commit ? 1 : 0
+            }
             let finish: @MainActor @Sendable () -> Void = { [weak self] in
                 guard let self, self.isVisible, self.model.orbitGeneration == generation else { return }
                 var transaction = Transaction(); transaction.disablesAnimations = true
@@ -932,7 +951,7 @@ extension AppExplorerPresenting {
                     else { self.resetLocalGesture(); self.input = self.makeSelection(waitingForLift: self.contactIsDown) }
                 }
             }
-            if animate { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: finish) }
+            if settleDuration > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration, execute: finish) }
             else { finish() }
             return true
         }
@@ -1372,6 +1391,8 @@ extension AppExplorerPresenting {
     }
 
     func dismiss() {
+        entryCache.removeAll(keepingCapacity: true)
+        entryCacheSettings = nil
         resetLocalGesture()
         guard let panel else { return }
         selectionGeneration &+= 1
@@ -1515,7 +1536,19 @@ private struct ExplorerDeepFanSector: Shape {
 private struct HUDOrbitSatellite: View {
     let preview: HUDCarouselPreview
     let theme: ExplorerTheme
-    @StateObject private var model = ExplorerModel()
+    @StateObject private var model: ExplorerModel
+
+    init(preview: HUDCarouselPreview, theme: ExplorerTheme) {
+        self.preview = preview
+        self.theme = theme
+        let prepared = ExplorerModel()
+        prepared.entries = preview.entries
+        prepared.theme = theme
+        prepared.slotCount = preview.slotCount
+        prepared.layerName = preview.name
+        prepared.animationsEnabled = false
+        _model = StateObject(wrappedValue: prepared)
+    }
     var body: some View {
         AnyView(AppExplorerView(model: model, onSelect: { _ in }, onCancel: {},
             forceReduceMotion: true, isPreview: true, showsCarousel: false))

@@ -258,6 +258,42 @@ private final class BindingPoster: GestureEventPosting {
             return TrackpadReport(contacts: fingers, buttonDown: false, scanTime: 0)
         }
 
+        // Switching prepared HUDs must not repeat app resolution or wait after
+        // a fully completed drag, even with animations enabled.
+        let originalResolver = controller.applicationURL
+        var resolutions = 0
+        controller.applicationURL = { _ in resolutions += 1; return nil }
+        var cachedLayer = ExplorerHoldLayer.empty(name: "Cached HUD")
+        cachedLayer.position = .right
+        cachedLayer.favorites = [AppExplorerFavorite(direction: .up, bundleID: "test.orbit.target", name: "Prepared target")]
+        hud = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, bundleID: "test.orbit.main", name: "Prepared main")],
+            holdLayers: [cachedLayer], animationsEnabled: true)
+        controller.show(waitingForLift: false)
+        let warmResolutions = resolutions
+        precondition(warmResolutions == 2, "Initial presentation prepares both HUDs")
+        for _ in 0..<5 {
+            controller.switchLayer(cachedLayer.id)
+            controller.switchLayer(nil)
+        }
+        precondition(resolutions == warmResolutions, "Warm rotations must reuse app URLs and icons")
+        controller.process(pairReport(500, 530))
+        controller.process(pairReport(300, 330))
+        controller.process(pairReport(nil, nil))
+        precondition(controller.displayedEntries.first?.name == "Prepared target",
+            "A completed drag must activate its HUD synchronously without a timer")
+        precondition(resolutions == warmResolutions)
+        hud.holdLayers?[0].favorites[0].name = "Updated target"
+        controller.switchLayer(nil)
+        controller.switchLayer(cachedLayer.id)
+        precondition(resolutions > warmResolutions && controller.displayedEntries.first?.name == "Updated target",
+            "Configuration edits invalidate prepared entries")
+        controller.dismiss()
+        let beforeReopen = resolutions
+        controller.show(waitingForLift: false)
+        precondition(resolutions > beforeReopen, "Reopening refreshes machine-local app information")
+        controller.dismiss()
+        controller.applicationURL = originalResolver
+
         // Continuous navigation follows fingers before lift, supports slow holds,
         // and cancels when the user reverses below the release threshold.
         var orbitLayer = ExplorerHoldLayer.empty(name: "Orbit target")

@@ -555,7 +555,7 @@ extension AppExplorerPresenting {
     private func loadEntries() {
         let original = configuration()
         if let builtIn = mappedBuiltIn {
-            if builtIn == .mediaControls { model.showingMediaControls = true }
+            // Mapped media layers are editable templates, not the generated media applet.
             if builtIn == .windowManager {
                 model.showingWindowManager = true
                 if tilingTarget == nil { tilingTarget = sourcePID.flatMap(captureWindow) }
@@ -681,6 +681,10 @@ extension AppExplorerPresenting {
         }
         if favorite.action == .mediaControls {
             return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination))
+        }
+        if let media = favorite.shortcut?.assignedAction?.media, favorite.isValidDestination {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, mediaAction: media))
         }
         if let shortcut = favorite.shortcut {
             let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
@@ -1298,7 +1302,7 @@ extension AppExplorerPresenting {
         if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingMediaControls {
             beginVoiceMode(); return
         }
-        guard model.showingMediaControls else { goBack(); return }
+        guard model.showingMediaControls || mappedBuiltIn == .mediaControls else { goBack(); return }
         performMedia(.playPause)
         model.selected = nil
         input = makeSelection(waitingForLift: contactIsDown)
@@ -1614,11 +1618,7 @@ struct HUDCarouselPreview: Identifiable {
         guard let origin = map.first(where: { $0.layerID == activeLayerID })?.point else { return [] }
         return map.filter { $0.layerID != activeLayerID }.map { node in
             Self(id: node.id, name: node.name, offset: node.point - origin,
-                slotCount: node.slotCount, entries: node.builtIn == .mediaControls
-                    ? ExplorerMediaAction.allCases.map {
-                        ExplorerEntry(direction: ExplorerSlot($0.direction), bundleID: nil, name: $0.title,
-                            icon: nil, url: nil, mediaAction: $0)
-                    } : node.favorites.map(makeEntry))
+                slotCount: node.slotCount, entries: node.favorites.map(makeEntry))
         }
     }
 }

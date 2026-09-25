@@ -330,6 +330,18 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 ## Configuration and defaults
 
+### Editable HUD templates
+
+In HUD settings, choose **Add HUD → Templates → Mac Actions / Media Controls /
+Editing Actions**, then an empty position. Templates copy ordinary tiles that
+can be replaced, moved, or removed; clearing them does not regenerate defaults.
+Recent Apps and Window Manager remain dynamic built-ins. Existing media layers
+now show their six controls in the editor and become ordinary saved tiles on
+first edit. Individual media commands are available in the tile's Media controls
+menu and in the Actions manager. Mac Actions includes Mission Control, Application
+Windows, previous/next desktop, Lock Screen, previous app, Show Desktop and Stage
+Manager (which still needs its shortcut configured in macOS).
+
 ### Local YAML and account sync
 
 **General → Account & Sync → Encrypted API keys** shares your OpenRouter key

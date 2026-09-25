@@ -838,6 +838,34 @@ enum ExplorerWindowLayout: String, Codable, CaseIterable {
     var fraction: Double { switch self { case .halves: return 0.5; case .thirds: return 1.0 / 3; case .twoThirds: return 2.0 / 3; case .fourths: return 0.25 } }
 }
 
+/// Templates copy ordinary editable tiles; they never regenerate after editing.
+enum HUDLayerTemplate: String, CaseIterable, Identifiable {
+    case macActions, mediaControls, editingActions
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .macActions: return "Mac Actions"
+        case .mediaControls: return "Media Controls"
+        case .editingActions: return "Editing Actions"
+        }
+    }
+    var favorites: [AppExplorerFavorite] {
+        switch self {
+        case .mediaControls:
+            return ExplorerMediaAction.allCases.compactMap { BindingAction.media($0).favorite(at: ExplorerSlot($0.direction)) }
+        case .editingActions:
+            return ExplorerReservedGroup.actions.tile(at: .up).children ?? []
+        case .macActions:
+            let commands: [(ExplorerSlot, AppExplorerAction)] = [
+                (.up, .missionControl), (.topRight, .appWindows), (.right, .nextDesktop),
+                (.bottomRight, .lockScreen), (.down, .previousApp), (.bottomLeft, .showDesktop),
+                (.left, .previousDesktop), (.topLeft, .toggleStageManager)
+            ]
+            return commands.map { AppExplorerFavorite(direction: $0.0, name: $0.1.title, action: $0.1) }
+        }
+    }
+}
+
 enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
     case recentApps, actions, windowManager, mediaControls
     var id: Self { self }
@@ -861,6 +889,11 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
 
 struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var builtIn: HUDLayerBuiltIn? = nil
+    // Legacy generated media layers expose their preset until the first edit
+    // materializes it and clears builtIn. An intentionally empty custom layer stays empty.
+    var editableFavorites: [AppExplorerFavorite] {
+        builtIn == .mediaControls && favorites.isEmpty ? HUDLayerTemplate.mediaControls.favorites : favorites
+    }
 
     var actionBindings: [ActionBinding]? = nil
     static func empty(name: String = "New layer") -> Self {
@@ -1009,6 +1042,22 @@ struct AppExplorerSettings: Codable, Equatable {
         }
         return result
     }
+    @discardableResult mutating func assignTemplate(_ template: HUDLayerTemplate, at position: HUDLayerPosition) -> UUID? {
+        let positions = resolvedHUDPositions
+        guard !positions.values.contains(position), (holdLayers ?? []).count < 128 else { return nil }
+        var next = self
+        var layers = next.holdLayers ?? []
+        for index in layers.indices { layers[index].position = positions[layers[index].id] }
+        var layer = ExplorerHoldLayer.empty(name: template.title)
+        layer.position = position
+        layer.favorites = template.favorites
+        layers.append(layer)
+        next.holdLayers = layers
+        guard next.hasValidFavorites else { return nil }
+        self = next
+        return layer.id
+    }
+
     /// Assign only into an empty position; never overwrite a user's saved HUD.
     @discardableResult mutating func assignBuiltIn(_ builtIn: HUDLayerBuiltIn, at position: HUDLayerPosition) -> UUID? {
         let positions = resolvedHUDPositions
@@ -1035,7 +1084,7 @@ struct AppExplorerSettings: Codable, Equatable {
             favorites: favorites, slotCount: slotCount ?? 8)] + (holdLayers ?? []).compactMap { layer in
             guard let position = positions[layer.id], includingUnavailable || layer.isAvailable(in: bundleID) else { return nil }
             return HUDMapNode(layerID: layer.id, name: layer.name, point: position.point,
-                favorites: layer.builtIn == .windowManager ? windowEditor().favorites : layer.favorites,
+                favorites: layer.builtIn == .windowManager ? windowEditor().favorites : layer.editableFavorites,
                 slotCount: layer.builtIn == .windowManager ? windowEditor().count(at: []) : (layer.slotCount ?? slotCount ?? 8),
                 builtIn: layer.builtIn)
         }
@@ -1105,7 +1154,7 @@ struct AppExplorerSettings: Codable, Equatable {
     func projected(layerID: UUID?) -> Self {
         guard let layer = holdLayers?.first(where: { $0.id == layerID }) else { return self }
         var result = self
-        result.favorites = layer.favorites
+        result.favorites = layer.editableFavorites
         result.actionBindings = layer.actionBindings
         result.defaultMode = .favorites
         result.holdLayers = nil
@@ -1168,7 +1217,7 @@ struct AppExplorerSettings: Codable, Equatable {
     func applying(_ layer: ExplorerHoldLayer, at path: [ExplorerSlot]) -> Self {
         var next = self
         if path.isEmpty {
-            next.favorites = layer.favorites
+            next.favorites = layer.editableFavorites
             next.actionBindings = layer.actionBindings
             next.defaultMode = .favorites
             next.slotCount = layer.slotCount ?? slotCount

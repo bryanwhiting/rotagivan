@@ -221,7 +221,7 @@ struct AppExplorerSettingsView: View {
         return baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.builtIn
     }
     private var generatedBuiltIn: HUDLayerBuiltIn? {
-        guard let builtIn = selectedBuiltIn, builtIn != .actions else { return nil }
+        guard let builtIn = selectedBuiltIn, builtIn != .actions, builtIn != .mediaControls else { return nil }
         return builtIn
     }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
@@ -310,7 +310,23 @@ struct AppExplorerSettingsView: View {
                 Menu {
                     Button("Custom HUD…") { creatingLayer = true; editingLayer = .empty() }
                     if scopeTitle == nil && !windowManagerOnly {
-                        ForEach(HUDLayerBuiltIn.allCases) { builtIn in
+                        Menu("Templates") {
+                            ForEach(HUDLayerTemplate.allCases) { template in
+                                Menu(template.title) {
+                                    ForEach(HUDLayerPosition.allCases.filter { layerAt($0) == nil }) { position in
+                                        Button(position.title) {
+                                            var next = baseSettings
+                                            guard let id = next.assignTemplate(template, at: position) else { return }
+                                            if saveBase(next) { selectedLayerID = id; groupPath = [] }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if scopeTitle == nil && !windowManagerOnly {
+                        ForEach([HUDLayerBuiltIn.recentApps, .windowManager]) { builtIn in
                             Menu(builtIn.title) {
                                 ForEach(HUDLayerPosition.allCases.filter { layerAt($0) == nil }) { position in
                                     Button(position.title) {
@@ -945,12 +961,18 @@ struct AppExplorerSettingsView: View {
                     .menuStyle(.borderlessButton)
                     .frame(maxWidth: .infinity)
 
-                    Button {
+                    Menu {
+                        ForEach(ExplorerMediaAction.allCases, id: \.self) { media in
+                            mediaActionButton(media, at: direction, closeEditor: true)
+                        }
+                        Divider()
+                        Button("Open media HUD") {
                         edit {
                             $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: "Media Controls",
                                 action: .mediaControls), at: groupPath + [direction]), at: direction, in: groupPath)
                         }
                         previewEditing = nil
+                        }
                     } label: {
                         ExplorerTileActionLabel(title: "Media controls", detail: "Playback and volume controls",
                             systemImage: "speaker.wave.2.fill", compact: true)
@@ -1222,9 +1244,20 @@ struct AppExplorerSettingsView: View {
                 windowActionButton(action, at: direction)
             }
         } label: { Label("Mac commands", systemImage: "macbook") }
+        Menu("Media actions") {
+            ForEach(ExplorerMediaAction.allCases, id: \.self) { media in mediaActionButton(media, at: direction) }
+        }
         Button("Media controls", systemImage: "speaker.wave.2.fill") {
             edit { $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: "Media Controls", action: .mediaControls),
                 at: groupPath + [direction]), at: direction, in: groupPath) }
+        }
+    }
+
+    private func mediaActionButton(_ media: ExplorerMediaAction, at direction: ExplorerSlot, closeEditor: Bool = false) -> some View {
+        Button(media.title, systemImage: media.symbol) {
+            guard let favorite = BindingAction.media(media).favorite(at: direction) else { return }
+            edit { $0.setFavorite(preservingHotkey(favorite, at: groupPath + [direction]), at: direction, in: groupPath) }
+            if closeEditor { previewEditing = nil }
         }
     }
 
@@ -1411,6 +1444,9 @@ struct AppExplorerSettingsView: View {
         if let selectedLayerID {
             next = baseSettings
             guard let index = next.holdLayers?.firstIndex(where: { $0.id == selectedLayerID }) else { groupError = "This layer was removed. Select another layer."; return false }
+            if next.holdLayers?[index].builtIn == .mediaControls || next.holdLayers?[index].builtIn == .actions {
+                next.holdLayers?[index].builtIn = nil
+            }
             next.holdLayers?[index].favorites = settings.favorites
             next.holdLayers?[index].slotCount = settings.slotCount
             next.holdLayers?[index].actionBindings = settings.actionBindings

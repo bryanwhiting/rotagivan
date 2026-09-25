@@ -125,6 +125,9 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift)
+xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDTemplateTests"
+"$test_dir/HUDTemplateTests"
 xcrun swiftc Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
 "$test_dir/VaultCryptoTests"
 xcrun swiftc "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift \

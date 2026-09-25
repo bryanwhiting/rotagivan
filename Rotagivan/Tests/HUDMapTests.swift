@@ -69,6 +69,28 @@ import Foundation
         precondition(builtIns.hasValidFavorites)
         let decodedBuiltIns = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(builtIns))
         precondition(decodedBuiltIns == builtIns)
+        for template in HUDLayerTemplate.allCases {
+            var custom = AppExplorerSettings()
+            let id = custom.assignTemplate(template, at: .right)!
+            let layer = custom.holdLayers!.first!
+            precondition(layer.builtIn == nil && !layer.favorites.isEmpty && custom.hasValidFavorites)
+            let before = custom
+            precondition(custom.assignTemplate(template, at: .right) == nil && custom == before)
+            let roundTrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(custom))
+            precondition(roundTrip == custom)
+            custom.holdLayers![0].favorites = []
+            precondition(custom.projected(layerID: id).favorites.isEmpty && custom.hudMap()[1].favorites.isEmpty,
+                "Cleared templates must never repopulate")
+        }
+        var legacyMedia = AppExplorerSettings()
+        let mediaID = legacyMedia.assignBuiltIn(.mediaControls, at: .left)!
+        let preset = legacyMedia.projected(layerID: mediaID).favorites
+        precondition(preset.count == 6 && legacyMedia.hudMap()[1].favorites == preset)
+        precondition(legacyMedia.applying(legacyMedia.holdLayers![0], at: []).favorites == preset)
+        precondition(Set(preset.compactMap { BindingAction.from(favorite: $0)?.media }) == Set(ExplorerMediaAction.allCases))
+        // A custom entry in an imported legacy media layer must not be replaced.
+        legacyMedia.holdLayers![0].favorites = [AppExplorerFavorite(direction: .left, name: "Lock", action: .lockScreen)]
+        precondition(legacyMedia.projected(layerID: mediaID).favorites.first?.action == .lockScreen)
         print("HUD map tests passed: nine fixed positions, every cardinal edge, persistence, legacy assignment, gaps and lossless overflow.")
     }
 }

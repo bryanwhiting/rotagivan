@@ -347,6 +347,68 @@ private final class BindingPoster: GestureEventPosting {
         precondition(performed.last == .media(.next),
             "A two-finger tap and swipe accepts the follow-up fingers landing on adjacent reports")
 
+        // A fixed 3x3 world, not eight positions re-packed around each active HUD.
+        controller.dismiss()
+        let mapLayers = HUDLayerPosition.allCases.map { position in
+            var layer = ExplorerHoldLayer.empty(name: position.title)
+            layer.position = position
+            layer.favorites = [AppExplorerFavorite(direction: .up, name: position.title, shortcut: key)]
+            return layer
+        }
+        hud = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "Main map", shortcut: key)],
+            holdLayers: mapLayers, animationsEnabled: false)
+        controller.show(waitingForLift: false)
+        let world = hud.hudMap()
+        for origin in world {
+            controller.switchLayer(origin.layerID)
+            precondition(controller.displayedHUDMap.count == 8)
+            for node in world where node.id != origin.id {
+                precondition(controller.displayedHUDMap.first { $0.id == node.id }?.offset == node.point - origin.point)
+            }
+            for direction in HUDNavigationAction.allCases {
+                controller.switchLayer(origin.layerID)
+                let target = HUDMapPoint.nearestIndex(in: world.map { $0.point - origin.point }, toward: direction)
+                precondition(controller.navigateHUD(direction) == (target != nil))
+                if let target {
+                    precondition(controller.displayedLayerID == world[target].layerID)
+                    // End-of-drag camera coordinates equal the committed map for EVERY face.
+                    let delta = world[target].point - origin.point
+                    for node in world {
+                        let before = (node.point - origin.point) - delta
+                        let after = node.point - world[target].point
+                        precondition(before == after)
+                        let first = HUDMapProjection(x: Double(before.x), y: Double(before.y))
+                        let second = HUDMapProjection(x: Double(after.x), y: Double(after.y))
+                        precondition(first.offsetX == second.offsetX && first.offsetY == second.offsetY && first.scale == second.scale)
+                    }
+                } else { precondition(controller.displayedLayerID == origin.layerID) }
+            }
+        }
+        let rightMap = mapLayers.first { $0.position == .right }!
+        let bottomMap = mapLayers.first { $0.position == .bottom }!
+        let bottomRightMap = mapLayers.first { $0.position == .bottomRight }!
+        controller.switchLayer(rightMap.id)
+        precondition(controller.displayedHUDMap.first { $0.id == bottomMap.id.uuidString }?.offset == HUDMapPoint(x: -1, y: -1),
+            "Bottom stays below Main, not below the active right-hand HUD")
+        func verticalPair(_ y: Double?) -> TrackpadReport {
+            TrackpadReport(contacts: y.map { value in [
+                FingerContact(id: 1, x: 480, y: value, touching: true, confident: true),
+                FingerContact(id: 2, x: 520, y: value, touching: true, confident: true)
+            ] } ?? [], buttonDown: false, scanTime: 0)
+        }
+        controller.process(verticalPair(500))
+        controller.process(verticalPair(600))
+        precondition(controller.displayedOrbitOffset == HUDMapPoint(x: 0, y: -1))
+        precondition(controller.displayedLayerID == rightMap.id)
+        controller.process(verticalPair(nil))
+        precondition(controller.displayedLayerID == bottomRightMap.id,
+            "Swiping down from Right targets Bottom right, not Bottom")
+        controller.process(verticalPair(500))
+        controller.process(verticalPair(700))
+        controller.process(verticalPair(nil))
+        precondition(controller.displayedLayerID == bottomRightMap.id, "An edge swipe cannot wrap")
+        controller.dismiss()
+
         // The same action reference can travel through the unchanged tap page.
         let poster = BindingPoster()
         let engine = GestureEngine(store: store, poster: poster)

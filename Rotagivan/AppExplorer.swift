@@ -114,6 +114,9 @@ extension AppExplorerPresenting {
     var isEditing: Bool { model.isEditing }
     var displayedEntries: [ExplorerEntry] { model.entries }
     var displayedOrbitProgress: Double { model.orbitProgress }
+    var displayedHUDMap: [HUDCarouselPreview] { model.carouselPreviews }
+    var displayedLayerID: UUID? { heldKeys.activeID }
+    var displayedOrbitOffset: HUDMapPoint { model.orbitOffset }
     var displayedLevelDirections: [ExplorerSlot] { model.groupDirections }
 
     init(defaults: UserDefaults = .standard) {
@@ -186,42 +189,14 @@ extension AppExplorerPresenting {
         refreshGroup()
     }
 
-    /// Move through Main HUD and the ordered custom HUD layers without closing
-    /// the panel or changing which app owns the interaction.
+    /// Move within the fixed map without closing the panel or wrapping at its edges.
     @discardableResult func navigateHUD(_ direction: HUDNavigationAction) -> Bool {
         guard isVisible, !isEditing, !model.showingWindowManager,
               !model.showingMediaControls, !model.showingAppWindows else { return false }
-        let settings = configuration()
-        let available = (settings.holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
-        let order: [UUID?] = [nil] + available.map { Optional($0.id) }
-        guard order.count > 1 else { return false }
-        let current = order.firstIndex(where: { $0 == heldKeys.activeID }) ?? 0
-        let positions = settings.resolvedHUDPositions
-        let source = heldKeys.activeID.flatMap { positions[$0] }
-        let origin = (x: source?.x ?? 0, y: source?.y ?? 0)
-        let vector: (x: Int, y: Int)
-        switch direction {
-        case .next: vector = (1, 0)
-        case .previous: vector = (-1, 0)
-        case .above: vector = (0, 1)
-        case .below: vector = (0, -1)
-        }
-        let candidates = order.indices.filter { $0 != current }.compactMap { index -> (index: Int, forward: Int, cross: Int)? in
-            let id = order[index]
-            guard id == nil || id.flatMap({ positions[$0] }) != nil else { return nil }
-            let point = id.flatMap { positions[$0] }
-            let dx = (point?.x ?? 0) - origin.x, dy = (point?.y ?? 0) - origin.y
-            let forward = dx * vector.x + dy * vector.y
-            guard forward > 0 else { return nil }
-            return (index, forward, abs(dx * vector.y - dy * vector.x))
-        }
-        let nearest = candidates.min { lhs, rhs in
-            (lhs.cross, lhs.forward) < (rhs.cross, rhs.forward)
-        }?.index
-        let advances = direction == .next || direction == .above
-        let fallback = (current + (advances ? 1 : -1) + order.count) % order.count
-        let target = nearest ?? fallback
-        switchLayer(order[target])
+        let map = configuration().hudMap(in: sourceBundleID)
+        guard let origin = map.first(where: { $0.layerID == heldKeys.activeID })?.point,
+              let target = HUDMapPoint.nearestIndex(in: map.map { $0.point - origin }, toward: direction) else { return false }
+        switchLayer(map[target].layerID)
         return true
     }
 
@@ -526,35 +501,23 @@ extension AppExplorerPresenting {
             model.carouselPreviews = []
             return
         }
-        let layers = (settings.holdLayers ?? []).filter { $0.isAvailable(in: sourceBundleID) }
-        let order: [(id: UUID?, name: String)] = [(nil, "Main HUD")] + layers.map { (Optional($0.id), $0.name) }
-        guard order.count > 1 else {
+        let map = settings.hudMap(in: sourceBundleID)
+        guard let current = map.firstIndex(where: { $0.layerID == heldKeys.activeID }), map.count > 1 else {
             model.previousLayerName = nil
             model.nextLayerName = nil
             model.carouselPosition = nil
             model.carouselPreviews = []
             return
         }
-        let current = order.firstIndex(where: { $0.id == heldKeys.activeID }) ?? 0
-        model.previousLayerName = order[(current - 1 + order.count) % order.count].name
-        model.nextLayerName = order[(current + 1) % order.count].name
-        model.carouselPosition = "\(current + 1) of \(order.count)"
-        let positions = settings.resolvedHUDPositions
-        let activePosition = heldKeys.activeID.flatMap { positions[$0] }
-        var taken = Set<HUDLayerPosition>()
-        var previews: [HUDCarouselPreview] = []
-        let others: [(id: UUID?, name: String, favorites: [AppExplorerFavorite], count: Int, preferred: HUDLayerPosition?)] =
-            [(nil, "Main HUD", settings.favorites, settings.slotCount ?? 8, activePosition?.opposite)] +
-            layers.map { (Optional($0.id), $0.name, $0.favorites, $0.slotCount ?? settings.slotCount ?? 8, positions[$0.id]) }
-        for layer in others where layer.id != heldKeys.activeID {
-            guard let preferred = layer.preferred else { continue }
-            guard let position = ([preferred] + HUDLayerPosition.allCases).first(where: { !taken.contains($0) }) else { continue }
-            taken.insert(position)
-            previews.append(HUDCarouselPreview(id: layer.id?.uuidString ?? "main", name: layer.name,
-                position: position, slotCount: layer.count,
-                entries: layer.favorites.map { makeEntry($0, depth: 0) }))
-        }
-        model.carouselPreviews = previews
+        model.carouselPreviews = HUDCarouselPreview.makeMap(map, activeLayerID: heldKeys.activeID) { makeEntry($0, depth: 0) }
+        model.previousLayerName = orbitDestination(.previous)?.name
+        model.nextLayerName = orbitDestination(.next)?.name
+        model.carouselPosition = "\(current + 1) of \(map.count)"
+    }
+
+    private func orbitDestination(_ direction: HUDNavigationAction) -> HUDCarouselPreview? {
+        guard let index = HUDMapPoint.nearestIndex(in: model.carouselPreviews.map(\.offset), toward: direction) else { return nil }
+        return model.carouselPreviews[index]
     }
 
     private func loadEntries() {
@@ -781,6 +744,7 @@ extension AppExplorerPresenting {
         model.orbitGeneration += 1
         model.orbitSettling = false
         model.orbitPosition = nil
+        model.orbitOffset = .zero
         model.orbitProgress = 0
         localGestureTimer?.invalidate(); localGestureTimer = nil
         localGestureReports.removeAll()
@@ -901,29 +865,23 @@ extension AppExplorerPresenting {
                     : (dy < 0 ? .twoFingerUp : .twoFingerDown)
                 if let binding = gestures.first(where: { $0.trigger.gesture == trigger }),
                    binding.action.kind == .hudNavigation, let navigation = binding.action.hudNavigation {
-                    let position: HUDLayerPosition
-                    switch navigation {
-                    case .next: position = .right
-                    case .previous: position = .left
-                    case .above: position = .top
-                    case .below: position = .bottom
-                    }
                     let coherent = localGestureFingerOrigins.count == 2 && localGestureFingerOrigins.allSatisfy { id, start in
                         guard let end = localGestureFingerLast[id] else { return false }
                         return (end.x - start.x) * dx + (end.y - start.y) * dy > 0
                     }
                     if coherent, hypot(dx, dy) > 8, model.orbitPosition == nil,
-                       model.carouselPreviews.contains(where: { $0.position == position }) {
-                        model.orbitPosition = position
+                       let target = orbitDestination(navigation) {
+                        model.orbitOffset = target.offset
+                        model.orbitPosition = navigation
                     }
                 }
                 if let locked = model.orbitPosition {
                     let distance: Double
                     switch locked {
-                    case .right: distance = -dx
-                    case .left: distance = dx
-                    case .top: distance = -dy
-                    case .bottom: distance = dy
+                    case .next: distance = -dx
+                    case .previous: distance = dx
+                    case .above: distance = -dy
+                    case .below: distance = dy
                     }
                     var transaction = Transaction(); transaction.disablesAnimations = true
                     withTransaction(transaction) { model.orbitProgress = min(1, max(0, distance / 180)) }
@@ -934,7 +892,7 @@ extension AppExplorerPresenting {
         }
         if let position = model.orbitPosition {
             let commit = model.orbitProgress >= 0.45
-            let target = model.carouselPreviews.first { $0.position == position }
+            let target = orbitDestination(position)
             let generation = model.orbitGeneration
             model.orbitSettling = true
             let animate = configuration().resolvedAnimationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -1499,9 +1457,18 @@ struct ExplorerEntry: Equatable {
 struct HUDCarouselPreview: Identifiable {
     let id: String
     let name: String
-    let position: HUDLayerPosition
+    let offset: HUDMapPoint
     let slotCount: Int
     let entries: [ExplorerEntry]
+
+    static func makeMap(_ map: [HUDMapNode], activeLayerID: UUID?,
+                        makeEntry: (AppExplorerFavorite) -> ExplorerEntry) -> [Self] {
+        guard let origin = map.first(where: { $0.layerID == activeLayerID })?.point else { return [] }
+        return map.filter { $0.layerID != activeLayerID }.map { node in
+            Self(id: node.id, name: node.name, offset: node.point - origin,
+                slotCount: node.slotCount, entries: node.favorites.map(makeEntry))
+        }
+    }
 }
 
 struct ExplorerDeepFan {
@@ -1580,22 +1547,33 @@ private struct HUDOrbitSatellite: View, Equatable {
     }
 }
 
+/// Move the camera across a fixed map. Every face stays front-on; only uniform
+/// scale, brightness and position convey distance. Endpoints are identical to
+/// the next active HUD's coordinates, so committing cannot re-pack the map.
+struct HUDMapProjection {
+    let x: Double
+    let y: Double
+    var scale: Double { 1 / (1 + 0.8 * (x * x + y * y)) }
+    var offsetX: Double { tanh(x * log(2)) * 475 }
+    var offsetY: Double { -tanh(y * log(2)) * 385 }
+    var brightness: Double { -0.18 * (1 - scale) }
+    var opacity: Double { 0.76 + 0.24 * scale }
+}
+
 private struct HUDOrbitTransform: ViewModifier, Animatable {
-    var position: HUDLayerPosition
-    var phase: Double
-    var animatableData: Double {
-        get { phase }
-        set { phase = newValue }
+    var x: Double
+    var y: Double
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(x, y) }
+        set { x = newValue.first; y = newValue.second }
     }
     func body(content: Content) -> some View {
-        let angle = phase * .pi / 2
-        let depth = cos(angle)
+        let projection = HUDMapProjection(x: x, y: y)
         content
-            .scaleEffect(0.56 + 0.44 * depth)
-            .brightness(-0.16 * (1 - depth))
-            .opacity(0.84 + 0.16 * depth)
-            .offset(x: Double(position.x) * sin(angle) * 340,
-                    y: Double(-position.y) * sin(angle) * 240)
+            .scaleEffect(projection.scale)
+            .brightness(projection.brightness)
+            .opacity(projection.opacity)
+            .offset(x: projection.offsetX, y: projection.offsetY)
     }
 }
 
@@ -1621,7 +1599,8 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var previousLayerName: String?
     @Published var nextLayerName: String?
     @Published var carouselPreviews: [HUDCarouselPreview] = []
-    @Published var orbitPosition: HUDLayerPosition?
+    @Published var orbitPosition: HUDNavigationAction?
+    @Published var orbitOffset: HUDMapPoint = .zero
     @Published var orbitProgress = 0.0
     var orbitSettling = false
     var orbitGeneration = 0
@@ -1751,10 +1730,10 @@ struct AppExplorerView: View {
                     .padding(.bottom, 80)
             }
         }
-        .modifier(HUDOrbitTransform(position: model.orbitPosition ?? .right,
-            phase: animates ? -model.orbitProgress : 0))
+        .modifier(HUDOrbitTransform(x: -cameraX, y: -cameraY))
+        .offset(y: showsCarousel ? -38 : 0)
         .frame(width: 950, height: 850)
-        .background { if showsCarousel { carouselBackdrop } }
+        .background { if showsCarousel { carouselBackdrop.offset(y: -38) } }
         .overlay(alignment: .bottom) {
             if showsCarousel {
                 ScrollView(.vertical, showsIndicators: false) {
@@ -1805,12 +1784,15 @@ struct AppExplorerView: View {
         .accessibilityHidden(true)
     }
 
+    private var cameraX: Double { animates ? Double(model.orbitOffset.x) * model.orbitProgress : 0 }
+    private var cameraY: Double { animates ? Double(model.orbitOffset.y) * model.orbitProgress : 0 }
+
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
         HUDOrbitSatellite(preview: preview, theme: model.theme)
             .equatable()
-            .modifier(HUDOrbitTransform(position: preview.position,
-                phase: model.orbitPosition == preview.position && animates ? 1 - model.orbitProgress : 1))
-            .opacity(model.orbitPosition == nil || model.orbitPosition == preview.position ? 1 : 1 - model.orbitProgress)
+            .modifier(HUDOrbitTransform(x: Double(preview.offset.x) - cameraX,
+                y: Double(preview.offset.y) - cameraY))
+            .zIndex(-Double(preview.offset.x * preview.offset.x + preview.offset.y * preview.offset.y))
     }
 
     private var settingsFooter: some View {

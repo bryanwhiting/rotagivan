@@ -29,28 +29,80 @@ enum HUDNavigationAction: String, Codable, CaseIterable {
 }
 
 enum HUDLayerPosition: String, Codable, CaseIterable, Identifiable {
-    case left, right, top, bottom
+    case left, right, top, bottom, topLeft, topRight, bottomLeft, bottomRight
     var id: Self { self }
-    static let legacyOrder: [Self] = [.right, .bottom, .left, .top]
-    var title: String { rawValue.capitalized }
+    // Keep legacy cardinal assignments stable before filling the new corners.
+    static let legacyOrder: [Self] = [.right, .bottom, .left, .top, .topLeft, .topRight, .bottomLeft, .bottomRight]
+    var title: String {
+        switch self {
+        case .topLeft: return "Top left"
+        case .topRight: return "Top right"
+        case .bottomLeft: return "Bottom left"
+        case .bottomRight: return "Bottom right"
+        default: return rawValue.capitalized
+        }
+    }
     var symbol: String {
         switch self {
         case .left: return "arrow.left"
         case .right: return "arrow.right"
         case .top: return "arrow.up"
         case .bottom: return "arrow.down"
+        case .topLeft: return "arrow.up.left"
+        case .topRight: return "arrow.up.right"
+        case .bottomLeft: return "arrow.down.left"
+        case .bottomRight: return "arrow.down.right"
         }
     }
-    var opposite: Self {
+    var x: Int {
         switch self {
-        case .left: return .right
-        case .right: return .left
-        case .top: return .bottom
-        case .bottom: return .top
+        case .left, .topLeft, .bottomLeft: return -1
+        case .right, .topRight, .bottomRight: return 1
+        default: return 0
         }
     }
-    var x: Int { self == .left ? -1 : self == .right ? 1 : 0 }
-    var y: Int { self == .top ? 1 : self == .bottom ? -1 : 0 }
+    var y: Int {
+        switch self {
+        case .top, .topLeft, .topRight: return 1
+        case .bottom, .bottomLeft, .bottomRight: return -1
+        default: return 0
+        }
+    }
+    var point: HUDMapPoint { HUDMapPoint(x: x, y: y) }
+}
+
+/// Coordinates never change when another HUD becomes active. Main is (0, 0).
+struct HUDMapPoint: Equatable, Hashable {
+    var x: Int
+    var y: Int
+    static let zero = Self(x: 0, y: 0)
+    static func - (lhs: Self, rhs: Self) -> Self { Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y) }
+
+    /// Cardinal swipes stay in their row/column, skipping gaps but never wrapping.
+    func distance(in direction: HUDNavigationAction) -> Int? {
+        let forward: Int
+        switch direction {
+        case .next: guard y == 0 else { return nil }; forward = x
+        case .previous: guard y == 0 else { return nil }; forward = -x
+        case .above: guard x == 0 else { return nil }; forward = y
+        case .below: guard x == 0 else { return nil }; forward = -y
+        }
+        return forward > 0 ? forward : nil
+    }
+    static func nearestIndex(in offsets: [Self], toward direction: HUDNavigationAction) -> Int? {
+        offsets.indices.compactMap { index in
+            offsets[index].distance(in: direction).map { (index: index, distance: $0) }
+        }.min { $0.distance < $1.distance }?.index
+    }
+}
+
+struct HUDMapNode: Identifiable {
+    let layerID: UUID?
+    let name: String
+    let point: HUDMapPoint
+    let favorites: [AppExplorerFavorite]
+    let slotCount: Int
+    var id: String { layerID?.uuidString ?? "main" }
 }
 
 /// A destination is independent of the input that invokes it. Physical output
@@ -723,6 +775,17 @@ struct AppExplorerSettings: Codable, Equatable {
             used.insert(position)
         }
         return result
+    }
+    /// The same fixed map drives the live HUD, keyboard navigation and settings preview.
+    /// Imported layers beyond the eight map slots remain saved and shortcut-accessible.
+    func hudMap(in bundleID: String? = nil, includingUnavailable: Bool = false) -> [HUDMapNode] {
+        let positions = resolvedHUDPositions
+        return [HUDMapNode(layerID: nil, name: "Main HUD", point: .zero,
+            favorites: favorites, slotCount: slotCount ?? 8)] + (holdLayers ?? []).compactMap { layer in
+            guard let position = positions[layer.id], includingUnavailable || layer.isAvailable(in: bundleID) else { return nil }
+            return HUDMapNode(layerID: layer.id, name: layer.name, point: position.point,
+                favorites: layer.favorites, slotCount: layer.slotCount ?? slotCount ?? 8)
+        }
     }
     /// Present generated legacy window presets through the ordinary group editor.
     /// The first edit saves explicit slots; an empty saved array stays empty.

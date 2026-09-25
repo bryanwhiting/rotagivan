@@ -404,7 +404,7 @@ struct AppExplorerSettingsView: View {
                     Text("HUD layers").font(.headline)
                     Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Drag a HUD to a position around Main, or choose a position on its card. Two-finger swipes move in that direction.")
+                    Text("Up to nine HUDs: Main stays in the center. Drag layers into the surrounding slots. Swipes follow the rows and columns.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -422,23 +422,31 @@ struct AppExplorerSettingsView: View {
                 } label: {
                     Label("Add HUD layer", systemImage: "plus")
                 }
-                .disabled((baseSettings.holdLayers ?? []).count >= 16 ||
+                .disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
             }
             VStack(spacing: 10) {
-                hudPositionCell(.top)
+                HStack(alignment: .top, spacing: 10) {
+                    hudPositionCell(.topLeft)
+                    hudPositionCell(.top)
+                    hudPositionCell(.topRight)
+                }
                 HStack(alignment: .top, spacing: 10) {
                     hudPositionCell(.left)
                     hudLayerCard(nil, index: 0)
                     hudPositionCell(.right)
                 }
-                hudPositionCell(.bottom)
+                HStack(alignment: .top, spacing: 10) {
+                    hudPositionCell(.bottomLeft)
+                    hudPositionCell(.bottom)
+                    hudPositionCell(.bottomRight)
+                }
             }
             .frame(maxWidth: .infinity)
             let placed = baseSettings.resolvedHUDPositions
             let unplaced = (baseSettings.holdLayers ?? []).filter { placed[$0.id] == nil }
             if !unplaced.isEmpty {
-                Text("Unplaced HUDs · assign a position to show one beside the active HUD")
+                Text("Unplaced HUDs · swap one into the map, or open it with its hotkey")
                     .font(.caption).foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators: true) {
                     HStack(spacing: 10) {
@@ -525,7 +533,7 @@ struct AppExplorerSettingsView: View {
                     Button("Add HUD layer") {
                         creatingLayer = true
                         editingLayer = .empty()
-                    }.disabled((baseSettings.holdLayers ?? []).count >= 16 ||
+                    }.disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                         (scopeTitle != nil && baseSettings.holdLayers == nil))
                     Button {
                         importingBookmarks = true
@@ -1803,26 +1811,10 @@ struct ExplorerHUDSettingsPreview: View {
             model.carouselPreviews = []
             return
         }
-        let layers = rootSettings.holdLayers ?? []
-        let positions = rootSettings.resolvedHUDPositions
-        let activePosition = selectedLayerID.flatMap { positions[$0] }
-        var taken = Set<HUDLayerPosition>()
-        let candidates: [(id: UUID?, name: String, favorites: [AppExplorerFavorite], count: Int, preferred: HUDLayerPosition?)] =
-            [(nil, "Main HUD", rootSettings.favorites, rootSettings.slotCount ?? 8, activePosition?.opposite)] +
-            layers.map { (Optional($0.id), $0.name, $0.favorites,
-                $0.slotCount ?? rootSettings.slotCount ?? 8, positions[$0.id]) }
-        model.carouselPreviews = candidates.compactMap { candidate in
-            guard candidate.id != selectedLayerID, let preferred = candidate.preferred,
-                  let position = ([preferred] + HUDLayerPosition.allCases).first(where: { !taken.contains($0) }) else {
-                return nil
+        model.carouselPreviews = HUDCarouselPreview.makeMap(rootSettings.hudMap(includingUnavailable: true),
+            activeLayerID: selectedLayerID) {
+                AppExplorerController.makeEntry($0, depth: 0, dictionary: dictionary)
             }
-            taken.insert(position)
-            return HUDCarouselPreview(id: candidate.id?.uuidString ?? "main", name: candidate.name,
-                position: position, slotCount: candidate.count,
-                entries: candidate.favorites.map {
-                    AppExplorerController.makeEntry($0, depth: 0, dictionary: dictionary)
-                })
-        }
     }
 }
 

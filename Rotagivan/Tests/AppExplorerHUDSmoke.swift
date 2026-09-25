@@ -22,6 +22,12 @@ import AppKit
         var bottom = ExplorerHoldLayer.empty(name: "Focus")
         bottom.position = .bottom
         bottom.favorites = [favorite(.up, "Timer"), favorite(.down, "Music")]
+        let extraLayers = [HUDLayerPosition.left, .topLeft, .topRight, .bottomLeft, .bottomRight].map { position in
+            var layer = ExplorerHoldLayer.empty(name: position.title)
+            layer.position = position
+            layer.favorites = [favorite(.up, position.title), favorite(.right, "Browse"), favorite(.down, "Notes")]
+            return layer
+        }
         let deepChoices = [
             AppExplorerFavorite(direction: ExplorerSlot.slots(3)[0], name: "Left third",
                 windowPlacement: ExplorerWindowPlacement(direction: .left, layout: .thirds)),
@@ -36,7 +42,7 @@ import AppKit
             ActionBinding(trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: 49, modifiers: 0, keyLabel: "Space")),
                 action: .media(.mute))
         ], favorites: [deepLeft, favorite(.right, "Search")],
-            holdLayers: [right, top, bottom])
+            holdLayers: [right, top, bottom] + extraLayers)
         controller.configuration = { settings }
         controller.contextIsValid = { true }
         controller.show(waitingForLift: false)
@@ -108,8 +114,7 @@ import AppKit
         controller.dismiss()
         precondition(!controller.isVisible)
 
-        // Vertical swipes remain useful even when the next HUD has only a
-        // horizontal map position: they fall back to the same cyclic stack.
+        // Missing neighbors are boundaries, not a cyclic fallback.
         settings.holdLayers = [right]
         controller.show(waitingForLift: false)
         func pair(_ y: Double?) -> TrackpadReport {
@@ -121,9 +126,9 @@ import AppKit
         controller.process(pair(500))
         controller.process(pair(620))
         controller.process(pair(nil))
-        precondition(controller.displayedEntries.contains { $0.name == "Mail" },
-            "A two-finger downward swipe must navigate the HUD even without a layer below")
+        precondition(controller.displayedLayerID == nil,
+            "A downward edge swipe must stay on Main when no layer is below")
         controller.dismiss()
-        print("Native App Explorer HUD rendered orbit phases and navigated all four directions, captured vertical two-finger navigation, and rendered a held three-choice deep fan without activating an app.")
+        print("Native nine-HUD map rendered orbit phases, navigated cardinal neighbors, respected missing-neighbor boundaries, and rendered a held deep fan.")
     }
 }

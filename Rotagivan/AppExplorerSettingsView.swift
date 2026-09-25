@@ -595,6 +595,7 @@ struct AppExplorerSettingsView: View {
                 ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
                     dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
                     layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name,
+                    rootSettings: baseSettings, selectedLayerID: selectedLayerID,
                     selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
                     onDrag: { source, target in
                         if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
@@ -1728,6 +1729,8 @@ struct ExplorerHUDSettingsPreview: View {
     let dictionary: [NamedHotkey]
     let groupPath: [ExplorerSlot]
     let layerName: String?
+    var rootSettings: AppExplorerSettings? = nil
+    var selectedLayerID: UUID? = nil
     @Binding var selection: ExplorerSlot
     var onBack: () -> Void
     var onDrag: (ExplorerSlot, ExplorerSlot?) -> Void
@@ -1761,6 +1764,8 @@ struct ExplorerHUDSettingsPreview: View {
             .onChange(of: dictionary) { _, _ in refresh() }
             .onChange(of: groupPath) { _, _ in refresh() }
             .onChange(of: layerName) { _, _ in refresh() }
+            .onChange(of: rootSettings) { _, _ in refresh() }
+            .onChange(of: selectedLayerID) { _, _ in refresh() }
             .onChange(of: selection) { _, selected in model.selected = selected }
     }
 
@@ -1770,6 +1775,7 @@ struct ExplorerHUDSettingsPreview: View {
         model.mode = .favorites
         model.slotCount = settings.count(at: groupPath)
         model.layerName = layerName
+        refreshCarousel()
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         model.groupDirections = groupPath
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
@@ -1789,6 +1795,33 @@ struct ExplorerHUDSettingsPreview: View {
                 AppExplorerController.makeEntry($0, depth: groupPath.count, dictionary: dictionary)
             }
             model.message = "Select a tile to edit · drag to move or swap"
+        }
+    }
+
+    private func refreshCarousel() {
+        guard let rootSettings else {
+            model.carouselPreviews = []
+            return
+        }
+        let layers = rootSettings.holdLayers ?? []
+        let positions = rootSettings.resolvedHUDPositions
+        let activePosition = selectedLayerID.flatMap { positions[$0] }
+        var taken = Set<HUDLayerPosition>()
+        let candidates: [(id: UUID?, name: String, favorites: [AppExplorerFavorite], count: Int, preferred: HUDLayerPosition?)] =
+            [(nil, "Main HUD", rootSettings.favorites, rootSettings.slotCount ?? 8, activePosition?.opposite)] +
+            layers.map { (Optional($0.id), $0.name, $0.favorites,
+                $0.slotCount ?? rootSettings.slotCount ?? 8, positions[$0.id]) }
+        model.carouselPreviews = candidates.compactMap { candidate in
+            guard candidate.id != selectedLayerID, let preferred = candidate.preferred,
+                  let position = ([preferred] + HUDLayerPosition.allCases).first(where: { !taken.contains($0) }) else {
+                return nil
+            }
+            taken.insert(position)
+            return HUDCarouselPreview(id: candidate.id?.uuidString ?? "main", name: candidate.name,
+                position: position, slotCount: candidate.count,
+                entries: candidate.favorites.map {
+                    AppExplorerController.makeEntry($0, depth: 0, dictionary: dictionary)
+                })
         }
     }
 }

@@ -1454,7 +1454,7 @@ final class ExplorerPanel: NSPanel {
     }
 }
 
-struct ExplorerEntry {
+struct ExplorerEntry: Equatable {
     var direction: ExplorerSlot
     var bundleID: String?
     var name: String
@@ -1533,7 +1533,7 @@ private struct ExplorerDeepFanSector: Shape {
 }
 
 /// Both faces use the same HUD renderer; only their position on the orbit differs.
-private struct HUDOrbitSatellite: View {
+private struct HUDOrbitSatellite: View, Equatable {
     let preview: HUDCarouselPreview
     let theme: ExplorerTheme
     @StateObject private var model: ExplorerModel
@@ -1541,24 +1541,35 @@ private struct HUDOrbitSatellite: View {
     init(preview: HUDCarouselPreview, theme: ExplorerTheme) {
         self.preview = preview
         self.theme = theme
+        _model = StateObject(wrappedValue: Self.prepare(preview: preview, theme: theme))
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.theme == rhs.theme && lhs.preview.id == rhs.preview.id &&
+        lhs.preview.name == rhs.preview.name && lhs.preview.slotCount == rhs.preview.slotCount &&
+        lhs.preview.entries == rhs.preview.entries
+    }
+
+    // StateObject evaluates this lazily, once per satellite identity, not once
+    // per gesture update. The orbit transform remains outside this cached face.
+    private static func prepare(preview: HUDCarouselPreview, theme: ExplorerTheme) -> ExplorerModel {
         let prepared = ExplorerModel()
         prepared.entries = preview.entries
         prepared.theme = theme
         prepared.slotCount = preview.slotCount
         prepared.layerName = preview.name
         prepared.animationsEnabled = false
-        _model = StateObject(wrappedValue: prepared)
+        return prepared
     }
     var body: some View {
         AnyView(AppExplorerView(model: model, onSelect: { _ in }, onCancel: {},
             forceReduceMotion: true, isPreview: true, showsCarousel: false))
             .frame(width: 470, height: 520)
             .allowsHitTesting(false)
-            .onAppear(perform: refresh)
             .onChange(of: theme) { _, _ in refresh() }
             .onChange(of: preview.name) { _, _ in refresh() }
             .onChange(of: preview.slotCount) { _, _ in refresh() }
-            .onChange(of: preview.entries.map { $0.name }) { _, _ in refresh() }
+            .onChange(of: preview.entries) { _, _ in refresh() }
     }
     private func refresh() {
         model.entries = preview.entries
@@ -1796,6 +1807,7 @@ struct AppExplorerView: View {
 
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
         HUDOrbitSatellite(preview: preview, theme: model.theme)
+            .equatable()
             .modifier(HUDOrbitTransform(position: preview.position,
                 phase: model.orbitPosition == preview.position && animates ? 1 - model.orbitProgress : 1))
             .opacity(model.orbitPosition == nil || model.orbitPosition == preview.position ? 1 : 1 - model.orbitProgress)

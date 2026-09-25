@@ -330,6 +330,18 @@ Do not run both apps together: each would receive and respond to the same touch 
 
 ## Configuration and defaults
 
+### Shared action picker
+
+HUD assignments, tile editors and gesture controls use one searchable action
+modal. Browse shortcuts, macros, installed apps, Mac/window commands, media,
+HUD layers and pointer actions. Each result includes a description. Search
+supports multiple words and descriptions; use up/down to select, Enter or
+**Use action** to confirm, and Escape to cancel. Browsing never executes an
+action or changes the assignment. Record a keystroke or enter a website in the
+same picker, or use the native file browser for apps outside scanned folders.
+Tile-specific grouping, deep swipes and app-window options remain in the tile
+editor instead of being mixed into the action catalog.
+
 ### Editable HUD templates
 
 In HUD settings, choose **Add HUD → Templates → Mac Actions / Media Controls /

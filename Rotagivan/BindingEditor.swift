@@ -60,141 +60,31 @@ struct BindingActionPicker: View {
     @Binding var action: BindingAction
     var title = "Action"
     var allowPointerActions = true
-    @State private var recording = false
-    @State private var enteringURL = false
-    @State private var urlDraft = "https://"
+    @State private var presenting = false
 
     var body: some View {
-        Menu {
-            Section("Common Mac shortcuts") {
-                ForEach(CommonMacShortcut.all, id: \.name) { preset in
-                    Button(preset.action.title) { action = preset.action }.help(preset.action.description)
-                }
+        Button { presenting = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: action.pickerSymbol).foregroundStyle(Color.accentColor)
+                    .frame(width: 28, height: 28)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                Text(action.isValid ? dictionary.title(for: action) : "Choose action…")
+                    .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 6)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            }.padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.1)))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .help("Search and choose an action")
+            .accessibilityLabel("\(title): \(dictionary.title(for: action)). Choose action")
+            .accessibilityIdentifier("binding-action-picker")
+            .sheet(isPresented: $presenting) {
+                ActionPickerModal(current: action, dictionary: dictionary, layers: hudLayers,
+                    destinations: hudDestinations, allowPointerActions: allowPointerActions,
+                    onSelect: { action = $0; presenting = false }, onCancel: { presenting = false })
             }
-            Section("Keystrokes") {
-                Button("Record keystroke…", systemImage: "keyboard") { recording = true }
-            }
-            Section("Macros") {
-                ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
-                    Button("\(entry.name) · \(entry.summary)") { action = .macro(entry) }
-                }
-            }
-            Section("HUD layers") {
-                ForEach(HUDNavigationAction.allCases, id: \.self) { navigation in
-                    Button(navigation.title, systemImage: navigation.symbol) { action = .hudNavigation(navigation) }
-                        .help(BindingAction.hudNavigation(navigation).description)
-                }
-                if hudDestinations.isEmpty {
-                    Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
-                    ForEach(hudLayers) { layer in
-                        Button(layer.name, systemImage: "square.stack.3d.up") { action = .hudLayer(layer) }
-                    }
-                }
-                ForEach(hudDestinations) { destination in
-                    Button(destination.title, systemImage: "square.stack.3d.up") {
-                        action = .hudDestination(destination)
-                    }
-                }
-            }
-            Section("Apps and websites") {
-                Button("Choose application…", systemImage: "app") { chooseApp() }
-                Button("Open URL…", systemImage: "globe") { enteringURL = true }
-            }
-            Section("Mac and window commands") {
-                Button("Media Controls", systemImage: "speaker.wave.2.fill") {
-                    action = .command(.mediaControls)
-                }
-                ForEach(AppExplorerAction.macOSCommands + AppExplorerAction.windowCommands, id: \.self) { command in
-                    Button(command.title, systemImage: command.symbol) { action = .command(command) }.help(command.description)
-                }
-                ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
-                    Menu("Place window · \(layout.title)") {
-                        ForEach(SwipeDirection.allCases, id: \.self) { direction in
-                            let placement = ExplorerWindowPlacement(direction: direction, layout: layout)
-                            Button(placement.title) { action = .windowPlacement(placement) }
-                        }
-                    }
-                }
-            }
-            Section("Media") {
-                ForEach(ExplorerMediaAction.allCases, id: \.self) { media in
-                    Button(media.title, systemImage: media.symbol) { action = .media(media) }.help(BindingAction.media(media).description)
-                }
-            }
-            if allowPointerActions {
-                Section("Pointer and HUD") {
-                    ForEach([TapAction.leftClick, .doubleLeftClick, .tripleLeftClick, .rightClick,
-                             .appExplorer, .windowManager, .enter, .optionF19], id: \.self) { tap in
-                        Button(tap.title) { action = .tap(tap) }.help(BindingAction.tap(tap).description)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: symbol).frame(width: 16)
-                Text(action.isValid ? dictionary.title(for: action) : "Choose action…").lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 9).frame(height: 28)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.11)))
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .help(action.description)
-        .accessibilityLabel("\(title): \(dictionary.title(for: action)). \(action.description)")
-        .popover(isPresented: $recording) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Keystroke").font(.headline)
-                Text("Press the combination this action should send.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ShortcutRecorder(title: "Record keystroke…") { shortcut in
-                    action = .keystroke(shortcut)
-                    recording = false
-                }.frame(width: 260, height: 28)
-            }.padding(16)
-        }
-        .popover(isPresented: $enteringURL) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Open URL").font(.headline)
-                TextField("https://example.com", text: $urlDraft).textFieldStyle(.roundedBorder)
-                HStack {
-                    Button("Cancel") { enteringURL = false }
-                    Spacer()
-                    Button("Use URL") {
-                        action = .openURL(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines))
-                        enteringURL = false
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(URL(string: urlDraft).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil } == nil)
-                }
-            }.padding(16).frame(width: 330)
-        }
-    }
-
-    private var symbol: String {
-        switch action.kind {
-        case .keystroke, .macro: return "keyboard"
-        case .hudLayer: return "square.stack.3d.up"
-        case .hudNavigation: return action.hudNavigation?.symbol ?? "square.stack.3d.up"
-        case .openApp: return "app"
-        case .openURL: return "globe"
-        case .command: return action.command?.symbol ?? "macwindow"
-        case .media: return action.media?.symbol ?? "speaker.wave.2"
-        case .windowPlacement: return "rectangle.split.2x2"
-        case .tap: return "hand.tap"
-        }
-    }
-
-    private func chooseApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.applicationBundle]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url,
-              let app = ExplorerApplicationCatalog.application(at: url) else { return }
-        action = .openApp(bundleID: app.bundleID, name: app.name)
     }
 }
 

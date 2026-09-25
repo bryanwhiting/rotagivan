@@ -855,130 +855,27 @@ struct AppExplorerSettingsView: View {
                     }
                 }
 
-                Text("ACTIONS")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    Menu {
-                        Button("Choose app…", systemImage: "app") {
-                            editingApplicationPath = groupPath + [direction]
-                        }
-                        Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") {
-                            editingURLPath = groupPath + [direction]
-                        }
-                        if let favorite, favorite.bundleID != nil {
-                            Divider()
-                            Toggle("Show this app’s windows", isOn: Binding(get: {
-                                favorite.showsWindows == true
-                            }, set: { enabled in
-                                var updated = favorite
-                                updated.showsWindows = enabled
-                                edit { $0.setFavorite(updated, at: direction, in: groupPath) }
-                            }))
-                        }
-                    } label: {
-                        ExplorerTileActionLabel(title: "Apps & websites", detail: "Launch an app or URL", systemImage: "app.badge", showsMenu: true)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .frame(maxWidth: .infinity)
-
-                    Button {
-                        editingShortcutPath = groupPath + [direction]
-                    } label: {
-                        ExplorerTileActionLabel(title: "Macros & keystrokes", detail: "Keys, shortcuts, sequences", systemImage: "keyboard")
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
+                if let favorite, favorite.bundleID != nil {
+                    Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in
+                        var updated = favorite; updated.showsWindows = enabled
+                        edit { $0.setFavorite(updated, at: direction, in: groupPath) }
+                    }))
                 }
-
-                HStack(spacing: 10) {
-                    Menu {
-                        ForEach(ExplorerReservedGroup.allCases) { group in
-                            Button(group.title, systemImage: group.symbol) {
-                                let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
-                                    at: groupPath + [direction])
-                                edit { $0.setFavorite(tile, at: direction, in: groupPath) }
-                                previewEditing = nil
-                            }
-                            .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth &&
-                                (group != .windowManager || windowManagerOnly))
+                Menu("Groups & nested HUDs") {
+                    ForEach(ExplorerReservedGroup.allCases) { group in
+                        Button(group.title, systemImage: group.symbol) {
+                            let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
+                                at: groupPath + [direction])
+                            edit { $0.setFavorite(tile, at: direction, in: groupPath) }
+                            previewEditing = nil
                         }
-                        Divider()
-                        Button("Create HUD layer…", systemImage: "square.3.layers.3d") {
-                            editingGroupPath = groupPath + [direction]
-                        }
-                        .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
-                    } label: {
-                        ExplorerTileActionLabel(title: "HUD layers", detail: "Open or create another layer", systemImage: "square.3.layers.3d", showsMenu: true)
+                        .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth &&
+                            (group != .windowManager || windowManagerOnly))
                     }
-                    .menuStyle(.borderlessButton)
-                    .frame(maxWidth: .infinity)
-
-                    Menu {
-                        Menu("Resize window") {
-                            windowActionButton(.maximize, at: direction, closeEditor: true)
-                            Divider()
-                            ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
-                                Menu(layout.title) {
-                                    ForEach(SwipeDirection.allCases, id: \.self) { placementDirection in
-                                        let placement = ExplorerWindowPlacement(direction: placementDirection, layout: layout)
-                                        Button(placement.title) {
-                                            edit {
-                                                $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: placement.title,
-                                                    windowPlacement: placement), at: groupPath + [direction]), at: direction, in: groupPath)
-                                            }
-                                            previewEditing = nil
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Menu("Full screen") {
-                            windowActionButton(.toggleFullScreen, at: direction, closeEditor: true)
-                            windowActionButton(.exitFullScreen, at: direction, closeEditor: true)
-                        }
-                        Divider()
-                        windowActionButton(.minimize, at: direction, closeEditor: true)
-                        windowActionButton(.closeWindow, at: direction, closeEditor: true)
-                    } label: {
-                        ExplorerTileActionLabel(title: "Window management", detail: "Move, resize, full screen", systemImage: "macwindow", showsMenu: true)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .frame(maxWidth: .infinity)
-                }
-
-                HStack(spacing: 10) {
-                    Menu {
-                        ForEach(AppExplorerAction.macOSCommands, id: \.self) { action in
-                            windowActionButton(action, at: direction, closeEditor: true)
-                        }
-                    } label: {
-                        ExplorerTileActionLabel(title: "Mac commands", detail: "Mission Control, desktops, app windows",
-                            systemImage: "macbook", showsMenu: true)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .frame(maxWidth: .infinity)
-
-                    Menu {
-                        ForEach(ExplorerMediaAction.allCases, id: \.self) { media in
-                            mediaActionButton(media, at: direction, closeEditor: true)
-                        }
-                        Divider()
-                        Button("Open media HUD") {
-                        edit {
-                            $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: "Media Controls",
-                                action: .mediaControls), at: groupPath + [direction]), at: direction, in: groupPath)
-                        }
-                        previewEditing = nil
-                        }
-                    } label: {
-                        ExplorerTileActionLabel(title: "Media controls", detail: "Playback and volume controls",
-                            systemImage: "speaker.wave.2.fill", compact: true)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
+                    Divider()
+                    Button("Create HUD layer…", systemImage: "square.3.layers.3d") {
+                        editingGroupPath = groupPath + [direction]
+                    }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
                 }
 
                 if favorite != nil {

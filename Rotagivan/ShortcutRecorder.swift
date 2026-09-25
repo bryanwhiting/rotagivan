@@ -62,6 +62,7 @@ extension RecordedShortcut {
 struct TapActionEditor: View {
     @Environment(\.hotkeyDictionary) private var dictionary
     @Environment(\.hudActionLayers) private var hudLayers
+    @Environment(\.hudActionDestinations) private var hudDestinations
     var title: String
     @Binding var action: TapAction
     @Binding var shortcut: RecordedShortcut?
@@ -89,29 +90,14 @@ struct TapActionEditor: View {
                     shortcut = recorded
                     action = .shortcut
                 }.frame(maxWidth: .infinity).frame(height: 26)
+                if !physicalKeysOnly {
+                    Button { showActionCatalog = true } label: {
+                        Image(systemName: "magnifyingglass").frame(width: 26, height: 26)
+                    }.buttonStyle(.plain).help("Search and choose an action")
+                        .accessibilityLabel("Choose action for \(title)")
+                        .accessibilityIdentifier("gesture-action-picker")
+                }
                 Menu {
-                    if !physicalKeysOnly {
-                        Button("Choose any action…") { showActionCatalog = true }
-                        Divider()
-                    }
-                    if !physicalKeysOnly && !dictionary.isEmpty {
-                        Menu("Macros") {
-                            ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
-                                Button("\(entry.name) (\(entry.summary))") { shortcut = .macro(entry); action = .shortcut }
-                            }
-                        }
-                        Divider()
-                    }
-                    if !physicalKeysOnly && (!keyboardOnly || !hudLayers.isEmpty) {
-                        Menu("HUD layer") {
-                            if !keyboardOnly {
-                                Button("Favorites") { action = .appExplorer; shortcut = nil }
-                            }
-                            ForEach(hudLayers) { layer in
-                                Button(layer.name) { shortcut = .hudLayer(layer); action = .shortcut }
-                            }
-                        }
-                    }
                     Button("Set shortcut manually…") {
                         if action == .shortcut, let shortcut, shortcut.isPhysicalShortcut { draft = shortcut }
                         else if action == .optionF19 { draft = RecordedShortcut(keyCode: 80, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), keyLabel: "F19") }
@@ -120,15 +106,7 @@ struct TapActionEditor: View {
                     }
                     Divider()
                     if !keyboardOnly {
-                        Button("Left click") { choose(.leftClick) }
-                        Button("Double left click") { choose(.doubleLeftClick) }
-                        Button("Triple left click") { choose(.tripleLeftClick) }
-                        Button("Right click") { choose(.rightClick) }
-                    }
-                    if !keyboardOnly {
-                    Button("HUD") { choose(.appExplorer) }
-                    Button("Window Manager") { choose(.windowManager) }
-                    Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
+                        Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                     }
                 } label: {
                     Image(systemName: "chevron.down")
@@ -140,7 +118,7 @@ struct TapActionEditor: View {
                     .controlSize(.regular).frame(width: 32, height: 26)
                     .accessibilityLabel("\(title) action options")
                     .accessibilityIdentifier("gesture-action-menu")
-                    .help("Choose a HUD layer, keybinding, macro, or tap action")
+                    .help("Set a shortcut manually or clear this assignment")
             }
         }
         .popover(isPresented: $showManual) {
@@ -169,23 +147,17 @@ struct TapActionEditor: View {
                 }
             }.padding(18).frame(width: 300)
         }
-        .popover(isPresented: $showActionCatalog) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Choose action").font(.headline)
-                BindingActionPicker(action: Binding(get: {
-                    if action == .shortcut, let shortcut { return .from(shortcut: shortcut) }
-                    return .tap(action)
-                }, set: { selected in
-                    if selected.kind == .tap {
-                        choose(selected.tap ?? .none)
-                    } else {
+        .sheet(isPresented: $showActionCatalog) {
+            ActionPickerModal(current: action == .shortcut ? shortcut.map { .from(shortcut: $0) } ?? .tap(.none) : .tap(action),
+                dictionary: dictionary, layers: hudLayers, destinations: hudDestinations,
+                allowPointerActions: !keyboardOnly, onSelect: { selected in
+                    if selected.kind == .tap { choose(selected.tap ?? .none) }
+                    else {
                         action = .shortcut
                         shortcut = selected.kind == .keystroke ? selected.shortcut : .assigned(selected)
                     }
                     showActionCatalog = false
-                }), allowPointerActions: !keyboardOnly)
-                .frame(width: 290)
-            }.padding(16)
+                }, onCancel: { showActionCatalog = false })
         }
     }
 

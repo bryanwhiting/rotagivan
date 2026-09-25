@@ -19,7 +19,7 @@ xcrun swiftc "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/Li
 "$test_dir/LiveCursorPreviewTests" "$test_dir"
 for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
   xcrun swiftc "${common[@]}" Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift \
-    Rotagivan/BindingEditor.swift Rotagivan/ExplorerApplicationCatalog.swift \
+    Rotagivan/ActionPicker.swift Rotagivan/BindingEditor.swift Rotagivan/ExplorerApplicationCatalog.swift \
     "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
@@ -119,12 +119,15 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/WindowTiling.swift \
   Rotagivan/ExplorerAppearance.swift \
   Rotagivan/MediaControls.swift \
-  Rotagivan/BindingEditor.swift \
+  Rotagivan/ActionPicker.swift Rotagivan/BindingEditor.swift \
   Rotagivan/HotkeyOrganizer.swift \
   Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/HIDManager.swift)
+xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/ActionPickerTests.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionPickerTests"
+"$test_dir/ActionPickerTests" "$test_dir"
 xcrun swiftc "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDTemplateTests"
 "$test_dir/HUDTemplateTests"

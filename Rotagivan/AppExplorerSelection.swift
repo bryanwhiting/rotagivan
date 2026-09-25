@@ -117,6 +117,16 @@ struct AppExplorerRecents {
         identifiers.insert(identifier, at: 0)
         identifiers = Array(identifiers.prefix(64))
     }
+    /// Pin the foreground application, then use MRU order without duplicating it.
+    func activeFirst(available: [String], active: String?, limit: Int = 8) -> [String] {
+        let count = max(0, min(16, limit))
+        guard count > 0 else { return [] }
+        guard let active, available.contains(active) else {
+            return ordered(available: available, excluding: [], limit: count)
+        }
+        return [active] + ordered(available: available, excluding: [active], limit: count - 1)
+    }
+
     func ordered(available: [String], excluding: Set<String>, limit: Int = 8) -> [String] {
         let allowed = Set(available).subtracting(excluding)
         var seen = Set<String>()

@@ -64,7 +64,7 @@ struct ReservedGroupPreview: View {
                     }
                 }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             } else {
-                Text("This HUD layer fills itself with running apps. The most recent app starts on the left, followed by the top-left, then clockwise. The current app is excluded. Tap the center to return to the previous layer.")
+                Text("This HUD layer fills itself with running apps. The active app is outlined on the left. Other recent apps start at top-left and continue clockwise. Tap the center to return to the previous layer.")
                 Text("Its contents update on this Mac. Assign it from any tile, then edit that HUD layer to change its capacity or name.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -605,7 +605,7 @@ struct AppExplorerSettingsView: View {
                         if builtIn == .windowManager {
                             WindowManagerSettingsView(store: store)
                         } else if builtIn == .recentApps {
-                            Text("Filled automatically with your other running apps, in recent-use order.")
+                            Text("The active app is outlined on the left. Other recent apps start at top-left and continue clockwise.")
                         } else {
                             Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
                         }
@@ -700,7 +700,7 @@ struct AppExplorerSettingsView: View {
             .onPreferenceChange(ExplorerSlotFramesKey.self) { slotFrames = $0 }
             }
             Text(isRecentGroup
-                ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
+                ? "The active app is outlined on the left. Other recent apps start at top-left and continue clockwise. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
                 : "Click a tile to edit it right there. Drag to rearrange, or choose Send to HUD layer to move it across layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -1412,7 +1412,7 @@ struct AppExplorerSettingsView: View {
         return VStack(spacing: 5) {
             Text(direction.title).font(.caption).foregroundStyle(.secondary)
             Text("\(rank)").font(.title2.weight(.semibold)).foregroundStyle(.teal)
-            Text(rank == 1 ? "Most recent" : "Recent app \(rank)").font(.caption)
+            Text(rank == 1 ? "Active app" : "Recent app \(rank - 1)").font(.caption)
         }.frame(maxWidth: .infinity).frame(height: 88)
             .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
     }
@@ -1823,8 +1823,11 @@ struct ExplorerHUDSettingsPreview: View {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             }
             model.entries = order.enumerated().map { index, slot in
-                ExplorerEntry(direction: slot, bundleID: nil, name: index == 0 ? "Most recent app" : "Recent app \(index + 1)",
+                var entry = ExplorerEntry(direction: slot, bundleID: nil,
+                    name: index == 0 ? "Active app" : "Recent app \(index)",
                     icon: NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil), url: nil)
+                entry.isActiveApp = index == 0
+                return entry
             }
             model.message = "Recent apps fill these positions at runtime · center goes back"
         } else {

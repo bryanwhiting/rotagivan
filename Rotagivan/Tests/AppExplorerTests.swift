@@ -233,6 +233,15 @@ import Foundation
             precondition(input.process(invalidReport) == .cancel)
             precondition(input.process(report()) == .waiting)
         }
+        let activeRecents = AppExplorerRecents(["recent", "active", "older", "closed"])
+        precondition(activeRecents.activeFirst(available: ["active", "recent", "older"], active: "active") == ["active", "recent", "older"])
+        precondition(activeRecents.activeFirst(available: ["recent", "older"], active: "closed") == ["recent", "older"])
+        precondition(activeRecents.activeFirst(available: ["active", "recent"], active: "active", limit: 1) == ["active"])
+        precondition(activeRecents.activeFirst(available: ["active"], active: "active", limit: 0).isEmpty)
+        let clockwise = ExplorerSlot.slots(8).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        precondition(clockwise == [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft])
         var recents = AppExplorerRecents(["b","a","b",""])
         recents.record("c"); recents.record("a")
         precondition(recents.identifiers == ["a","c","b"])

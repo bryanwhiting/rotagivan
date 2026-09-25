@@ -695,15 +695,21 @@ extension AppExplorerPresenting {
     private func recentEntries(slotCount: Int) -> [ExplorerEntry] {
         let running = workspace.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated &&
-            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
+            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
             $0.bundleIdentifier != "local.rotagivan"
         }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
-        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [], limit: slotCount)
+        let active = running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier
+        let ordered = recents.activeFirst(available: running.compactMap(\.bundleIdentifier), active: active, limit: slotCount)
         let slots = ExplorerSlot.slots(slotCount).sorted { a, b in
             (a.angle + 180).truncatingRemainder(dividingBy: 360) < (b.angle + 180).truncatingRemainder(dividingBy: 360)
         }
-        return ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
-            ExplorerEntry(direction: slots[$0.offset], app: $0.element)
+        return ordered.compactMap { id in
+            running.first { $0.bundleIdentifier == id && $0.processIdentifier == sourcePID }
+                ?? running.first { $0.bundleIdentifier == id }
+        }.enumerated().map {
+            var entry = ExplorerEntry(direction: slots[$0.offset], app: $0.element)
+            entry.isActiveApp = $0.element.processIdentifier == sourcePID
+            return entry
         }
     }
 
@@ -1462,6 +1468,7 @@ final class ExplorerPanel: NSPanel {
 }
 
 struct ExplorerEntry: Equatable {
+    var isActiveApp = false
     var direction: ExplorerSlot
     var bundleID: String?
     var name: String
@@ -1999,11 +2006,19 @@ struct AppExplorerView: View {
                         accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
                     shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
                 }
+                if entry?.isActiveApp == true {
+                    shape.stroke(Color.orange, lineWidth: 2)
+                        .allowsHitTesting(false)
+                }
                 VStack(spacing: 3) {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
                         Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: model.theme.isFloating ? .semibold : .medium))
                             .lineLimit(entry.shortcut == nil ? 2 : 3).multilineTextAlignment(.center)
+                        if entry.isActiveApp {
+                            Text("ACTIVE").font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(Color.orange)
+                        }
                         if entry.hasDeepChoices {
                             Image(systemName: "chevron.forward.2")
                                 .font(.system(size: 7, weight: .bold)).foregroundStyle(accent)
@@ -2029,7 +2044,7 @@ struct AppExplorerView: View {
             isPreview ? [direction: $0] : [:]
         }
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
-        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")")
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")\(entry?.isActiveApp == true ? ", Active app" : "")")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .animation(feedback, value: selected)
     }
@@ -2121,6 +2136,9 @@ struct AppExplorerView: View {
                 if let entry {
                     entrySymbol(entry)
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(entry.shortcut == nil ? 1 : 2)
+                    if entry.isActiveApp {
+                        Text("ACTIVE").font(.system(size: 9, weight: .bold)).foregroundStyle(Color.orange)
+                    }
                     if let shortcut = entry.shortcut {
                         if !entry.name.hasSuffix("(\(shortcut.readableCombination))") { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     }
@@ -2137,6 +2155,8 @@ struct AppExplorerView: View {
             }
             .frame(width: 130, height: 98)
             .background(ExplorerTileChrome(theme: model.theme, selected: selected, occupied: entry != nil))
+            .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(
+                entry?.isActiveApp == true ? Color.orange : .clear, lineWidth: 2))
             .scaleEffect(selected && model.theme.isHUD ? 1.025 : 1)
             .animation(feedback, value: selected)
             .contentShape(RoundedRectangle(cornerRadius: 15))
@@ -2144,7 +2164,7 @@ struct AppExplorerView: View {
         .buttonStyle(.plain).disabled(!available)
         .modifier(previewDrag(direction))
         .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
-        .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")")
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")\(entry?.isActiveApp == true ? ", Active app" : "")")
         .anchorPreference(key: ExplorerTileAnchors.self, value: .bounds) { isPreview ? [direction: $0] : [:] }
     }
 

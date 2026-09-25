@@ -1105,6 +1105,11 @@ extension AppExplorerPresenting {
             model.showingAppWindows = true
             refreshGroup(); return
         }
+        if let command = entry?.command, command.macOSShortcut == nil,
+           let message = command.shortcutSetupMessage {
+            model.message = message
+            return
+        }
         if let command = entry?.command, command.macOSShortcut != nil {
             let originalPID = sourcePID
             dismiss()
@@ -1245,8 +1250,8 @@ extension AppExplorerPresenting {
         else { dismiss() }
     }
 
-    static func showWindowError(_ message: String) {
-        let alert = NSAlert(); alert.messageText = "Window unavailable"; alert.informativeText = message
+    static func showWindowError(_ message: String, title: String = "Window unavailable") {
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
         alert.addButton(withTitle: "OK"); alert.runModal()
     }
 

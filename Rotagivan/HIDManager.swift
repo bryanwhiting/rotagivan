@@ -291,6 +291,9 @@ final class NavigatorHIDManager: ObservableObject {
                 if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
             default:
                 if let shortcut = command.macOSShortcut { EventPoster().performTap(.shortcut, shortcut: shortcut) }
+                else if let message = command.shortcutSetupMessage {
+                    AppExplorerController.showWindowError(message, title: "Mac shortcut needed")
+                }
                 else if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
                         let target = WindowTiling.capture(pid: pid) { if let error = target.command(command) { AppExplorerController.showWindowError(error) } }
             }

@@ -121,6 +121,19 @@ import Foundation
         ]]]]
         precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: customized) == RecordedShortcut(
             keyCode: 34, modifiers: 917_504, keyLabel: "Mission Control"))
+        let stage = AppExplorerAction.toggleStageManager
+        precondition(AppExplorerAction.macOSCommands.contains(stage))
+        precondition(stage.shortcutSetupMessage != nil)
+        precondition(stage.resolvedMacOSShortcut(symbolicHotKeys: nil) == nil)
+        for (enabled, key, expected) in [(true, 17, true), (false, 17, false), (true, 65535, false), (true, 65536, false), (true, -1, false)] {
+            let prefs: [String: Any] = ["222": ["enabled": NSNumber(value: enabled), "value": ["parameters": [
+                NSNumber(value: 116), NSNumber(value: key), NSNumber(value: (1 << 20) | (1 << 19))
+            ]]]]
+            let resolved = stage.resolvedMacOSShortcut(symbolicHotKeys: prefs)
+            precondition((resolved != nil) == expected)
+            if expected { precondition(resolved?.keyCode == 17 && resolved?.modifiers == (1 << 20) | (1 << 19)) }
+        }
+        precondition(stage.resolvedMacOSShortcut(symbolicHotKeys: ["222": ["enabled": true, "value": ["parameters": [1]]]]) == nil)
         precondition(AppExplorerAction.showDesktop.resolvedMacOSShortcut(symbolicHotKeys: nil)?.keyCode == 103)
         precondition(AppExplorerAction.lockScreen.resolvedMacOSShortcut(symbolicHotKeys: nil) ==
             RecordedShortcut(keyCode: 12, modifiers: UInt64((1 << 18) | (1 << 20)), keyLabel: "Q"))

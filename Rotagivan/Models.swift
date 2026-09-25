@@ -568,6 +568,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
+    case toggleStageManager
     case toggleDock, previousApp, nextAppWindow, previousAppWindow, appExpose, hideApp, hideOtherApps
     case moveWindowPreviousDesktop, moveWindowNextDesktop
     case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop, lockScreen
@@ -581,6 +582,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "Previous desktop"
         case .nextDesktop: return "Next desktop"
         case .showDesktop: return "Show Desktop"
+        case .toggleStageManager: return "Toggle Stage Manager"
         case .toggleDock: return "Show / hide Dock"
         case .previousApp: return "Previous app"
         case .nextAppWindow: return "Next window in app"
@@ -607,6 +609,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "arrow.left.square"
         case .nextDesktop: return "arrow.right.square"
         case .showDesktop: return "menubar.dock.rectangle"
+        case .toggleStageManager: return "rectangle.3.group"
         case .toggleDock: return "dock.rectangle"
         case .previousApp: return "arrow.left.arrow.right"
         case .nextAppWindow: return "macwindow.on.rectangle"
@@ -626,6 +629,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     }
     var description: String {
         switch self {
+        case .toggleStageManager: return "Turn Stage Manager on or off using your macOS shortcut. First enable Turn Stage Manager on/off in System Settings → Keyboard → Keyboard Shortcuts → Mission Control. No shortcut is assigned automatically."
         case .toggleDock: return "Toggle automatic hiding of the Dock with Option–Command–D."
         case .previousApp: return "Switch to the most recently used other app with Command–Tab. Repeating toggles between the last two apps."
         case .nextAppWindow: return "Cycle forward through windows of the current app with Command–backtick—not through different apps."
@@ -651,7 +655,12 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         }
     }
     static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
-    static let macOSCommands: [Self] = [.toggleDock, .previousApp, .nextAppWindow, .previousAppWindow, .appExpose, .missionControl, .appWindows, .previousDesktop, .nextDesktop, .moveWindowPreviousDesktop, .moveWindowNextDesktop, .showDesktop, .hideApp, .hideOtherApps, .lockScreen]
+    static let macOSCommands: [Self] = [.toggleStageManager, .toggleDock, .previousApp, .nextAppWindow, .previousAppWindow, .appExpose, .missionControl, .appWindows, .previousDesktop, .nextDesktop, .moveWindowPreviousDesktop, .moveWindowNextDesktop, .showDesktop, .hideApp, .hideOtherApps, .lockScreen]
+    var shortcutSetupMessage: String? {
+        guard self == .toggleStageManager else { return nil }
+        return "Enable and assign “Turn Stage Manager on/off” in System Settings → Keyboard → Keyboard Shortcuts → Mission Control, then try again. Use a different combination from the Rotagivan keybinding that invokes this action."
+    }
+
     /// Uses the current System Settings shortcut when present, then the macOS default.
     /// App windows uses Rotagivan's accessible window picker instead.
     var macOSShortcut: RecordedShortcut? {
@@ -675,6 +684,8 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         switch self {
         case .missionControl: ids = [32, 34]
         case .appExpose: ids = [33, 35]
+        // Verified in Apple KeyboardSettings DefaultShortcutsTable.xml; no default key.
+        case .toggleStageManager: ids = [222]
         case .previousDesktop: ids = [79, 80]
         case .nextDesktop: ids = [81, 82]
         case .showDesktop: ids = [36, 37]
@@ -685,6 +696,10 @@ enum AppExplorerAction: String, Codable, CaseIterable {
                   (entry["enabled"] as? NSNumber)?.boolValue == true,
                   let value = entry["value"] as? [String: Any],
                   let parameters = value["parameters"] as? [NSNumber], parameters.count >= 3 else { continue }
+            if self == .toggleStageManager {
+                let key = parameters[1].doubleValue
+                guard key.isFinite, key >= 0, key <= 127, key.rounded() == key else { continue }
+            }
             let keyCode = UInt16(truncating: parameters[1])
             let modifiers = UInt64(truncating: parameters[2])
             let shortcut = RecordedShortcut(keyCode: keyCode, modifiers: modifiers, keyLabel: title)

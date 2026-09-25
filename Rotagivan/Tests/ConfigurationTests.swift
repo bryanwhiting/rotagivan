@@ -38,6 +38,18 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        var builtInConfig = factory
+        var builtInMap = AppExplorerSettings()
+        for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
+            precondition(builtInMap.assignBuiltIn(kind, at: position) != nil)
+        }
+        builtInConfig.settings.appExplorer = builtInMap
+        let builtInYAML = try builtInConfig.yaml()
+        let restoredBuiltIns = try AppConfiguration.parse(builtInYAML)
+        precondition(restoredBuiltIns.settings.appExplorer == builtInMap,
+            "Built-in HUD assignments must survive manual YAML save/load")
+        let builtInFingerprintMatches = try restoredBuiltIns.syncFingerprint() == builtInConfig.syncFingerprint()
+        precondition(builtInFingerprintMatches)
         var macroConfig = factory
         let firstStep = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
         let macro = NamedHotkey(name: "Copy then paste", shortcut: firstStep,

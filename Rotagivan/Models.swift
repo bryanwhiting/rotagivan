@@ -48,8 +48,7 @@ enum HUDNavigationAction: String, Codable, CaseIterable {
     }
 }
 
-enum HUDSwipeDirection
-: String, Codable, CaseIterable {
+enum HUDSwipeDirection: String, Codable, CaseIterable {
     case inverted, regular
     var title: String { self == .inverted ? "Inverted (default)" : "Regular" }
 
@@ -156,6 +155,7 @@ struct HUDMapNode: Identifiable {
     let point: HUDMapPoint
     let favorites: [AppExplorerFavorite]
     let slotCount: Int
+    var builtIn: HUDLayerBuiltIn? = nil
     var id: String { layerID?.uuidString ?? "main" }
 }
 
@@ -684,7 +684,30 @@ enum ExplorerWindowLayout: String, Codable, CaseIterable {
     var fraction: Double { switch self { case .halves: return 0.5; case .thirds: return 1.0 / 3; case .twoThirds: return 2.0 / 3; case .fourths: return 0.25 } }
 }
 
+enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
+    case recentApps, actions, windowManager, mediaControls
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .recentApps: return "Recent Apps"
+        case .actions: return "Actions"
+        case .windowManager: return "Window Manager"
+        case .mediaControls: return "Media Controls"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .recentApps: return "clock.arrow.circlepath"
+        case .actions: return "command"
+        case .windowManager: return "rectangle.split.2x2"
+        case .mediaControls: return "playpause.fill"
+        }
+    }
+}
+
 struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
+    var builtIn: HUDLayerBuiltIn? = nil
+
     var actionBindings: [ActionBinding]? = nil
     static func empty(name: String = "New layer") -> Self {
         Self(name: name, holdShortcut: nil, slotCount: 8, windowTilesConfigured: true)
@@ -832,6 +855,24 @@ struct AppExplorerSettings: Codable, Equatable {
         }
         return result
     }
+    /// Assign only into an empty position; never overwrite a user's saved HUD.
+    @discardableResult mutating func assignBuiltIn(_ builtIn: HUDLayerBuiltIn, at position: HUDLayerPosition) -> UUID? {
+        let positions = resolvedHUDPositions
+        guard !positions.values.contains(position), (holdLayers ?? []).count < 128 else { return nil }
+        var next = self
+        var layers = next.holdLayers ?? []
+        for index in layers.indices { layers[index].position = positions[layers[index].id] }
+        var layer = ExplorerHoldLayer.empty(name: builtIn.title)
+        layer.builtIn = builtIn
+        layer.position = position
+        if builtIn == .actions { layer.favorites = ExplorerReservedGroup.actions.tile(at: .up).children ?? [] }
+        layers.append(layer)
+        next.holdLayers = layers
+        guard next.hasValidFavorites else { return nil }
+        self = next
+        return layer.id
+    }
+
     /// The same fixed map drives the live HUD, keyboard navigation and settings preview.
     /// Imported layers beyond the eight map slots remain saved and shortcut-accessible.
     func hudMap(in bundleID: String? = nil, includingUnavailable: Bool = false) -> [HUDMapNode] {
@@ -840,7 +881,9 @@ struct AppExplorerSettings: Codable, Equatable {
             favorites: favorites, slotCount: slotCount ?? 8)] + (holdLayers ?? []).compactMap { layer in
             guard let position = positions[layer.id], includingUnavailable || layer.isAvailable(in: bundleID) else { return nil }
             return HUDMapNode(layerID: layer.id, name: layer.name, point: position.point,
-                favorites: layer.favorites, slotCount: layer.slotCount ?? slotCount ?? 8)
+                favorites: layer.builtIn == .windowManager ? windowEditor().favorites : layer.favorites,
+                slotCount: layer.builtIn == .windowManager ? windowEditor().count(at: []) : (layer.slotCount ?? slotCount ?? 8),
+                builtIn: layer.builtIn)
         }
     }
     /// Present generated legacy window presets through the ordinary group editor.

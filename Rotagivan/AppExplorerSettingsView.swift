@@ -222,6 +222,14 @@ struct AppExplorerSettingsView: View {
             settings.layers(at: settings.layerScope(at: groupPath)).compactMap(\.holdShortcut) +
             (windowOwnerPath == nil ? [] : (store.settings.appExplorer?.windowManager?.shortcuts.map(\.shortcut) ?? []))
     }
+    private var selectedBuiltIn: HUDLayerBuiltIn? {
+        guard scopeTitle == nil, !windowManagerOnly else { return nil }
+        return baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.builtIn
+    }
+    private var generatedBuiltIn: HUDLayerBuiltIn? {
+        guard let builtIn = selectedBuiltIn, builtIn != .actions else { return nil }
+        return builtIn
+    }
     private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
     private var availableBookmarkSlots: [ExplorerSlot] {
         let occupied = Set(favorites.map(\.direction))
@@ -297,7 +305,20 @@ struct AppExplorerSettingsView: View {
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: position.symbol).font(.title3)
-                    Text("Drop a HUD here").font(.caption.weight(.medium))
+                    if scopeTitle == nil && !windowManagerOnly {
+                    Menu("Built-in HUD…") {
+                        ForEach(HUDLayerBuiltIn.allCases) { builtIn in
+                            Button(builtIn.title, systemImage: builtIn.symbol) {
+                                var next = baseSettings
+                                guard let id = next.assignBuiltIn(builtIn, at: position) else { return }
+                                if saveBase(next) { selectedLayerID = id; groupPath = [] }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    }
+                    Text("Drop a custom HUD here").font(.caption2)
+
                     Text(position.title).font(.caption2)
                 }
                 .foregroundStyle(.secondary)
@@ -409,7 +430,7 @@ struct AppExplorerSettingsView: View {
                     Text("HUD layers").font(.headline)
                     Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Up to nine HUDs: Main stays in the center. Drag layers into the surrounding slots. Swipes follow the rows and columns.")
+                    Text("Up to nine HUDs: Main stays in the center. Drag layers into the surrounding slots. Choose a built-in in any empty slot, or drag a custom layer. Swipe in all eight directions.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -418,7 +439,7 @@ struct AppExplorerSettingsView: View {
                 } label: {
                     Label("Import bookmarks", systemImage: "book.closed")
                 }
-                .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
+                .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
                 .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
                     "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
                 Button {
@@ -552,7 +573,7 @@ struct AppExplorerSettingsView: View {
                     } label: {
                         Label("Import bookmarks", systemImage: "book.closed")
                     }
-                    .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
+                    .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
                     .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
                         "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
                     if !groupPath.isEmpty {
@@ -575,6 +596,22 @@ struct AppExplorerSettingsView: View {
                 Text("Slot direction and window position are independent. Use ••• → Window management → Resize window to assign any position and size.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let builtIn = generatedBuiltIn {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(builtIn.title, systemImage: builtIn.symbol).font(.headline)
+                        Text("This position opens the built-in HUD directly. Swipe to another position to leave it.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        if builtIn == .windowManager {
+                            WindowManagerSettingsView(store: store)
+                        } else if builtIn == .recentApps {
+                            Text("Filled automatically with your other running apps, in recent-use order.")
+                        } else {
+                            Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
+                        }
+                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
             Picker(settings.favorite(at: groupPath)?.hasPrimaryDestination == true ? "Slots in this deep swipe" : "Slots in this HUD layer",
                 selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                 var next = settings
@@ -666,6 +703,7 @@ struct AppExplorerSettingsView: View {
                 ? "Filled automatically with your most recently used other running apps. Starts on the left, then goes clockwise. The current app is excluded. Any assigned favorites are kept if you switch back. Tap the center in the HUD to go back."
                 : "Click a tile to edit it right there. Drag to rearrange, or choose Send to HUD layer to move it across layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if let groupError { Text(groupError).font(.caption).foregroundStyle(.red).padding(6).background(.regularMaterial) }
@@ -1284,7 +1322,7 @@ struct AppExplorerSettingsView: View {
             Button("Import Chrome or Safari bookmarks…", systemImage: "book.closed") {
                 importingBookmarks = true
             }
-            .disabled(isRecentGroup || availableBookmarkSlots.isEmpty)
+            .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
             if let favorite, favorite.bundleID != nil {
                 Divider()
                 Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in

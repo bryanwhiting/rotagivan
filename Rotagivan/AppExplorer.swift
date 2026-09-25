@@ -190,10 +190,19 @@ extension AppExplorerPresenting {
         refreshGroup()
     }
 
+    private var mappedBuiltIn: HUDLayerBuiltIn? {
+        guard groupPath.isEmpty, windowGroupPath.isEmpty, !model.showingAppWindows else { return nil }
+        return configuration().holdLayers?.first { $0.id == heldKeys.activeID }?.builtIn
+    }
+    private var mapNavigationAvailable: Bool {
+        !model.showingAppWindows &&
+        (!model.showingWindowManager || mappedBuiltIn == .windowManager) &&
+        (!model.showingMediaControls || mappedBuiltIn == .mediaControls)
+    }
+
     /// Move within the fixed map without closing the panel or wrapping at its edges.
     @discardableResult func navigateHUD(_ direction: HUDNavigationAction) -> Bool {
-        guard isVisible, !isEditing, !model.showingWindowManager,
-              !model.showingMediaControls, !model.showingAppWindows else { return false }
+        guard isVisible, !isEditing, mapNavigationAvailable else { return false }
         let map = configuration().hudMap(in: sourceBundleID)
         guard let origin = map.first(where: { $0.layerID == heldKeys.activeID })?.point,
               let target = HUDMapPoint.nearestIndex(in: map.map { $0.point - origin }, toward: direction) else { return false }
@@ -495,7 +504,7 @@ extension AppExplorerPresenting {
     }
 
     private func updateCarouselContext(_ settings: AppExplorerSettings) {
-        guard !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows else {
+        guard mapNavigationAvailable else {
             model.previousLayerName = nil
             model.nextLayerName = nil
             model.carouselPosition = nil
@@ -511,6 +520,11 @@ extension AppExplorerPresenting {
             return
         }
         model.carouselPreviews = HUDCarouselPreview.makeMap(map, activeLayerID: heldKeys.activeID) { makeEntry($0, depth: 0) }
+        model.carouselPreviews = model.carouselPreviews.map { preview in
+            guard map.first(where: { $0.id == preview.id })?.builtIn == .recentApps else { return preview }
+            return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                slotCount: preview.slotCount, entries: recentEntries(slotCount: preview.slotCount))
+        }
         model.previousLayerName = orbitDestination(.previous)?.name
         model.nextLayerName = orbitDestination(.next)?.name
         model.carouselPosition = "\(current + 1) of \(map.count)"
@@ -523,6 +537,13 @@ extension AppExplorerPresenting {
 
     private func loadEntries() {
         let original = configuration()
+        if let builtIn = mappedBuiltIn {
+            if builtIn == .mediaControls { model.showingMediaControls = true }
+            if builtIn == .windowManager {
+                model.showingWindowManager = true
+                if tilingTarget == nil { tilingTarget = sourcePID.flatMap(captureWindow) }
+            }
+        }
         let dictionary = hotkeyDictionary()
         if entryCacheSettings != original || entryCacheDictionary != dictionary {
             entryCache.removeAll(keepingCapacity: true)
@@ -556,7 +577,7 @@ extension AppExplorerPresenting {
             model.groupDirections.append(controlDirection)
             model.groupSlotCounts.append(settings.count(at: groupPath))
         }
-        let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true
+        let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true || mappedBuiltIn == .recentApps
         model.showingRecents = model.mode == .recent || recentGroup
         model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingMediaControls && layer == nil
         model.slotCount = settings.count(at: groupPath)
@@ -669,16 +690,19 @@ extension AppExplorerPresenting {
     }
 
     private func loadRecentEntries() {
+        model.entries = recentEntries(slotCount: model.slotCount)
+    }
+    private func recentEntries(slotCount: Int) -> [ExplorerEntry] {
         let running = workspace.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated &&
             $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && $0.processIdentifier != sourcePID &&
             $0.bundleIdentifier != "local.rotagivan"
         }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
-        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [], limit: model.slotCount)
-        let slots = ExplorerSlot.slots(model.slotCount).sorted { a, b in
+        let ordered = recents.ordered(available: running.compactMap(\.bundleIdentifier), excluding: [], limit: slotCount)
+        let slots = ExplorerSlot.slots(slotCount).sorted { a, b in
             (a.angle + 180).truncatingRemainder(dividingBy: 360) < (b.angle + 180).truncatingRemainder(dividingBy: 360)
         }
-        model.entries = ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
+        return ordered.compactMap { id in running.first { $0.bundleIdentifier == id } }.enumerated().map {
             ExplorerEntry(direction: slots[$0.offset], app: $0.element)
         }
     }
@@ -774,7 +798,7 @@ extension AppExplorerPresenting {
     private func processLocalGesture(_ report: TrackpadReport) -> Bool {
         if model.orbitSettling { return true }
         var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
-        if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
+        if mapNavigationAvailable,
            (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
             let direction = configuration().resolvedSwipeDirection
             let defaults: [ActionBinding] = [AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].map { trigger in
@@ -1228,8 +1252,12 @@ extension AppExplorerPresenting {
     }
 
     func goBack() {
-
         guard isVisible, !isEditing else { return }
+        if mappedBuiltIn != nil {
+            guard contextIsValid?() != false else { dismiss(); return }
+            switchLayer(nil)
+            return
+        }
         if model.showingAppWindows {
             model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
             model.message = nil; refreshGroup(); return
@@ -1487,7 +1515,11 @@ struct HUDCarouselPreview: Identifiable {
         guard let origin = map.first(where: { $0.layerID == activeLayerID })?.point else { return [] }
         return map.filter { $0.layerID != activeLayerID }.map { node in
             Self(id: node.id, name: node.name, offset: node.point - origin,
-                slotCount: node.slotCount, entries: node.favorites.map(makeEntry))
+                slotCount: node.slotCount, entries: node.builtIn == .mediaControls
+                    ? ExplorerMediaAction.allCases.map {
+                        ExplorerEntry(direction: ExplorerSlot($0.direction), bundleID: nil, name: $0.title,
+                            icon: nil, url: nil, mediaAction: $0)
+                    } : node.favorites.map(makeEntry))
         }
     }
 }

@@ -57,6 +57,18 @@ import Foundation
         precondition(HUDMapPoint.nearestIndex(in: gapOffsets, toward: .previous) == 0,
             "Skip an empty cell but never substitute a diagonal HUD")
         precondition(HUDMapPoint.nearestIndex(in: gapOffsets, toward: .below) == nil)
+        var builtIns = AppExplorerSettings()
+        for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
+            let id = builtIns.assignBuiltIn(kind, at: position)!
+            precondition(builtIns.holdLayers?.first { $0.id == id }?.builtIn == kind)
+            precondition(builtIns.hudMap().first { $0.layerID == id }?.builtIn == kind)
+            let before = builtIns
+            precondition(builtIns.assignBuiltIn(.actions, at: position) == nil && builtIns == before,
+                "Occupied map assignments must never be overwritten")
+        }
+        precondition(builtIns.hasValidFavorites)
+        let decodedBuiltIns = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(builtIns))
+        precondition(decodedBuiltIns == builtIns)
         print("HUD map tests passed: nine fixed positions, every cardinal edge, persistence, legacy assignment, gaps and lossless overflow.")
     }
 }

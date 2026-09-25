@@ -629,6 +629,46 @@ private final class BindingPoster: GestureEventPosting {
         mediaController.dismiss()
         mediaController.centerTap()
         precondition(mediaActions.count == 2, "Hidden HUD does not send media commands")
+        var builtInMap = AppExplorerSettings(animationsEnabled: false)
+        for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
+            _ = builtInMap.assignBuiltIn(kind, at: position)
+        }
+        let builtInController = AppExplorerController(defaults: defaults)
+        builtInController.configuration = { builtInMap }
+        builtInController.contextIsValid = { true }
+        builtInController.captureWindow = { _ in nil }
+        var builtInMedia: [ExplorerMediaAction] = []
+        builtInController.performMedia = { builtInMedia.append($0) }
+        for layer in builtInMap.holdLayers! {
+            builtInController.showLayer(layer.id, waitingForLift: false)
+            precondition(builtInController.displayedLayerID == layer.id)
+            precondition(builtInController.displayedHUDMap.count == 4,
+                "Built-in HUDs retain their surrounding map")
+            switch layer.builtIn! {
+            case .mediaControls:
+                precondition(builtInController.displayedEntries.count == 6)
+                builtInController.process(report(true))
+                builtInController.process(report(false))
+                precondition(builtInMedia == [.playPause])
+            case .actions:
+                precondition(builtInController.displayedEntries.count == 8)
+                precondition(builtInController.displayedEntries.allSatisfy { $0.shortcut != nil })
+            case .windowManager:
+                precondition(!builtInController.displayedEntries.isEmpty)
+                precondition(builtInController.displayedEntries.contains { $0.tilingDirection != nil })
+            case .recentApps:
+                precondition(builtInController.displayedEntries.allSatisfy { $0.bundleID != nil })
+            }
+            // Default inverted motion back toward Main from each assigned position.
+            let position = builtInMap.resolvedHUDPositions[layer.id]!
+            builtInController.process(strokePair(500))
+            builtInController.process(strokePair(500 + Double(position.x) * 200,
+                                                  500 - Double(position.y) * 200))
+            builtInController.process(strokePair(nil))
+            precondition(builtInController.displayedLayerID == nil && builtInController.isVisible,
+                "Two-finger swipe leaves a built-in map cell directly")
+            builtInController.dismiss()
+        }
         print("Action binding runtime tests passed: empty-layer keyboard, HUD gesture and navigation, legacy tap action, and global override precedence.")
     }
 }

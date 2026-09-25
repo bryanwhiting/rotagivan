@@ -29,13 +29,7 @@ import Foundation
             let offsets = map.map { $0.point - origin.point }
             for direction in HUDNavigationAction.allCases {
                 let target = HUDMapPoint.nearestIndex(in: offsets, toward: direction)
-                let expected: HUDMapPoint
-                switch direction {
-                case .next: expected = HUDMapPoint(x: origin.point.x + 1, y: origin.point.y)
-                case .previous: expected = HUDMapPoint(x: origin.point.x - 1, y: origin.point.y)
-                case .above: expected = HUDMapPoint(x: origin.point.x, y: origin.point.y + 1)
-                case .below: expected = HUDMapPoint(x: origin.point.x, y: origin.point.y - 1)
-                }
+                let expected = HUDMapPoint(x: origin.point.x + direction.step.x, y: origin.point.y + direction.step.y)
                 if abs(expected.x) > 1 || abs(expected.y) > 1 {
                     precondition(target == nil, "Map edges must not cycle to another row")
                 } else {

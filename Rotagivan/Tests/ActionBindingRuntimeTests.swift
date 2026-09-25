@@ -414,7 +414,11 @@ private final class BindingPoster: GestureEventPosting {
             (.twoFingerLeft, -1, 0, .right, .left),
             (.twoFingerRight, 1, 0, .left, .right),
             (.twoFingerUp, 0, -1, .bottom, .top),
-            (.twoFingerDown, 0, 1, .top, .bottom)
+            (.twoFingerDown, 0, 1, .top, .bottom),
+            (.twoFingerLeft, -1, -1, .bottomRight, .topLeft),
+            (.twoFingerRight, 1, -1, .bottomLeft, .topRight),
+            (.twoFingerLeft, -1, 1, .topRight, .bottomLeft),
+            (.twoFingerRight, 1, 1, .topLeft, .bottomRight)
         ]
         func strokePair(_ x: Double?, _ y: Double = 500) -> TrackpadReport {
             TrackpadReport(contacts: x.map { value in [
@@ -444,6 +448,30 @@ private final class BindingPoster: GestureEventPosting {
             }
             controller.dismiss()
         }
+        hud.swipeDirection = .regular
+        controller.show(waitingForLift: false)
+        controller.switchLayer(mapLayers.first { $0.position == .topLeft }!.id)
+        let edgeID = controller.displayedLayerID
+        controller.process(strokePair(500))
+        controller.process(strokePair(300, 300))
+        precondition(controller.displayedOrbitOffset == HUDMapPoint(x: -1, y: 1))
+        precondition(controller.displayedOrbitProgress > 0 && controller.displayedOrbitProgress < 0.12,
+            "Missing diagonal resists instead of silently ignoring the drag")
+        controller.process(strokePair(nil))
+        precondition(controller.displayedLayerID == edgeID && controller.displayedOrbitProgress == 0,
+            "Missing diagonal returns without switching HUDs")
+        controller.dismiss()
+        let savedMapLayers = hud.holdLayers
+        hud.holdLayers?.removeAll { $0.position == .topRight }
+        controller.show(waitingForLift: false)
+        controller.process(strokePair(500))
+        controller.process(strokePair(700, 300))
+        precondition(controller.displayedOrbitProgress > 0 && controller.displayedOrbitProgress < 0.12)
+        controller.process(strokePair(nil))
+        precondition(controller.displayedLayerID == nil && controller.displayedOrbitProgress == 0,
+            "An empty in-grid corner bounces back to Main")
+        controller.dismiss()
+        hud.holdLayers = savedMapLayers
         // An explicit cross-axis binding is not inverted again and must scrub
         // along the physical gesture, not the destination's axis.
         hud.swipeDirection = .inverted

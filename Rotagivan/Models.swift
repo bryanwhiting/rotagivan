@@ -9,13 +9,17 @@ struct BindingTrigger: Codable, Equatable {
 }
 
 enum HUDNavigationAction: String, Codable, CaseIterable {
-    case previous, next, above, below
+    case previous, next, above, below, topLeft, topRight, bottomLeft, bottomRight
     var title: String {
         switch self {
         case .previous: return "Previous HUD (left)"
         case .next: return "Next HUD (right)"
         case .above: return "HUD above"
         case .below: return "HUD below"
+        case .topLeft: return "HUD top left"
+        case .topRight: return "HUD top right"
+        case .bottomLeft: return "HUD bottom left"
+        case .bottomRight: return "HUD bottom right"
         }
     }
     var symbol: String {
@@ -24,13 +28,42 @@ enum HUDNavigationAction: String, Codable, CaseIterable {
         case .next: return "chevron.right.2"
         case .above: return "chevron.up.2"
         case .below: return "chevron.down.2"
+        case .topLeft: return "arrow.up.left"
+        case .topRight: return "arrow.up.right"
+        case .bottomLeft: return "arrow.down.left"
+        case .bottomRight: return "arrow.down.right"
+        }
+    }
+    var step: HUDMapPoint {
+        switch self {
+        case .previous: return HUDMapPoint(x: -1, y: 0)
+        case .next: return HUDMapPoint(x: 1, y: 0)
+        case .above: return HUDMapPoint(x: 0, y: 1)
+        case .below: return HUDMapPoint(x: 0, y: -1)
+        case .topLeft: return HUDMapPoint(x: -1, y: 1)
+        case .topRight: return HUDMapPoint(x: 1, y: 1)
+        case .bottomLeft: return HUDMapPoint(x: -1, y: -1)
+        case .bottomRight: return HUDMapPoint(x: 1, y: -1)
         }
     }
 }
 
-enum HUDSwipeDirection: String, Codable, CaseIterable {
+enum HUDSwipeDirection
+: String, Codable, CaseIterable {
     case inverted, regular
     var title: String { self == .inverted ? "Inverted (default)" : "Regular" }
+
+    /// Equal 45-degree sectors; hardware Y grows downward.
+    func navigation(dx: Double, dy: Double) -> HUDNavigationAction {
+        let diagonal = min(abs(dx), abs(dy)) > max(abs(dx), abs(dy)) * 0.41421356237
+        let sign = self == .inverted ? -1 : 1
+        let x = (dx < 0 ? -1 : 1) * sign
+        let y = (dy < 0 ? 1 : -1) * sign
+        if diagonal {
+            return x < 0 ? (y > 0 ? .topLeft : .bottomLeft) : (y > 0 ? .topRight : .bottomRight)
+        }
+        return abs(dx) >= abs(dy) ? (x < 0 ? .previous : .next) : (y > 0 ? .above : .below)
+    }
 
     /// Inverted drags the surface with the fingers; regular follows the swipe.
     /// This affects only default two-finger HUD gestures, never keyboard actions.
@@ -95,7 +128,7 @@ struct HUDMapPoint: Equatable, Hashable {
     static let zero = Self(x: 0, y: 0)
     static func - (lhs: Self, rhs: Self) -> Self { Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y) }
 
-    /// Cardinal swipes stay in their row/column, skipping gaps but never wrapping.
+    /// Swipes follow their row, column, or diagonal ray without wrapping.
     func distance(in direction: HUDNavigationAction) -> Int? {
         let forward: Int
         switch direction {
@@ -103,6 +136,10 @@ struct HUDMapPoint: Equatable, Hashable {
         case .previous: guard y == 0 else { return nil }; forward = -x
         case .above: guard x == 0 else { return nil }; forward = y
         case .below: guard x == 0 else { return nil }; forward = -y
+        case .topLeft: guard x == -y else { return nil }; forward = y
+        case .topRight: guard x == y else { return nil }; forward = y
+        case .bottomLeft: guard x == y else { return nil }; forward = -y
+        case .bottomRight: guard x == -y else { return nil }; forward = -y
         }
         return forward > 0 ? forward : nil
     }

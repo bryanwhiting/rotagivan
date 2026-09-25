@@ -41,6 +41,7 @@ extension AppExplorerPresenting {
     private var localGestureFollowupDelay = 0.0
     private var localGestureStarted = Date.distantPast
     private var localGestureLastLift = Date.distantPast
+    private var orbitDragUnit = CGPoint.zero
     private var localGestureOrigin: CGPoint?
     private var localGestureLast = CGPoint.zero
     private var localGestureFingerOrigins: [UInt8: CGPoint] = [:]
@@ -745,6 +746,7 @@ extension AppExplorerPresenting {
         model.orbitSettling = false
         model.orbitPosition = nil
         model.orbitTrigger = nil
+        orbitDragUnit = .zero
         model.orbitOffset = .zero
         model.orbitProgress = 0
         localGestureTimer?.invalidate(); localGestureTimer = nil
@@ -864,43 +866,49 @@ extension AppExplorerPresenting {
                     ? (dx < 0 ? .twoFingerLeft : .twoFingerRight)
                     : (dy < 0 ? .twoFingerUp : .twoFingerDown)
                 if let binding = gestures.first(where: { $0.trigger.gesture == trigger }),
-                   binding.action.kind == .hudNavigation, let navigation = binding.action.hudNavigation {
+                   binding.action.kind == .hudNavigation, let assignedNavigation = binding.action.hudNavigation {
+                    let explicit = visibleActionBindings.contains { $0.isValid && $0.trigger.gesture == trigger }
+                    let navigation = explicit ? assignedNavigation : configuration().resolvedSwipeDirection.navigation(dx: dx, dy: dy)
                     let coherent = localGestureFingerOrigins.count == 2 && localGestureFingerOrigins.allSatisfy { id, start in
                         guard let end = localGestureFingerLast[id] else { return false }
                         return (end.x - start.x) * dx + (end.y - start.y) * dy > 0
                     }
-                    if coherent, hypot(dx, dy) > 8, model.orbitPosition == nil,
-                       let target = orbitDestination(navigation) {
-                        model.orbitOffset = target.offset
+                    if coherent, hypot(dx, dy) > 14, model.orbitPosition == nil {
+                        let step = navigation.step
+                        let diagonal = step.x != 0 && step.y != 0 && !explicit
+                        orbitDragUnit = diagonal
+                            ? CGPoint(x: dx < 0 ? -sqrt(0.5) : sqrt(0.5), y: dy < 0 ? -sqrt(0.5) : sqrt(0.5))
+                            : (abs(dx) >= abs(dy) ? CGPoint(x: dx < 0 ? -1 : 1, y: 0) : CGPoint(x: 0, y: dy < 0 ? -1 : 1))
+                        model.orbitOffset = orbitDestination(navigation)?.offset ?? step
                         model.orbitPosition = navigation
                         model.orbitTrigger = trigger
                     }
                 }
-                if let locked = model.orbitTrigger {
-                    let distance: Double
-                    switch locked {
-                    case .twoFingerLeft: distance = -dx
-                    case .twoFingerRight: distance = dx
-                    case .twoFingerUp: distance = -dy
-                    case .twoFingerDown: distance = dy
-                    default: distance = 0
-                    }
+                if let position = model.orbitPosition {
+                    let distance = max(0, dx * orbitDragUnit.x + dy * orbitDragUnit.y)
+                    let available = orbitDestination(position) != nil
+                    // Empty cells resist the drag, then spring back on lift.
+                    let progress = available ? min(1, distance / 180) : 0.12 * (1 - exp(-distance / 90))
                     var transaction = Transaction(); transaction.disablesAnimations = true
-                    withTransaction(transaction) { model.orbitProgress = min(1, max(0, distance / 180)) }
+                    withTransaction(transaction) { model.orbitProgress = progress }
                     deadline = Date().addingTimeInterval(15)
                 }
             }
             return true
         }
         if let position = model.orbitPosition {
-            let commit = model.orbitProgress >= 0.45
             let target = orbitDestination(position)
+            let commit = target != nil && model.orbitProgress >= 0.45
             let generation = model.orbitGeneration
             model.orbitSettling = true
             let animate = configuration().resolvedAnimationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             let remaining = commit ? 1 - model.orbitProgress : model.orbitProgress
-            let settleDuration = animate ? 0.18 * remaining : 0
-            withAnimation(settleDuration > 0 ? .easeOut(duration: settleDuration) : nil) {
+            let blocked = target == nil && model.orbitProgress > 0
+            let settleDuration = animate ? (blocked ? 0.24 : 0.18 * remaining) : 0
+            let settling: Animation? = settleDuration == 0 ? nil : (blocked
+                ? .spring(duration: settleDuration, bounce: 0.18)
+                : .easeOut(duration: settleDuration))
+            withAnimation(settling) {
                 model.orbitProgress = commit ? 1 : 0
             }
             let finish: @MainActor @Sendable () -> Void = { [weak self] in

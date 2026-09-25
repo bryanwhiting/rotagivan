@@ -51,13 +51,7 @@ import SwiftUI
             (.above, .right), (.previous, nil)
         ]
         for (direction, position) in route {
-            let end: HUDMapPoint
-            switch direction {
-            case .next: end = HUDMapPoint(x: 300, y: 500)
-            case .previous: end = HUDMapPoint(x: 700, y: 500)
-            case .above: end = HUDMapPoint(x: 500, y: 700)
-            case .below: end = HUDMapPoint(x: 500, y: 300)
-            }
+            let end = HUDMapPoint(x: 500 - direction.step.x * 200, y: 500 + direction.step.y * 200)
             controller.process(pair(HUDMapPoint(x: 500, y: 500)))
             controller.process(pair(end))
             precondition(controller.displayedOrbitProgress == 1)

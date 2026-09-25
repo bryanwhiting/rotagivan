@@ -93,7 +93,7 @@ struct ConfigurationTests {
             .openApp(bundleID: "com.apple.Safari", name: "Safari"), .openURL("https://example.com/docs"),
             .command(.missionControl), .command(.lockScreen), .media(.playPause),
             .windowPlacement(ExplorerWindowPlacement(direction: .left)), .tap(.rightClick)
-        ]
+        ] + CommonMacShortcut.all.map(\.action)
         let independent = actions.enumerated().map { index, action in
             ActionBinding(trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: UInt16(64 + index),
                 modifiers: 1 << 20, keyLabel: "Test \(index)")), action: action)

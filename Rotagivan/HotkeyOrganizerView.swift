@@ -179,6 +179,7 @@ struct HotkeyOrganizerView: View {
 
     private var builtInActions: some View {
         VStack(alignment: .leading, spacing: 12) {
+            actionGroup("Common Mac shortcuts", actions: CommonMacShortcut.all.map(\.action))
             actionGroup("Mac controls", actions: AppExplorerAction.macOSCommands.map { BindingAction(kind: .command, command: $0) })
             actionGroup("Windows", actions: AppExplorerAction.windowCommands.map { BindingAction(kind: .command, command: $0) })
             actionGroup("Window layouts", actions: ExplorerWindowLayout.allCases.flatMap { layout in

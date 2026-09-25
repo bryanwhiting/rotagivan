@@ -159,6 +159,46 @@ struct HUDMapNode: Identifiable {
     var id: String { layerID?.uuidString ?? "main" }
 }
 
+/// Built-in outputs, not registered global hotkeys or seeded user macros.
+/// Keeping presets separate means upgrades never overwrite saved actions.
+struct CommonMacShortcut {
+    let name: String
+    let keyCode: UInt16
+    let keyLabel: String
+    let modifiers: UInt64
+    let detail: String
+
+    var action: BindingAction {
+        BindingAction(kind: .keystroke, keyCode: keyCode, modifiers: modifiers, keyLabel: keyLabel, name: name)
+    }
+
+    static let all: [Self] = {
+        let command = UInt64(1 << 20), shift = UInt64(1 << 17), option = UInt64(1 << 19)
+        return [
+            Self(name: "Copy", keyCode: 8, keyLabel: "C", modifiers: command, detail: "Copy the selection to the clipboard."),
+            Self(name: "Cut", keyCode: 7, keyLabel: "X", modifiers: command, detail: "Cut the selection to the clipboard in apps that support it."),
+            Self(name: "Paste", keyCode: 9, keyLabel: "V", modifiers: command, detail: "Paste the clipboard into the active app."),
+            Self(name: "Paste and match style", keyCode: 9, keyLabel: "V", modifiers: command | option | shift, detail: "Paste using the destination formatting in apps that support this shortcut."),
+            Self(name: "Undo", keyCode: 6, keyLabel: "Z", modifiers: command, detail: "Undo the last edit."),
+            Self(name: "Redo", keyCode: 6, keyLabel: "Z", modifiers: command | shift, detail: "Redo the last undone edit in apps using the standard Mac shortcut."),
+            Self(name: "Select all", keyCode: 0, keyLabel: "A", modifiers: command, detail: "Select all content in the active field or view."),
+            Self(name: "Save", keyCode: 1, keyLabel: "S", modifiers: command, detail: "Save the current document; a new document may prompt for a location."),
+            Self(name: "Find", keyCode: 3, keyLabel: "F", modifiers: command, detail: "Open the active app’s search or find bar."),
+            Self(name: "Find next", keyCode: 5, keyLabel: "G", modifiers: command, detail: "Jump to the next search match in apps that support it."),
+            Self(name: "New window or document", keyCode: 45, keyLabel: "N", modifiers: command, detail: "Create a new window or document, depending on the app."),
+            Self(name: "New tab", keyCode: 17, keyLabel: "T", modifiers: command, detail: "Open a new tab in apps that support tabs."),
+            Self(name: "Close tab or window", keyCode: 13, keyLabel: "W", modifiers: command, detail: "Close the active tab or window. The app may ask about unsaved changes."),
+            Self(name: "Reopen closed tab", keyCode: 17, keyLabel: "T", modifiers: command | shift, detail: "Reopen the last closed tab in supported browsers."),
+            Self(name: "Reload", keyCode: 15, keyLabel: "R", modifiers: command, detail: "Reload the current page in supported browsers; other apps may use this key differently."),
+            Self(name: "Focus address bar", keyCode: 37, keyLabel: "L", modifiers: command, detail: "Select the address bar in supported browsers."),
+            Self(name: "App settings", keyCode: 43, keyLabel: ",", modifiers: command, detail: "Open the active app’s settings if it supports Command–comma."),
+            Self(name: "Spotlight", keyCode: 49, keyLabel: "Space", modifiers: command, detail: "Open Spotlight using its default shortcut; macOS shortcut customizations may change this."),
+            Self(name: "Screenshot selection", keyCode: 21, keyLabel: "4", modifiers: command | shift, detail: "Start a screenshot selection using the default macOS shortcut."),
+            Self(name: "Screenshot controls", keyCode: 23, keyLabel: "5", modifiers: command | shift, detail: "Open screenshot and screen-recording controls using the default macOS shortcut.")
+        ]
+    }()
+}
+
 /// A destination is independent of the input that invokes it. Physical output
 /// keys are stored as scalars so references cannot recursively contain actions.
 struct BindingAction: Codable, Equatable {
@@ -187,7 +227,7 @@ struct BindingAction: Codable, Equatable {
     }
     var title: String {
         switch kind {
-        case .keystroke: return shortcut?.readableCombination ?? "Keystroke"
+        case .keystroke: return name.map { "\($0) · \(shortcut?.readableCombination ?? "Keystroke")" } ?? shortcut?.readableCombination ?? "Keystroke"
         case .macro: return name ?? "Saved action"
         case .hudLayer: return "Open HUD · " + (name ?? (hudLayerID == nil ? "Default" : "Layer"))
         case .hudNavigation: return hudNavigation?.title ?? "Navigate HUD"
@@ -201,7 +241,7 @@ struct BindingAction: Codable, Equatable {
     }
     var description: String {
         switch kind {
-        case .keystroke: return "Send \(shortcut?.readableCombination ?? "the chosen keys") to the active app. This is the output, not the keybinding that triggers it."
+        case .keystroke: return (CommonMacShortcut.all.first { $0.name == name && $0.action.shortcut == shortcut }.map { $0.detail + " " } ?? "") + "Send \(shortcut?.readableCombination ?? "the chosen keys") to the active app. This is the output, not the keybinding that triggers it."
         case .macro: return "Run the saved macro’s steps in order. A macro can contain keystrokes and app launches."
         case .hudLayer: return "Open \(name ?? "the selected HUD layer") so you can choose one of its actions."
         case .hudNavigation: return "Move to \(hudNavigation?.title ?? "the selected HUD") in the fixed HUD map without closing it."

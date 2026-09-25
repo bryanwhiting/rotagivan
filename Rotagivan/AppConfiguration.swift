@@ -191,7 +191,11 @@ private indirect enum ConfigurationValue: Codable {
 
     init(from decoder: Decoder) throws {
         let box = try decoder.singleValueContainer()
-        if box.decodeNil() { self = .null }
+        // Yams can decode quoted numeric key labels as Double. Preserve the
+        // schema's string type before rebuilding action objects for validation.
+        if decoder.codingPath.last?.stringValue == "keyLabel",
+           let label = try? box.decode(String.self) { self = .string(label) }
+        else if box.decodeNil() { self = .null }
         else if let object = try? box.decode([String: Self].self) { self = .object(object) }
         else if let array = try? box.decode([Self].self) { self = .array(array) }
         else if let bool = try? box.decode(Bool.self) { self = .bool(bool) }

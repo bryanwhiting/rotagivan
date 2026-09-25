@@ -66,6 +66,11 @@ struct BindingActionPicker: View {
 
     var body: some View {
         Menu {
+            Section("Common Mac shortcuts") {
+                ForEach(CommonMacShortcut.all, id: \.name) { preset in
+                    Button(preset.action.title) { action = preset.action }.help(preset.action.description)
+                }
+            }
             Section("Keystrokes") {
                 Button("Record keystroke…", systemImage: "keyboard") { recording = true }
             }

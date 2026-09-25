@@ -87,7 +87,20 @@ import Foundation
             AppExplorerFavorite(direction: .left, name: "Duplicate", url: "https://example.com/other",
                 activationShortcut: actionKey)]).hasValidFavorites)
         precondition(Set(AppExplorerAction.macOSCommands).count == AppExplorerAction.macOSCommands.count)
+        precondition(CommonMacShortcut.all.count == 20)
+        precondition(Set(CommonMacShortcut.all.map { $0.action.identity }).count == 20)
+        for preset in CommonMacShortcut.all {
+            let action = preset.action
+            precondition(action.isValid && action.kind == .keystroke)
+            precondition(action.title.contains(preset.name))
+            precondition(action.description.contains(preset.detail))
+            precondition(action.favorite(at: .up).flatMap(BindingAction.from(favorite:)) == action)
+            precondition(try! JSONDecoder().decode(BindingAction.self, from: JSONEncoder().encode(action)) == action)
+        }
+        precondition(StoredSettings().resolvedHotkeyDictionary.isEmpty)
+        precondition(StoredSettings().actionBindings == nil)
         for command in AppExplorerAction.allCases {
+
             precondition(!command.description.isEmpty)
             let action = BindingAction.command(command)
             precondition(action.isValid && !action.description.isEmpty)

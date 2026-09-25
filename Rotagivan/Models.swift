@@ -28,6 +28,23 @@ enum HUDNavigationAction: String, Codable, CaseIterable {
     }
 }
 
+enum HUDSwipeDirection: String, Codable, CaseIterable {
+    case inverted, regular
+    var title: String { self == .inverted ? "Inverted (default)" : "Regular" }
+
+    /// Inverted drags the surface with the fingers; regular follows the swipe.
+    /// This affects only default two-finger HUD gestures, never keyboard actions.
+    func navigation(for trigger: AppGestureTrigger) -> HUDNavigationAction? {
+        switch trigger {
+        case .twoFingerLeft: return self == .inverted ? .next : .previous
+        case .twoFingerRight: return self == .inverted ? .previous : .next
+        case .twoFingerUp: return self == .inverted ? .below : .above
+        case .twoFingerDown: return self == .inverted ? .above : .below
+        default: return nil
+        }
+    }
+}
+
 enum HUDLayerPosition: String, Codable, CaseIterable, Identifiable {
     case left, right, top, bottom, topLeft, topRight, bottomLeft, bottomRight
     var id: Self { self }
@@ -760,6 +777,8 @@ struct AppExplorerSettings: Codable, Equatable {
     var centerCursorOnAppSwitch: Bool? = nil
     var slotCount: Int? = nil
     var windowManager: ExplorerWindowSettings? = nil
+    var swipeDirection: HUDSwipeDirection? = nil
+    var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
     var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }

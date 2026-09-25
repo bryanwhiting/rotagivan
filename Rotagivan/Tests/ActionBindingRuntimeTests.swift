@@ -397,16 +397,64 @@ private final class BindingPoster: GestureEventPosting {
             ] } ?? [], buttonDown: false, scanTime: 0)
         }
         controller.process(verticalPair(500))
-        controller.process(verticalPair(600))
+        controller.process(verticalPair(400))
         precondition(controller.displayedOrbitOffset == HUDMapPoint(x: 0, y: -1))
         precondition(controller.displayedLayerID == rightMap.id)
         controller.process(verticalPair(nil))
         precondition(controller.displayedLayerID == bottomRightMap.id,
-            "Swiping down from Right targets Bottom right, not Bottom")
+            "Inverted swipe up from Right targets Bottom right, not Bottom")
         controller.process(verticalPair(500))
-        controller.process(verticalPair(700))
+        controller.process(verticalPair(300))
         controller.process(verticalPair(nil))
         precondition(controller.displayedLayerID == bottomRightMap.id, "An edge swipe cannot wrap")
+        controller.dismiss()
+
+        // Each direction mode tracks physical motion, including partial reversal.
+        let strokes: [(AppGestureTrigger, Int, Int, HUDLayerPosition, HUDLayerPosition)] = [
+            (.twoFingerLeft, -1, 0, .right, .left),
+            (.twoFingerRight, 1, 0, .left, .right),
+            (.twoFingerUp, 0, -1, .bottom, .top),
+            (.twoFingerDown, 0, 1, .top, .bottom)
+        ]
+        func strokePair(_ x: Double?, _ y: Double = 500) -> TrackpadReport {
+            TrackpadReport(contacts: x.map { value in [
+                FingerContact(id: 1, x: value, y: y, touching: true, confident: true),
+                FingerContact(id: 2, x: value + 30, y: y, touching: true, confident: true)
+            ] } ?? [], buttonDown: false, scanTime: 0)
+        }
+        for mode in HUDSwipeDirection.allCases {
+            hud.swipeDirection = mode
+            controller.show(waitingForLift: false)
+            for (_, dx, dy, invertedTarget, regularTarget) in strokes {
+                controller.switchLayer(nil)
+                controller.process(strokePair(500))
+                controller.process(strokePair(500 + Double(dx) * 40, 500 + Double(dy) * 40))
+                precondition(controller.displayedOrbitProgress > 0 && controller.displayedOrbitProgress < 0.45)
+                controller.process(strokePair(500))
+                controller.process(strokePair(nil))
+                precondition(controller.displayedLayerID == nil && controller.displayedOrbitProgress == 0,
+                    "Reversing a partial drag cancels in either direction mode")
+                controller.process(strokePair(500))
+                controller.process(strokePair(500 + Double(dx) * 200, 500 + Double(dy) * 200))
+                precondition(controller.displayedOrbitProgress == 1)
+                controller.process(strokePair(nil))
+                let target = mode == .inverted ? invertedTarget : regularTarget
+                precondition(controller.displayedLayerID == mapLayers.first { $0.position == target }?.id,
+                    "Every physical swipe must respect the selected direction mode")
+            }
+            controller.dismiss()
+        }
+        // An explicit cross-axis binding is not inverted again and must scrub
+        // along the physical gesture, not the destination's axis.
+        hud.swipeDirection = .inverted
+        hud.actionBindings = [ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .hudNavigation(.above))]
+        controller.show(waitingForLift: false)
+        controller.process(strokePair(500))
+        controller.process(strokePair(400))
+        precondition(controller.displayedOrbitProgress > 0.45 && controller.displayedOrbitOffset == HUDMapPoint(x: 0, y: 1))
+        controller.process(strokePair(nil))
+        precondition(controller.displayedLayerID == mapLayers.first { $0.position == .top }?.id,
+            "Explicit gesture navigation overrides the direction preference")
         controller.dismiss()
 
         // The same action reference can travel through the unchanged tap page.

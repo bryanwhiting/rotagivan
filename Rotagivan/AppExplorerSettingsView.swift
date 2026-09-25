@@ -240,6 +240,11 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.animationsEnabled = enabled; saveBase(next)
         })
     }
+    private var swipeDirectionBinding: Binding<HUDSwipeDirection> {
+        Binding(get: { baseSettings.resolvedSwipeDirection }, set: { direction in
+            var next = baseSettings; next.swipeDirection = direction; saveBase(next)
+        })
+    }
     private var centerCursorBinding: Binding<Bool> {
         Binding(get: { baseSettings.resolvedCenterCursorOnAppSwitch }, set: { enabled in
             var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
@@ -509,6 +514,13 @@ struct AppExplorerSettingsView: View {
                         ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
                     }.frame(width: 230)
                     Menu {
+                        Picker("Two-finger HUD swipes", selection: swipeDirectionBinding) {
+                            ForEach(HUDSwipeDirection.allCases, id: \.self) { direction in
+                                Text(direction.title).tag(direction)
+                            }
+                        }
+                        .help("Inverted: drag down to reach the HUD above. Regular: swipe down to reach the HUD below.")
+                        Divider()
                         Toggle("Animate HUD feedback", isOn: animationBinding)
                         Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
                     } label: { Label("Options", systemImage: "slider.horizontal.3") }.fixedSize()

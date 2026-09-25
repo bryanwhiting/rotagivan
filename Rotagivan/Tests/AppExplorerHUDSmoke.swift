@@ -127,7 +127,7 @@ import AppKit
         controller.process(pair(620))
         controller.process(pair(nil))
         precondition(controller.displayedLayerID == nil,
-            "A downward edge swipe must stay on Main when no layer is below")
+            "An inverted downward edge swipe must stay on Main when no layer is above")
         controller.dismiss()
         print("Native nine-HUD map rendered orbit phases, navigated cardinal neighbors, respected missing-neighbor boundaries, and rendered a held deep fan.")
     }

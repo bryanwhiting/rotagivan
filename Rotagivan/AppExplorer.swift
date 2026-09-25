@@ -744,6 +744,7 @@ extension AppExplorerPresenting {
         model.orbitGeneration += 1
         model.orbitSettling = false
         model.orbitPosition = nil
+        model.orbitTrigger = nil
         model.orbitOffset = .zero
         model.orbitProgress = 0
         localGestureTimer?.invalidate(); localGestureTimer = nil
@@ -773,12 +774,11 @@ extension AppExplorerPresenting {
         var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
         if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
            (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
-            let defaults: [ActionBinding] = [
-                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .hudNavigation(.next)),
-                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerRight), action: .hudNavigation(.previous)),
-                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerUp), action: .hudNavigation(.above)),
-                ActionBinding(trigger: BindingTrigger(gesture: .twoFingerDown), action: .hudNavigation(.below))
-            ]
+            let direction = configuration().resolvedSwipeDirection
+            let defaults: [ActionBinding] = [AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].map { trigger in
+                ActionBinding(trigger: BindingTrigger(gesture: trigger),
+                    action: .hudNavigation(direction.navigation(for: trigger)!))
+            }
             gestures += defaults.filter { fallback in
                 !gestures.contains { $0.trigger.identity == fallback.trigger.identity }
             }
@@ -873,15 +873,17 @@ extension AppExplorerPresenting {
                        let target = orbitDestination(navigation) {
                         model.orbitOffset = target.offset
                         model.orbitPosition = navigation
+                        model.orbitTrigger = trigger
                     }
                 }
-                if let locked = model.orbitPosition {
+                if let locked = model.orbitTrigger {
                     let distance: Double
                     switch locked {
-                    case .next: distance = -dx
-                    case .previous: distance = dx
-                    case .above: distance = -dy
-                    case .below: distance = dy
+                    case .twoFingerLeft: distance = -dx
+                    case .twoFingerRight: distance = dx
+                    case .twoFingerUp: distance = -dy
+                    case .twoFingerDown: distance = dy
+                    default: distance = 0
                     }
                     var transaction = Transaction(); transaction.disablesAnimations = true
                     withTransaction(transaction) { model.orbitProgress = min(1, max(0, distance / 180)) }
@@ -1600,6 +1602,8 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var nextLayerName: String?
     @Published var carouselPreviews: [HUDCarouselPreview] = []
     @Published var orbitPosition: HUDNavigationAction?
+    // Track the physical stroke independently of its chosen navigation action.
+    var orbitTrigger: AppGestureTrigger?
     @Published var orbitOffset: HUDMapPoint = .zero
     @Published var orbitProgress = 0.0
     var orbitSettling = false

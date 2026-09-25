@@ -55,8 +55,8 @@ import SwiftUI
             switch direction {
             case .next: end = HUDMapPoint(x: 300, y: 500)
             case .previous: end = HUDMapPoint(x: 700, y: 500)
-            case .above: end = HUDMapPoint(x: 500, y: 300)
-            case .below: end = HUDMapPoint(x: 500, y: 700)
+            case .above: end = HUDMapPoint(x: 500, y: 700)
+            case .below: end = HUDMapPoint(x: 500, y: 300)
             }
             controller.process(pair(HUDMapPoint(x: 500, y: 500)))
             controller.process(pair(end))

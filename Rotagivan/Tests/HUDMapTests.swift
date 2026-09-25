@@ -2,6 +2,19 @@ import Foundation
 
 @main struct HUDMapTests {
     static func main() throws {
+        precondition(AppExplorerSettings().resolvedSwipeDirection == .inverted)
+        let legacy = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(#"{"defaultMode":"favorites","favorites":[]}"#.utf8))
+        precondition(legacy.swipeDirection == nil && legacy.resolvedSwipeDirection == .inverted,
+            "Existing profiles with no preference default to inverted")
+        for mode in HUDSwipeDirection.allCases {
+            let preference = AppExplorerSettings(swipeDirection: mode)
+            let saved = try JSONEncoder().encode(preference)
+            let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: saved)
+            precondition(restored.resolvedSwipeDirection == mode && restored == preference)
+        }
+        precondition(HUDSwipeDirection.inverted.navigation(for: .twoFingerDown) == .above)
+        precondition(HUDSwipeDirection.regular.navigation(for: .twoFingerDown) == .below)
+        precondition(HUDSwipeDirection.inverted.navigation(for: .oneFingerTap) == nil)
         var layers = HUDLayerPosition.allCases.map { position in
             var layer = ExplorerHoldLayer.empty(name: position.title)
             layer.position = position

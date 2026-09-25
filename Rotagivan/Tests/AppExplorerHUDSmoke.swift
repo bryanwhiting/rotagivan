@@ -32,7 +32,10 @@ import AppKit
         ]
         let deepLeft = AppExplorerFavorite(direction: .left, name: "Left half", children: deepChoices, slotCount: 3,
             windowPlacement: ExplorerWindowPlacement(direction: .left, layout: .halves))
-        var settings = AppExplorerSettings(favorites: [deepLeft, favorite(.right, "Search")],
+        var settings = AppExplorerSettings(actionBindings: [
+            ActionBinding(trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: 49, modifiers: 0, keyLabel: "Space")),
+                action: .media(.mute))
+        ], favorites: [deepLeft, favorite(.right, "Search")],
             holdLayers: [right, top, bottom])
         controller.configuration = { settings }
         controller.contextIsValid = { true }

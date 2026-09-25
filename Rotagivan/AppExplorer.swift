@@ -1551,7 +1551,7 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
             .brightness(-0.16 * (1 - depth))
             .opacity(0.84 + 0.16 * depth)
             .offset(x: Double(position.x) * sin(angle) * 340,
-                    y: Double(-position.y) * sin(angle) * 290)
+                    y: Double(-position.y) * sin(angle) * 240)
     }
 }
 
@@ -1681,26 +1681,6 @@ struct AppExplorerView: View {
                 }
             }
             }
-            // Keep actionable runtime messages, but no instruction chip between
-            // the wheel and its E/S footer (including in settings previews).
-            if !isPreview, let message = model.message {
-                Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).lineLimit(3)
-            }
-            if model.showingAppWindows {
-                HStack {
-                    Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
-                    Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
-                    Button("Next") { onWindowPage(1) }.disabled(model.page + 1 >= model.pageCount)
-                }.background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-6) } }
-            }
-            if !model.layerHint.isEmpty {
-                Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                    .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
-            }
-            if showsCarousel { settingsFooter }
-            else { Text(model.layerName ?? "Main HUD").font(.caption.weight(.medium)).foregroundStyle(accent) }
-            if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty { layerActionHotkeyFooter }
         }
         .padding(26)
         .frame(width: 470, height: 520)
@@ -1720,10 +1700,55 @@ struct AppExplorerView: View {
         }
         .transaction { if !animates { $0.animation = nil } }
         .help(guidance)
+        .overlay(alignment: .bottom) {
+            if !showsCarousel {
+                Text(model.layerName ?? "Main HUD")
+                    .font(.caption.weight(.medium)).foregroundStyle(accent)
+                    .padding(.bottom, 80)
+            }
+        }
         .modifier(HUDOrbitTransform(position: model.orbitPosition ?? .right,
             phase: animates ? -model.orbitProgress : 0))
         .frame(width: 950, height: 850)
         .background { if showsCarousel { carouselBackdrop } }
+        .overlay(alignment: .bottom) {
+            if showsCarousel {
+                ScrollView(.vertical, showsIndicators: false) {
+                    fixedHUDControls
+                }
+                .frame(width: 440, height: 72, alignment: .top)
+                .padding(.bottom, 6)
+                .tint(accent)
+                .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
+                .transaction { $0.animation = nil }
+            }
+        }
+
+    }
+
+    private var fixedHUDControls: some View {
+        VStack(spacing: 6) {
+            settingsFooter
+            if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty {
+                layerActionHotkeyFooter.frame(height: 30)
+            }
+            if !isPreview, let message = model.message {
+                Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineLimit(3)
+            }
+            if model.showingAppWindows {
+                HStack {
+                    Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
+                    Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
+                    Button("Next") { onWindowPage(1) }.disabled(model.page + 1 >= model.pageCount)
+                }.background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-6) } }
+            }
+            if !model.layerHint.isEmpty {
+                Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var carouselBackdrop: some View {

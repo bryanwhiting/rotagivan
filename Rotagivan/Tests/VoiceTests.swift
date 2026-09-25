@@ -108,6 +108,8 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         session.start(catalog: catalog)
         try await Task.sleep(nanoseconds: 30_000_000)
         precondition(session.phase == .listening && mic.starts == 1)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        precondition(session.waveform.contains { $0 > 0 }, "Live microphone levels reach the HUD")
         precondition(session.selectedMatch == nil, "No execution while recording")
         session.finishListening()
         precondition(mic.stops == 1 && mic.buffer.snapshot().0.isEmpty)
@@ -189,7 +191,41 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         precondition(executed.count == 2, "No-match results cannot execute even if an action is selected")
         controller.dismiss()
 
+        precondition(!AppExplorerSettings().resolvedVoiceAutoDecide)
+        var automatic = AppExplorerSettings()
+        automatic.voiceAutoDecide = true
+        let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(automatic))
+        precondition(restored.resolvedVoiceAutoDecide)
+        controller.configuration = { automatic }
+        controller.prepareVoice = { voice, _ in voice.receive(decision, final: false) }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        precondition(executed.count == 2, "Partial results never auto-execute")
+        let automaticSession = controller.displayedVoiceSession!
+        automaticSession.receive(decision, final: true)
+        automaticSession.receive(decision, final: true)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        precondition(executed.count == 3 && executed.last == slack.action, "Auto-decide runs the best final action once")
+        controller.prepareVoice = { voice, _ in voice.receive(noMatch, final: true) }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        precondition(executed.count == 3 && controller.displayedVoiceSession != nil, "Auto-decide must not execute no-match")
+        controller.dismiss()
+        controller.prepareVoice = { voice, _ in
+            available = [mute, pause]
+            voice.receive(decision, final: true)
+        }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Auto-decide revalidates removed IDs")
+        controller.dismiss(); available = catalog
+        let levels = VoiceAudioBuffer()
+        for _ in 0..<100 { levels.append(Data(), rms: 0.1) }
+        precondition(levels.waveform().count == 48 && levels.waveform().allSatisfy { $0 > 0 && $0 <= 1 })
+        levels.append(Data(), rms: .nan)
+        precondition(levels.waveform().last == 0)
+        levels.clear()
+        precondition(levels.waveform().allSatisfy { $0 == 0 })
+
         // Render without recording or network access.
+
         let preview = VoiceSession()
         preview.makeCloud = { fake }; preview.makeMicrophone = { FakeMicrophone() }; preview.requestPermission = { true }
         preview.start(catalog: catalog)

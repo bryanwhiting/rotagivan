@@ -1024,6 +1024,8 @@ struct AppExplorerSettings: Codable, Equatable {
     var centerCursorOnAppSwitch: Bool? = nil
     var slotCount: Int? = nil
     var windowManager: ExplorerWindowSettings? = nil
+    var voiceAutoDecide: Bool? = nil
+    var resolvedVoiceAutoDecide: Bool { voiceAutoDecide ?? false }
     var swipeDirection: HUDSwipeDirection? = nil
     var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
     var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }

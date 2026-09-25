@@ -583,6 +583,18 @@ struct ContentView: View {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
             }
             Divider()
+            Section("Voice mode") {
+                Toggle("Auto-decide", isOn: Binding(
+                    get: { store.settings.appExplorer?.resolvedVoiceAutoDecide ?? false },
+                    set: { enabled in
+                        var settings = store.settings.appExplorer ?? AppExplorerSettings()
+                        settings.voiceAutoDecide = enabled
+                        store.settings.appExplorer = settings
+                    }))
+                Text("Off by default: choose among three matches in the voice HUD, then press Space or Enter. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
             ConfigurationSettingsView(store: store, hid: hid)
             Divider()
             SyncSettingsView(sync: sync)

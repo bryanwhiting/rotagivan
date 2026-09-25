@@ -27,18 +27,24 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     private var pcm = Data()
     private var speechAt: Date?
     private var failed = false
+    private var levels = [Double](repeating: 0, count: 48)
+    func waveform() -> [Double] {
+        lock.lock(); defer { lock.unlock() }; return levels
+    }
     static let maximumBytes = 16_000 * 2 * 12
     func append(_ data: Data, rms: Double) {
         lock.lock(); defer { lock.unlock() }
         pcm.append(data.prefix(max(0, Self.maximumBytes - pcm.count)))
-        if rms > 0.008 { speechAt = Date() }
+        let level = rms.isFinite ? max(0, min(1, rms)) : 0
+        levels.append(min(1, sqrt(level) * 2.5)); levels.removeFirst()
+        if level > 0.008 { speechAt = Date() }
     }
     func fail() { lock.lock(); failed = true; lock.unlock() }
     func snapshot() -> (Data, Date?, Bool) {
         lock.lock(); defer { lock.unlock() }
         return (pcm, speechAt, failed)
     }
-    func clear() { lock.lock(); pcm.removeAll(); speechAt = nil; failed = false; lock.unlock() }
+    func clear() { lock.lock(); pcm.removeAll(); levels = Array(repeating: 0, count: 48); speechAt = nil; failed = false; lock.unlock() }
     static func wav(_ pcm: Data) -> Data {
         var result = Data()
         func text(_ value: String) { result.append(contentsOf: value.utf8) }
@@ -108,6 +114,9 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     @Published private(set) var transcript = ""
     @Published private(set) var decision: VoiceDecision?
     @Published private(set) var message = "Preparing microphone…"
+    @Published private(set) var waveform = [Double](repeating: 0, count: 48)
+    var onFinalMatch: (() -> Void)?
+    private var deliveredFinal = false
     @Published var selected: ExplorerSlot = .up
     private var microphone: VoiceAudioCapturing?
     var makeMicrophone: () -> VoiceAudioCapturing = { VoiceMicrophone() }
@@ -139,6 +148,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         generation = UUID()
         let token = generation
         self.catalog = catalog
+        deliveredFinal = false
         transcript = ""; decision = nil; selected = .up
         phase = .preparing; message = "Preparing microphone…"
         preparation = Task { [weak self] in
@@ -153,7 +163,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                 self.microphone = mic
                 self.started = Date(); self.sentAt = .distantPast
                 self.phase = .listening; self.message = "Listening… say an action · Space/Enter to finish"
-                let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+                let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
                 }
                 self.timer = timer
@@ -163,6 +173,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     }
     private func tick() {
         guard phase == .listening, let microphone else { return }
+        waveform = microphone.buffer.waveform()
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         if failed { fail(VoiceError.message("Microphone audio conversion failed. Please try again.")); return }
         let elapsed = Date().timeIntervalSince(started)
@@ -218,9 +229,12 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         guard phase != .cancelled && phase != .failed else { return }
         self.decision = decision
         if final {
+            guard !deliveredFinal else { return }
+            deliveredFinal = true
             phase = .ready
             selected = decision.noMatch ? .left : .up
             message = decision.noMatch ? "No matching action. Nothing will run." : "Swipe to select · Space or Enter to run"
+            if !decision.noMatch, selectedMatch != nil { onFinalMatch?() }
         }
     }
     func select(_ direction: ExplorerSlot) {
@@ -231,6 +245,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         timer?.invalidate(); timer = nil
         worker?.cancel(); worker = nil; queued = nil
         (cloud as? OpenRouterVoiceCloud)?.close(); cloud = nil
+        waveform = Array(repeating: 0, count: 48)
         decision = nil; phase = .failed
         message = (error as? VoiceError)?.errorDescription ?? "Voice service unavailable. Check your connection and try again. Nothing was run."
     }
@@ -241,6 +256,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         microphone?.stop(); microphone?.buffer.clear(); microphone = nil
         timer?.invalidate(); timer = nil
         (cloud as? OpenRouterVoiceCloud)?.close(); cloud = nil
+        waveform = Array(repeating: 0, count: 48)
         phase = .cancelled; decision = nil; transcript = ""; catalog = []
     }
 }
@@ -263,23 +279,8 @@ struct VoiceHUDView: View {
                 .font(.system(size: 21, weight: .medium)).multilineTextAlignment(.center)
                 .lineLimit(3).frame(height: 78)
                 .accessibilityLabel("Transcription: " + session.transcript)
-            VStack(spacing: 10) {
-                option(.up, index: 0)
-                HStack(spacing: 10) {
-                    option(.left, index: nil)
-                    Button {
-                        if session.phase == .listening { session.finishListening() }
-                        else { onRetry() }
-                    } label: {
-                        VStack(spacing: 6) {
-                            Image(systemName: session.phase == .listening ? "stop.fill" : "mic.fill").font(.title2)
-                            Text(session.phase == .listening ? "Finish" : "Listen again").font(.caption)
-                        }.frame(width: 112, height: 94)
-                    }.buttonStyle(.plain).foregroundStyle(cyan)
-                    option(.right, index: 1)
-                }
-                option(.down, index: 2)
-            }
+            waveformView
+            radialView
             Text(session.message).font(.callout).multilineTextAlignment(.center).frame(minHeight: 38)
             if let decision = session.decision {
                 Text("Jev confidence \(Int((decision.confidence * 100).rounded()))% · \(decision.shortlisted ? "Scores among finalists" : "Action match scores")")
@@ -295,19 +296,62 @@ struct VoiceHUDView: View {
         .overlay(RoundedRectangle(cornerRadius: 26).stroke(cyan.opacity(0.45), lineWidth: 1))
         .environment(\.colorScheme, .dark).tint(cyan)
     }
+    @ViewBuilder private var waveformView: some View {
+            if session.phase == .listening || session.phase == .preparing {
+                HStack(spacing: 3) {
+                    ForEach(0..<48, id: \.self) { index in
+                        Capsule().fill(cyan.opacity(0.85))
+                            .frame(width: 4, height: max(3, session.waveform[index] * 56))
+                    }
+                }.frame(height: 60)
+                    .accessibilityLabel("Microphone audio level")
+            }
+    }
+    private var radialView: some View {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.025))
+                    .overlay(Circle().stroke(cyan.opacity(0.3), lineWidth: 1))
+                option(.up, index: 0)
+                option(.right, index: 1)
+                option(.down, index: 2)
+                option(.left, index: nil)
+                Button {
+                    if session.phase == .listening { session.finishListening() }
+                    else if session.phase == .ready { onConfirm() }
+                    else if session.phase == .failed { onRetry() }
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: session.phase == .listening ? "stop.fill" : session.phase == .ready ? "return" : "mic.fill")
+                        Text(session.phase == .listening ? "Finish" : session.phase == .ready ? "Run" : session.phase == .failed ? "Retry" : "Wait")
+                            .font(.system(size: 10, weight: .medium))
+                    }.frame(width: 82, height: 82)
+                        .background(Circle().fill(Color.black.opacity(0.35)))
+                        .overlay(Circle().stroke(cyan.opacity(0.65), lineWidth: 1))
+                }.buttonStyle(.plain).foregroundStyle(cyan)
+                    .disabled(session.phase == .matching || session.phase == .preparing)
+            }.frame(width: 350, height: 350)
+    }
     private func option(_ direction: ExplorerSlot, index: Int?) -> some View {
         let match = index.flatMap { i in session.decision.flatMap { i < $0.matches.count ? $0.matches[i] : nil } }
         let active = session.selected == direction
+        let sector = ExplorerStarburstSector(direction: direction, innerRadius: 48, outerRadius: 170, halfAngle: 43, roundedRim: true)
+        let angle = ExplorerStarburstLayout.angle(direction) * .pi / 180
         return Button { session.select(direction) } label: {
-            VStack(spacing: 5) {
-                Text(direction == .left ? "Exit / Ignore" : (match?.record.title ?? "—"))
-                    .font(.system(size: 12, weight: .semibold)).lineLimit(3)
-                if let match { Text("\(Int((match.probability * 100).rounded()))% match").font(.caption).foregroundStyle(cyan) }
-                else if direction == .left { Text("Nothing will run").font(.system(size: 10)).foregroundStyle(.secondary) }
-            }.multilineTextAlignment(.center).frame(width: 145, height: 94)
-                .background(RoundedRectangle(cornerRadius: 15).fill(active ? cyan.opacity(0.18) : Color.white.opacity(0.04)))
-                .overlay(RoundedRectangle(cornerRadius: 15).stroke(active ? cyan : Color.white.opacity(0.12), lineWidth: active ? 2 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 15))
+            ZStack {
+                sector.fill(active ? cyan.opacity(0.2) : Color.white.opacity(0.04))
+                sector.stroke(active ? cyan : cyan.opacity(0.25), lineWidth: active ? 2 : 1)
+                VStack(spacing: 5) {
+                    Text(direction == .left ? "Exit / Ignore" : (match?.record.title ?? "—"))
+                        .font(.system(size: 12, weight: .semibold)).lineLimit(3)
+                    if let match {
+                        Text("\(Int((match.probability * 100).rounded()))% match").font(.caption).foregroundStyle(cyan)
+                    } else if direction == .left {
+                        Text("Nothing will run").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }.multilineTextAlignment(.center).frame(width: 102, height: 78)
+                    .offset(x: cos(angle) * 111, y: sin(angle) * 111)
+            }.frame(width: 350, height: 350).contentShape(sector)
         }.buttonStyle(.plain).accessibilityLabel(direction == .left ? "Exit or ignore" : "\(match?.record.title ?? "No match"), \(Int(((match?.probability ?? 0) * 100).rounded())) percent match")
+
     }
 }

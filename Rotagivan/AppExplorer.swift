@@ -1320,6 +1320,12 @@ extension AppExplorerPresenting {
         endVoiceMode()
         resetLocalGesture()
         let voice = VoiceSession()
+        voice.onFinalMatch = { [weak self, weak voice] in
+            guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                  self.contextIsValid?() != false,
+                  self.configuration().resolvedVoiceAutoDecide == true else { return }
+            self.confirmVoiceAction()
+        }
         model.voiceSession = voice
         input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: 4)
         deadline = Date().addingTimeInterval(120)

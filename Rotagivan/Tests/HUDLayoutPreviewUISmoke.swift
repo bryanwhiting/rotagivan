@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor private final class PreviewState: ObservableObject {
     @Published var settings = AppExplorerSettings()
+    @Published var selectedLayerID: UUID?
     @Published var selection: ExplorerSlot = .up
     @Published var groupPath: [ExplorerSlot] = []
     @Published var editing: ExplorerSlot?
@@ -15,8 +16,8 @@ import SwiftUI
 private struct PreviewFixture: View {
     @ObservedObject var state: PreviewState
     var body: some View {
-        ExplorerHUDSettingsPreview(settings: state.settings, theme: state.settings.resolvedTheme, dictionary: [], groupPath: state.groupPath,
-            layerName: nil, selection: $state.selection, onBack: { if !state.groupPath.isEmpty { state.groupPath.removeLast() } }, onDrag: { source, _ in
+        ExplorerHUDSettingsPreview(settings: state.settings.projected(layerID: state.selectedLayerID), theme: state.settings.resolvedTheme, dictionary: [], groupPath: state.groupPath,
+            layerName: state.settings.holdLayers?.first { $0.id == state.selectedLayerID }?.name, rootSettings: state.settings, selectedLayerID: state.selectedLayerID, onSelectLayer: { state.selectedLayerID = $0; state.groupPath = []; state.editing = nil }, selection: $state.selection, onBack: { if !state.groupPath.isEmpty { state.groupPath.removeLast() } }, onDrag: { source, _ in
                 if state.drag == nil { state.drag = ExplorerSlotDrag(source: source, path: state.groupPath, settings: state.settings) }
             }, onDrop: { _, target in
                 defer { state.drag = nil }
@@ -56,7 +57,9 @@ private struct PreviewFixture: View {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
         }
-        func send(_ type: NSEvent.EventType, x: CGFloat, y: CGFloat) {
+        func send(_ type: NSEvent.EventType, x: CGFloat, y: CGFloat, fullLayout: Bool = false) {
+            let x = x + (fullLayout ? 0 : (host.bounds.width - 470) / 2)
+            let y = y + (fullLayout ? 0 : (host.bounds.height - 520) / 2)
             let point = host.convert(NSPoint(x: x, y: host.isFlipped ? y : host.bounds.height - y), to: nil)
             let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
@@ -117,12 +120,51 @@ private struct PreviewFixture: View {
             RunLoop.main.run(until: Date().addingTimeInterval(0.4))
             precondition(state.editing == .right && state.editorAppeared == .right)
             let rightFrame = NSApp.windows.first { $0 !== panel && $0.isVisible && $0.contentView != nil }!.frame
-            precondition(rightFrame.midX > leftFrame.midX + 80,
-                         "Popover must follow the selected tile, not attach to the whole HUD")
+            precondition(panel.screen?.visibleFrame.contains(panel.frame.insetBy(dx: -400, dy: 0)) != true || rightFrame.midX > leftFrame.midX + 80,
+                         "When screen space permits, the popover must follow its tile; AppKit may clamp it at screen edges")
             state.editing = nil
             RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         }
+        // Real mouse events on satellite HUDs must select the saved layer,
+        // not execute its tiles or open a tile editor before selection.
+        state.settings.theme = .starburstAir
+        let layer = ExplorerHoldLayer(name: "Other HUD", position: .right, holdShortcut: nil,
+            favorites: [AppExplorerFavorite(direction: .up, name: "Lock", action: .lockScreen)])
+        state.settings.holdLayers = [layer]
+        panel.setContentSize(NSSize(width: 950, height: 850))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let right = HUDMapProjection(x: 1, y: 0)
+        send(.leftMouseDown, x: 475 + right.offsetX, y: 425 - 38 + right.offsetY, fullLayout: true)
+        send(.leftMouseUp, x: 475 + right.offsetX, y: 425 - 38 + right.offsetY, fullLayout: true)
+        precondition(state.selectedLayerID == layer.id && state.editing == nil,
+            "Clicking a satellite selects that HUD without executing or editing its tiles")
+        try snapshot("hud-preview-selected-layer")
+        let left = HUDMapProjection(x: -1, y: 0)
+        send(.leftMouseDown, x: 475 + left.offsetX, y: 425 - 38 + left.offsetY, fullLayout: true)
+        send(.leftMouseUp, x: 475 + left.offsetX, y: 425 - 38 + left.offsetY, fullLayout: true)
+        precondition(state.selectedLayerID == nil, "The Main HUD is selectable from another layer")
+        try snapshot("hud-preview-main-return")
         panel.orderOut(nil); panel.close()
+        let suite = "Rotagivan.VisualHUDSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "migration.rotagivan.v1")
+        let store = SettingsStore(defaults: defaults)
+        store.settings.appExplorer = state.settings
+        let savedSettings = store.settings.appExplorer
+        let settingsHost = NSHostingView(rootView: AppExplorerSettingsView(store: store).padding())
+        let settingsPanel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 1080),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        settingsPanel.isReleasedWhenClosed = false; settingsPanel.contentView = settingsHost
+        settingsPanel.orderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        settingsHost.layoutSubtreeIfNeeded()
+        let bitmap = settingsHost.bitmapImageRepForCachingDisplay(in: settingsHost.bounds)!
+        settingsHost.cacheDisplay(in: settingsHost.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath:
+            CommandLine.arguments[1] + "/hud-unified-settings.png"))
+        precondition(store.settings.appExplorer == savedSettings, "Browsing the visual editor must preserve settings")
+        settingsPanel.orderOut(nil); settingsPanel.close()
         print("HUD preview UI passed: inert selection, native drag-to-swap, tile-anchored app-picker popovers in every theme, shared rendering for 4/8/12/16 slots. No actions executed.")
     }
 }

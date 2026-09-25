@@ -1704,6 +1704,7 @@ struct AppExplorerView: View {
     var forceReduceTransparency = false
     var isPreview = false
     var showsCarousel = true
+    var onPreviewLayer: ((String) -> Void)? = nil
     var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
@@ -1849,16 +1850,29 @@ struct AppExplorerView: View {
                 carouselGhost(preview)
             }
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .allowsHitTesting(isPreview && onPreviewLayer != nil)
+        .accessibilityHidden(!isPreview || onPreviewLayer == nil)
     }
 
     private var cameraX: Double { animates ? Double(model.orbitOffset.x) * model.orbitProgress : 0 }
     private var cameraY: Double { animates ? Double(model.orbitOffset.y) * model.orbitProgress : 0 }
 
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
-        HUDOrbitSatellite(preview: preview, theme: model.theme)
-            .equatable()
+        Group {
+            if isPreview, let onPreviewLayer {
+                Button { onPreviewLayer(preview.id) } label: {
+                    HUDOrbitSatellite(preview: preview, theme: model.theme)
+                        .equatable()
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(preview.name)")
+                .accessibilityIdentifier("hud-preview-layer-\(preview.id)")
+                .help("Click to edit \(preview.name)")
+            } else {
+                HUDOrbitSatellite(preview: preview, theme: model.theme).equatable()
+            }
+        }
             .modifier(HUDOrbitTransform(x: Double(preview.offset.x) - cameraX,
                 y: Double(preview.offset.y) - cameraY))
             .zIndex(-Double(preview.offset.x * preview.offset.x + preview.offset.y * preview.offset.y))
@@ -1869,9 +1883,13 @@ struct AppExplorerView: View {
             Text("HUD: \(model.groupNames.last ?? model.layerName ?? "Main HUD")")
                 .lineLimit(1).truncationMode(.middle)
             Text("·")
+            if isPreview {
+                Text("Click a HUD to switch · click a tile to edit")
+            } else {
             Text("Press")
             footerKey("S", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")
+            }
             if let position = model.carouselPosition {
                 Text("· \(position)").monospacedDigit()
             }

@@ -161,12 +161,6 @@ struct WindowManagerSettingsView: View {
     }
 }
 
-private struct HUDLayerActivationSource: Hashable {
-    let symbol: String
-    let title: String
-    let detail: String
-}
-
 struct AppExplorerSettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var editingURLPath: [ExplorerSlot]?
@@ -258,25 +252,6 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
         })
     }
-    private func activationSources(for layer: ExplorerHoldLayer?) -> [HUDLayerActivationSource] {
-        let favorites = layer?.favorites ?? baseSettings.favorites
-        let sources = favorites.compactMap { tile -> HUDLayerActivationSource? in
-            guard let shortcut = tile.activationShortcut else { return nil }
-            return HUDLayerActivationSource(symbol: "keyboard",
-                title: shortcut.readableCombination, detail: tile.name)
-        }
-        let direct = ((layer == nil ? baseSettings.actionBindings : layer?.actionBindings) ?? []).compactMap { binding -> HUDLayerActivationSource? in
-            guard binding.trigger.isValid else { return nil }
-            return HUDLayerActivationSource(symbol: binding.trigger.keyboard == nil ? "hand.tap" : "keyboard",
-                title: binding.trigger.title, detail: binding.action.title)
-        }
-        let allSources = direct + sources
-        return allSources.isEmpty
-            ? [HUDLayerActivationSource(symbol: "keyboard.badge.ellipsis", title: "No action hotkeys",
-                detail: "Add a layer action")]
-            : allSources
-    }
-
     private func placeHUDLayer(_ id: UUID, at destination: HUDLayerPosition) {
         var next = baseSettings
         guard var layers = next.holdLayers,
@@ -297,192 +272,76 @@ struct AppExplorerSettingsView: View {
         return baseSettings.holdLayers?.first { resolved[$0.id] == position }
     }
 
-    private func hudPositionCell(_ position: HUDLayerPosition) -> some View {
-        Group {
-            if let layer = layerAt(position) {
-                hudLayerCard(layer, index: (baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0) + 1)
-                    .draggable(layer.id.uuidString)
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: position.symbol).font(.title3)
-                    if scopeTitle == nil && !windowManagerOnly {
-                    Menu("Built-in HUD…") {
-                        ForEach(HUDLayerBuiltIn.allCases) { builtIn in
-                            Button(builtIn.title, systemImage: builtIn.symbol) {
-                                var next = baseSettings
-                                guard let id = next.assignBuiltIn(builtIn, at: position) else { return }
-                                if saveBase(next) { selectedLayerID = id; groupPath = [] }
-                            }
-                        }
-                    }
-                    .fixedSize()
-                    }
-                    Text("Drop a custom HUD here").font(.caption2)
-
-                    Text(position.title).font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-                .frame(width: 220, height: 170)
-                .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
-            }
-        }
-        .dropDestination(for: String.self) { identifiers, _ in
-            guard let value = identifiers.first, let id = UUID(uuidString: value),
-                  baseSettings.holdLayers?.contains(where: { $0.id == id }) == true else { return false }
-            placeHUDLayer(id, at: position)
-            return true
-        }
-        .accessibilityIdentifier("hud-position-\(position.rawValue)")
+    private var visualHUDPreview: some View {
+        ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
+            dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
+            layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name,
+            rootSettings: baseSettings, selectedLayerID: selectedLayerID, onSelectLayer: { id in selectedLayerID = id; groupPath = [] },
+            selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
+            onDrag: { source, target in
+                if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
+            }, onDrop: { _, target in
+                defer { previewDrag = nil }
+                guard let drag = previewDrag, let target else { return }
+                var next = settings
+                if drag.apply(to: target, in: groupPath, settings: &next), save(next) { previewSelection = target }
+            }, editingTile: $previewEditing, editor: generatedBuiltIn == nil ? { direction in tilePopover(direction) } : nil)
+            .padding(.top, -20)
+            .frame(maxWidth: .infinity)
     }
 
-    private func hudLayerCard(_ layer: ExplorerHoldLayer?, index: Int) -> some View {
-        let layerID = layer?.id
-        let selected = selectedLayerID == layerID
-        let sources = activationSources(for: layer)
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                selectedLayerID = layerID
-                groupPath = []
-            } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(String(format: "%02d", index + 1))
-                            .font(.caption2.monospacedDigit().weight(.bold))
-                            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                        Text(layer?.name ?? "Main HUD")
-                            .font(.headline).lineLimit(1)
-                        Spacer(minLength: 4)
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
-                        }
+    private var visualHUDControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("Editing HUD", selection: $selectedLayerID) {
+                    Text("Main HUD").tag(nil as UUID?)
+                    ForEach(baseSettings.holdLayers ?? []) { layer in
+                        Text(layer.name).tag(Optional(layer.id))
                     }
-                    VStack(alignment: .leading, spacing: 7) {
-                        ForEach(Array(sources.prefix(3)), id: \.self) { source in
-                            HStack(alignment: .top, spacing: 7) {
-                                Image(systemName: source.symbol)
-                                    .frame(width: 14).foregroundStyle(Color.accentColor)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(source.title).font(.caption.weight(.semibold)).lineLimit(1)
-                                    Text(source.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }.frame(maxWidth: 260)
+                Button("Actions & hotkeys…") {
+                    if !groupPath.isEmpty { openGroupHotkeys() }
+                    else if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
+                        creatingLayer = false; editingLayer = layer
+                    } else { editingDefaultLayer = true }
+                }
+                .accessibilityIdentifier("hud-visual-actions")
+                Spacer(minLength: 8)
+                Menu {
+                    Button("Custom HUD…") { creatingLayer = true; editingLayer = .empty() }
+                    if scopeTitle == nil && !windowManagerOnly {
+                        ForEach(HUDLayerBuiltIn.allCases) { builtIn in
+                            Menu(builtIn.title) {
+                                ForEach(HUDLayerPosition.allCases.filter { layerAt($0) == nil }) { position in
+                                    Button(position.title) {
+                                        var next = baseSettings
+                                        guard let id = next.assignBuiltIn(builtIn, at: position) else { return }
+                                        if saveBase(next) { selectedLayerID = id; groupPath = [] }
+                                    }
                                 }
                             }
                         }
-                        if sources.count > 3 {
-                            Text("+\(sources.count - 3) more activation sources")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
                     }
-                }
-                .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-                .padding(13).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if let layer {
-                Divider()
-                HStack(spacing: 12) {
-                    Button("Edit hotkeys") {
-                        if selected && !groupPath.isEmpty { openGroupHotkeys() }
-                        else { creatingLayer = false; editingLayer = layer }
-                    }
-                    Spacer(minLength: 0)
-                    Menu {
-                        ForEach(HUDLayerPosition.allCases) { position in
-                            Button(position.title, systemImage: position.symbol) {
-                                placeHUDLayer(layer.id, at: position)
-                            }
-                        }
-                    } label: {
-                        Text(baseSettings.resolvedHUDPositions[layer.id]?.title ?? "Unplaced")
-                    }
-                    .help("Place \(layer.name) around the Main HUD")
-                }
-                .font(.caption).buttonStyle(.link).padding(.horizontal, 13).frame(height: 32)
-            } else {
-                Divider()
-                HStack {
-                    Label("Main HUD actions", systemImage: "safari")
-                    Spacer(minLength: 0)
-                    Button("Edit hotkeys") {
-                        if !groupPath.isEmpty { openGroupHotkeys() }
-                        else { editingDefaultLayer = true }
-                    }
-                        .buttonStyle(.link)
-                }.font(.caption).padding(.horizontal, 13).frame(height: 32)
-            }
-        }
-        .frame(width: 220)
-        .background(selected ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.035),
-                    in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(selected ? Color.accentColor.opacity(0.72) : Color.primary.opacity(0.1),
-                              lineWidth: selected ? 1.5 : 1)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(layerID.map { "hud-layer-\($0.uuidString)" } ?? "hud-layer-default")
-    }
-
-    private var hudLayerRail: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("HUD layers").font(.headline)
-                    Text("Select a layer to edit its tiles. Each card shows its hotkey → action assignments.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Up to nine HUDs: Main stays in the center. Drag layers into the surrounding slots. Choose a built-in in any empty slot, or drag a custom layer. Swipe in all eight directions.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    importingBookmarks = true
-                } label: {
-                    Label("Import bookmarks", systemImage: "book.closed")
-                }
-                .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
-                .help(availableBookmarkSlots.isEmpty ? "Remove a tile to make room for a bookmark." :
-                    "Import Chrome or Safari bookmarks into open tiles in this HUD layer.")
-                Button {
-                    creatingLayer = true
-                    editingLayer = .empty()
-                } label: {
-                    Label("Add HUD layer", systemImage: "plus")
-                }
+                } label: { Label("Add HUD", systemImage: "plus") }
                 .disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
-            }
-            VStack(spacing: 10) {
-                HStack(alignment: .top, spacing: 10) {
-                    hudPositionCell(.topLeft)
-                    hudPositionCell(.top)
-                    hudPositionCell(.topRight)
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    hudPositionCell(.left)
-                    hudLayerCard(nil, index: 0)
-                    hudPositionCell(.right)
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    hudPositionCell(.bottomLeft)
-                    hudPositionCell(.bottom)
-                    hudPositionCell(.bottomRight)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            let placed = baseSettings.resolvedHUDPositions
-            let unplaced = (baseSettings.holdLayers ?? []).filter { placed[$0.id] == nil }
-            if !unplaced.isEmpty {
-                Text("Unplaced HUDs · swap one into the map, or open it with its hotkey")
-                    .font(.caption).foregroundStyle(.secondary)
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 10) {
-                        ForEach(unplaced) { layer in
-                            hudLayerCard(layer, index: (baseSettings.holdLayers?.firstIndex(where: { $0.id == layer.id }) ?? 0) + 1)
-                                .draggable(layer.id.uuidString)
+                .accessibilityIdentifier("hud-visual-add")
+                Menu {
+                    Button("Import bookmarks…") { importingBookmarks = true }
+                        .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
+                    if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
+                        Button("Rename / edit HUD…") { creatingLayer = false; editingLayer = layer }
+                        Menu("Position") {
+                            ForEach(HUDLayerPosition.allCases) { position in
+                                Button(position.title) { placeHUDLayer(layer.id, at: position) }
+                            }
                         }
+                        Button("Remove HUD…", role: .destructive) { removingLayer = true }
                     }
-                }
+                } label: { Label("Manage", systemImage: "ellipsis.circle") }
             }
+            Text("Click any surrounding HUD to bring it forward and edit it. Use Actions & hotkeys to add actions to the selected HUD.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -586,7 +445,7 @@ struct AppExplorerSettingsView: View {
                     }
                 }.font(.subheadline)
             } else {
-                hudLayerRail
+                visualHUDControls
             }
             if scopeTitle == nil && compact {
                 Text("Assign keyboard shortcuts or trackpad gestures to this layer’s actions.")
@@ -597,6 +456,7 @@ struct AppExplorerSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let builtIn = generatedBuiltIn {
+                if !compact { visualHUDPreview }
                 GroupBox {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(builtIn.title, systemImage: builtIn.symbol).font(.headline)
@@ -649,21 +509,7 @@ struct AppExplorerSettingsView: View {
                 }.pickerStyle(.segmented)
             }
             if !compact {
-                ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
-                    dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
-                    layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name,
-                    rootSettings: baseSettings, selectedLayerID: selectedLayerID,
-                    selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
-                    onDrag: { source, target in
-                        if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
-                    }, onDrop: { _, target in
-                        defer { previewDrag = nil }
-                        guard let drag = previewDrag, let target else { return }
-                        var next = settings
-                        if drag.apply(to: target, in: groupPath, settings: &next), save(next) { previewSelection = target }
-                    }, editingTile: $previewEditing, editor: { direction in tilePopover(direction) })
-                    .padding(.top, -20)
-                    .frame(maxWidth: .infinity)
+                visualHUDPreview
             } else {
             VStack(spacing: 6) {
                 if settings.count(at: groupPath) != 8 {
@@ -1772,6 +1618,7 @@ struct ExplorerHUDSettingsPreview: View {
     let layerName: String?
     var rootSettings: AppExplorerSettings? = nil
     var selectedLayerID: UUID? = nil
+    var onSelectLayer: ((UUID?) -> Void)? = nil
     @Binding var selection: ExplorerSlot
     var onBack: () -> Void
     var onDrag: (ExplorerSlot, ExplorerSlot?) -> Void
@@ -1784,6 +1631,11 @@ struct ExplorerHUDSettingsPreview: View {
         AppExplorerView(model: model, onSelect: { slot in
             if !model.showingRecents { selection = slot; if editor != nil { editingTile.wrappedValue = slot } }
         }, onCancel: {}, onBack: onBack, isPreview: true,
+            onPreviewLayer: onSelectLayer.map { select in { id in
+                guard let node = rootSettings?.hudMap(includingUnavailable: true).first(where: { $0.id == id }) else { return }
+                editingTile.wrappedValue = nil
+                select(node.layerID)
+            } },
             onPreviewDrag: { source, target in editingTile.wrappedValue = nil; model.selected = target; onDrag(source, target) },
             onPreviewDrop: { source, target in onDrop(source, target); model.selected = selection })
             .accessibilityIdentifier("hud-layout-preview")
@@ -1820,7 +1672,7 @@ struct ExplorerHUDSettingsPreview: View {
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         model.groupDirections = groupPath
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
-        model.showingRecents = settings.favorite(at: groupPath)?.isRecentGroup == true
+        model.showingRecents = settings.favorite(at: groupPath)?.isRecentGroup == true || (groupPath.isEmpty && rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn == .recentApps)
         model.selected = model.showingRecents ? nil : selection
         if model.showingRecents {
             let order = ExplorerSlot.slots(model.slotCount).sorted {

@@ -39,7 +39,41 @@ import AppKit
         controller.show(waitingForLift: false)
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         precondition(controller.isVisible)
+        func orbitPair(_ x: Double?) -> TrackpadReport {
+            TrackpadReport(contacts: x.map { value in [
+                FingerContact(id: 1, x: value, y: 500, touching: true, confident: true),
+                FingerContact(id: 2, x: value + 30, y: 500, touching: true, confident: true)
+            ] } ?? [], buttonDown: false, scanTime: 0)
+        }
+        for (name, distance) in [("rest", 0.0), ("partial", 65.0), ("near-complete", 160.0)] {
+            if distance > 0 { controller.process(orbitPair(500)) }
+            if distance > 0 { controller.process(orbitPair(500 - distance)) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+            let orbitWindow = NSApp.windows.first { $0.title == "App Explorer" }!
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-l", String(orbitWindow.windowNumber), CommandLine.arguments[1] + ".screen-" + name + ".png"]
+            try capture.run(); capture.waitUntilExit()
+            let content = orbitWindow.contentView!
+
+            content.layoutSubtreeIfNeeded()
+            let image = content.bitmapImageRepForCachingDisplay(in: content.bounds)!
+            content.cacheDisplay(in: content.bounds, to: image)
+            try image.representation(using: .png, properties: [:])!.write(to:
+                URL(fileURLWithPath: CommandLine.arguments[1] + "." + name + ".png"))
+            if distance > 0 { controller.process(orbitPair(500)) }
+            if distance > 0 { controller.process(orbitPair(nil)) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
+
+        controller.process(orbitPair(500))
+        controller.process(orbitPair(390))
+        controller.process(orbitPair(nil))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        precondition(controller.displayedEntries.contains { $0.name == "Mail" }, "Animated release must finish on the incoming HUD")
+        precondition(controller.navigateHUD(.previous))
         precondition(controller.navigateHUD(.next), "A horizontal swipe should rotate to the right-hand HUD")
+
         RunLoop.main.run(until: Date().addingTimeInterval(0.12))
         let window = NSApp.windows.first { $0.title == "App Explorer" }!
         let view = window.contentView!
@@ -87,6 +121,6 @@ import AppKit
         precondition(controller.displayedEntries.contains { $0.name == "Mail" },
             "A two-finger downward swipe must navigate the HUD even without a layer below")
         controller.dismiss()
-        print("Native App Explorer HUD slid in all four directions, captured vertical two-finger navigation, and rendered a held three-choice deep fan without activating an app.")
+        print("Native App Explorer HUD rendered orbit phases and navigated all four directions, captured vertical two-finger navigation, and rendered a held three-choice deep fan without activating an app.")
     }
 }

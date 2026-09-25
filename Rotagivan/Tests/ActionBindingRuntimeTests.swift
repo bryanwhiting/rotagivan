@@ -257,6 +257,35 @@ private final class BindingPoster: GestureEventPosting {
             if let secondX { fingers.append(FingerContact(id: 2, x: secondX, y: 500, touching: true, confident: true)) }
             return TrackpadReport(contacts: fingers, buttonDown: false, scanTime: 0)
         }
+
+        // Continuous navigation follows fingers before lift, supports slow holds,
+        // and cancels when the user reverses below the release threshold.
+        var orbitLayer = ExplorerHoldLayer.empty(name: "Orbit target")
+        orbitLayer.position = .right
+        orbitLayer.favorites = [AppExplorerFavorite(direction: .up, name: "Orbit tile", shortcut: key)]
+        hud = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "Main tile", shortcut: key)],
+            holdLayers: [orbitLayer], animationsEnabled: false)
+        controller.show(waitingForLift: false)
+        controller.process(pairReport(500, 530))
+        controller.process(pairReport(460, 490))
+        precondition(controller.displayedOrbitProgress > 0 && controller.displayedOrbitProgress < 0.45,
+            "A partial drag must update orbit progress before lift")
+        precondition(controller.displayedEntries.first?.name == "Main tile", "Scrubbing must not activate the destination early")
+        controller.process(pairReport(495, 525))
+        controller.process(pairReport(nil, nil))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+        precondition(controller.displayedOrbitProgress == 0 && controller.displayedEntries.first?.name == "Main tile",
+            "Reversing before release cancels the transition")
+        controller.process(pairReport(500, 530))
+        for _ in 0..<240 { controller.process(pairReport(400, 430)) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        controller.process(pairReport(400, nil))
+        precondition(controller.displayedEntries.first?.name == "Main tile", "One finger lifting must not commit early")
+        controller.process(pairReport(nil, nil))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+        precondition(controller.displayedEntries.first?.name == "Orbit tile",
+            "Slow scrubs beyond the threshold must commit exactly once, including staggered lift")
+        controller.dismiss()
         hud.actionBindings = [ActionBinding(trigger: BindingTrigger(gesture: .twoFingerLeft), action: .media(.previous))]
         controller.show(waitingForLift: false)
         let beforePinch = performed.count

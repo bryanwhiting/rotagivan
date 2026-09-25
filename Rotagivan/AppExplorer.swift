@@ -108,6 +108,7 @@ extension AppExplorerPresenting {
     var isVisible: Bool { panel != nil }
     var isEditing: Bool { model.isEditing }
     var displayedEntries: [ExplorerEntry] { model.entries }
+    var displayedOrbitProgress: Double { model.orbitProgress }
     var displayedLevelDirections: [ExplorerSlot] { model.groupDirections }
 
     init(defaults: UserDefaults = .standard) {
@@ -215,20 +216,8 @@ extension AppExplorerPresenting {
         let advances = direction == .next || direction == .above
         let fallback = (current + (advances ? 1 : -1) + order.count) % order.count
         let target = nearest ?? fallback
-        let outgoing = snapshotHUD()
         switchLayer(order[target])
-        model.carouselTransition = HUDCarouselTransition(direction: direction, outgoing: outgoing)
         return true
-    }
-
-    private func snapshotHUD() -> NSImage? {
-        guard let view = panel?.contentView, !view.bounds.isEmpty else { return nil }
-        view.layoutSubtreeIfNeeded()
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        let image = NSImage(size: view.bounds.size)
-        image.addRepresentation(bitmap)
-        return image
     }
 
     @discardableResult func switchContainer(_ tokens: [String]) -> Bool {
@@ -309,7 +298,6 @@ extension AppExplorerPresenting {
     private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil) {
         guard !isVisible else { return }
         resetLocalGesture()
-        model.carouselTransition = nil
         cursorCentering.cancel()
         selectionGeneration &+= 1
         groupPath = []
@@ -775,6 +763,10 @@ extension AppExplorerPresenting {
     }
 
     private func resetLocalGesture() {
+        model.orbitGeneration += 1
+        model.orbitSettling = false
+        model.orbitPosition = nil
+        model.orbitProgress = 0
         localGestureTimer?.invalidate(); localGestureTimer = nil
         localGestureReports.removeAll()
         localGestureStrokeStart = 0
@@ -798,6 +790,7 @@ extension AppExplorerPresenting {
     /// Recognize assigned HUD gestures before the HUD's sector-selection gate.
     /// Unassigned strokes are replayed through the original selection path.
     private func processLocalGesture(_ report: TrackpadReport) -> Bool {
+        if model.orbitSettling { return true }
         var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
         if !model.showingWindowManager, !model.showingMediaControls, !model.showingAppWindows,
            (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
@@ -819,6 +812,9 @@ extension AppExplorerPresenting {
         let profile = gestureSettings()
         let contacts = report.contacts.filter(\.touching)
         guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
+            if model.orbitPosition != nil {
+                resetLocalGesture(); input = makeSelection(waitingForLift: true); return true
+            }
             replayLocalGesture(); return false
         }
         let needsOneFingerSequence = gestures.contains { binding in
@@ -847,7 +843,10 @@ extension AppExplorerPresenting {
             replayLocalGesture()
             if !isVisible { return true }
         }
-        if localGestureReports.count >= 200 { replayLocalGesture(); return false }
+        if localGestureReports.count >= 200 {
+            if model.orbitPosition != nil { localGestureReports.removeSubrange(1..<100) }
+            else { replayLocalGesture(); return false }
+        }
         localGestureReports.append(report)
         if !contacts.isEmpty {
             let point = CGPoint(x: contacts.map(\.x).reduce(0, +) / Double(contacts.count),
@@ -880,6 +879,61 @@ extension AppExplorerPresenting {
                 localGestureMaxTravel = max(localGestureMaxTravel, hypot(point.x - (localGestureOrigin?.x ?? point.x),
                     point.y - (localGestureOrigin?.y ?? point.y)))
             }
+            if contacts.count == 2, localGestureTapCount == 0, let origin = localGestureOrigin {
+                let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
+                let trigger: AppGestureTrigger = abs(dx) >= abs(dy)
+                    ? (dx < 0 ? .twoFingerLeft : .twoFingerRight)
+                    : (dy < 0 ? .twoFingerUp : .twoFingerDown)
+                if let binding = gestures.first(where: { $0.trigger.gesture == trigger }),
+                   binding.action.kind == .hudNavigation, let navigation = binding.action.hudNavigation {
+                    let position: HUDLayerPosition
+                    switch navigation {
+                    case .next: position = .right
+                    case .previous: position = .left
+                    case .above: position = .top
+                    case .below: position = .bottom
+                    }
+                    let coherent = localGestureFingerOrigins.count == 2 && localGestureFingerOrigins.allSatisfy { id, start in
+                        guard let end = localGestureFingerLast[id] else { return false }
+                        return (end.x - start.x) * dx + (end.y - start.y) * dy > 0
+                    }
+                    if coherent, hypot(dx, dy) > 8, model.orbitPosition == nil,
+                       model.carouselPreviews.contains(where: { $0.position == position }) {
+                        model.orbitPosition = position
+                    }
+                }
+                if let locked = model.orbitPosition {
+                    let distance: Double
+                    switch locked {
+                    case .right: distance = -dx
+                    case .left: distance = dx
+                    case .top: distance = -dy
+                    case .bottom: distance = dy
+                    }
+                    var transaction = Transaction(); transaction.disablesAnimations = true
+                    withTransaction(transaction) { model.orbitProgress = min(1, max(0, distance / 180)) }
+                    deadline = Date().addingTimeInterval(15)
+                }
+            }
+            return true
+        }
+        if let position = model.orbitPosition {
+            let commit = model.orbitProgress >= 0.45
+            let target = model.carouselPreviews.first { $0.position == position }
+            let generation = model.orbitGeneration
+            model.orbitSettling = true
+            let animate = configuration().resolvedAnimationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            withAnimation(animate ? .easeOut(duration: 0.24) : nil) { model.orbitProgress = commit ? 1 : 0 }
+            let finish: @MainActor @Sendable () -> Void = { [weak self] in
+                guard let self, self.isVisible, self.model.orbitGeneration == generation else { return }
+                var transaction = Transaction(); transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if commit, let target { self.switchLayer(UUID(uuidString: target.id)) }
+                    else { self.resetLocalGesture(); self.input = self.makeSelection(waitingForLift: self.contactIsDown) }
+                }
+            }
+            if animate { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: finish) }
+            else { finish() }
             return true
         }
         guard localGestureFingerCount > 0, let origin = localGestureOrigin else { return true }
@@ -1429,12 +1483,6 @@ struct HUDCarouselPreview: Identifiable {
     let entries: [ExplorerEntry]
 }
 
-struct HUDCarouselTransition: Identifiable {
-    let id = UUID()
-    let direction: HUDNavigationAction
-    let outgoing: NSImage?
-}
-
 struct ExplorerDeepFan {
     let origin: ExplorerSlot
     let entries: [ExplorerEntry]
@@ -1463,91 +1511,46 @@ private struct ExplorerDeepFanSector: Shape {
     }
 }
 
-private extension HUDNavigationAction {
-    var screenVector: CGVector {
-        switch self {
-        case .next: return CGVector(dx: 1, dy: 0)
-        case .previous: return CGVector(dx: -1, dy: 0)
-        case .above: return CGVector(dx: 0, dy: -1)
-        case .below: return CGVector(dx: 0, dy: 1)
-        }
-    }
-
-}
-
-private struct HUDMiniSector: Shape {
-    let slot: ExplorerSlot
-    let count: Int
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let half = 180.0 / Double(count) - 1.5
-        let start = (slot.angle - half) * .pi / 180
-        let end = (slot.angle + half) * .pi / 180
-        func point(_ angle: Double, _ radius: Double) -> CGPoint {
-            CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
-        }
-        var path = Path()
-        path.move(to: point(start, 30))
-        path.addLine(to: point(start, 106))
-        for step in 1...10 { path.addLine(to: point(start + (end - start) * Double(step) / 10, 106)) }
-        path.addLine(to: point(end, 30))
-        for step in 1...10 { path.addLine(to: point(end - (end - start) * Double(step) / 10, 30)) }
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct HUDMiniWheel: View {
+/// Both faces use the same HUD renderer; only their position on the orbit differs.
+private struct HUDOrbitSatellite: View {
     let preview: HUDCarouselPreview
     let theme: ExplorerTheme
-    private var accent: Color { theme.accent }
+    @StateObject private var model = ExplorerModel()
     var body: some View {
-        ZStack {
-            Circle().fill(theme.surface.opacity(0.95))
-                .overlay(Circle().stroke(accent.opacity(0.8), lineWidth: 1.5))
-            ForEach(ExplorerSlot.slots(preview.slotCount), id: \.self) { slot in
-                let entry = preview.entries.first { $0.direction == slot }
-                HUDMiniSector(slot: slot, count: preview.slotCount)
-                    .fill(entry == nil ? accent.opacity(0.04) : accent.opacity(0.17))
-                    .overlay(HUDMiniSector(slot: slot, count: preview.slotCount)
-                        .stroke(accent.opacity(entry == nil ? 0.14 : 0.55), lineWidth: 0.8))
-                if let entry {
-                    let angle = slot.angle * .pi / 180
-                    VStack(spacing: 1) {
-                        tileSymbol(entry).frame(width: 21, height: 21)
-                        Text(entry.name)
-                            .font(.system(size: preview.slotCount > 8 ? 5 : 6, weight: .medium))
-                            .lineLimit(1).truncationMode(.tail)
-                            .frame(width: preview.slotCount > 8 ? 34 : 47)
-                    }
-                    .position(x: 112 + cos(angle) * 70, y: 112 + sin(angle) * 70)
-                }
-            }
-            VStack(spacing: 2) {
-                Image(systemName: "square.stack.3d.up").font(.system(size: 12))
-                Text(preview.name).font(.system(size: 7, weight: .semibold))
-                    .lineLimit(2).multilineTextAlignment(.center).frame(width: 55)
-            }
-            .foregroundStyle(accent)
-            .frame(width: 58, height: 58)
-            .background(Circle().fill(theme.surface))
-        }
-        .foregroundStyle(.white)
-        .frame(width: 224, height: 224)
-        .accessibilityLabel("\(preview.name), \(preview.entries.count) tiles, \(preview.position.title)")
+        AnyView(AppExplorerView(model: model, onSelect: { _ in }, onCancel: {},
+            forceReduceMotion: true, isPreview: true, showsCarousel: false))
+            .frame(width: 470, height: 520)
+            .allowsHitTesting(false)
+            .onAppear(perform: refresh)
+            .onChange(of: theme) { _, _ in refresh() }
+            .onChange(of: preview.name) { _, _ in refresh() }
+            .onChange(of: preview.slotCount) { _, _ in refresh() }
+            .onChange(of: preview.entries.map { $0.name }) { _, _ in refresh() }
     }
+    private func refresh() {
+        model.entries = preview.entries
+        model.theme = theme
+        model.slotCount = preview.slotCount
+        model.layerName = preview.name
+        model.animationsEnabled = false
+    }
+}
 
-    @ViewBuilder private func tileSymbol(_ entry: ExplorerEntry) -> some View {
-        if let icon = entry.icon {
-            Image(nsImage: icon).resizable().scaledToFit()
-        } else if entry.isWebURL {
-            WebsiteFavicon(url: entry.url, size: 21, symbolName: entry.webIconSymbol)
-        } else {
-            Image(systemName: entry.command?.symbol ??
-                (entry.isGroup ? "folder.fill" : entry.isWindowManager ? "rectangle.split.2x2" :
-                entry.shortcut != nil ? "keyboard" : "app.dashed"))
-                .resizable().scaledToFit()
-        }
+private struct HUDOrbitTransform: ViewModifier, Animatable {
+    var position: HUDLayerPosition
+    var phase: Double
+    var animatableData: Double {
+        get { phase }
+        set { phase = newValue }
+    }
+    func body(content: Content) -> some View {
+        let angle = phase * .pi / 2
+        content
+            .scaleEffect(0.56 + 0.44 * cos(angle))
+            .rotation3DEffect(.degrees(-phase * 36),
+                axis: (x: Double(position.y), y: Double(position.x), z: 0), perspective: 0.35)
+            .offset(x: Double(position.x) * sin(angle) * 340,
+                    y: Double(-position.y) * sin(angle) * 290)
     }
 }
 
@@ -1573,7 +1576,10 @@ private struct HUDMiniWheel: View {
     @Published var previousLayerName: String?
     @Published var nextLayerName: String?
     @Published var carouselPreviews: [HUDCarouselPreview] = []
-    @Published var carouselTransition: HUDCarouselTransition?
+    @Published var orbitPosition: HUDLayerPosition?
+    @Published var orbitProgress = 0.0
+    var orbitSettling = false
+    var orbitGeneration = 0
     @Published var carouselPosition: String?
     @Published var layerHint = ""
     @Published var windowLayout: ExplorerWindowLayout = .halves
@@ -1592,8 +1598,6 @@ struct AppExplorerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var appeared = false
     @State private var reticleRotation = -135.0
-    @State private var carouselTransition: HUDCarouselTransition?
-    @State private var carouselProgress = 1.0
     var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
     var onDeepSelect: (ExplorerSlot) -> Void = { _ in }
@@ -1606,6 +1610,7 @@ struct AppExplorerView: View {
     var forceReduceMotion = false
     var forceReduceTransparency = false
     var isPreview = false
+    var showsCarousel = true
     var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
@@ -1615,11 +1620,6 @@ struct AppExplorerView: View {
             reduceMotion: reduceMotion || forceReduceMotion)
     }
     private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
-    private var carouselVector: CGVector { carouselTransition?.direction.screenVector ?? .zero }
-    private var carouselArrivalOffset: CGSize {
-        CGSize(width: carouselVector.dx * 820 * (1 - carouselProgress),
-               height: carouselVector.dy * 700 * (1 - carouselProgress))
-    }
     private var accent: Color { model.theme.accent }
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var opaqueChrome: Bool { reduceTransparency || forceReduceTransparency }
@@ -1697,7 +1697,8 @@ struct AppExplorerView: View {
                 Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
             }
-            settingsFooter
+            if showsCarousel { settingsFooter }
+            else { Text(model.layerName ?? "Main HUD").font(.caption.weight(.medium)).foregroundStyle(accent) }
             if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty { layerActionHotkeyFooter }
         }
         .padding(26)
@@ -1716,25 +1717,18 @@ struct AppExplorerView: View {
                 reticleRotation = ExplorerHUDMotion.nearestAngle(from: reticleRotation, to: reticleAngle(direction))
             }
         }
-        .onReceive(model.$carouselTransition.compactMap { $0 }) { transition in
-            beginCarouselTransition(transition)
-        }
         .transaction { if !animates { $0.animation = nil } }
         .help(guidance)
+        .modifier(HUDOrbitTransform(position: model.orbitPosition ?? .right,
+            phase: animates ? -model.orbitProgress : 0))
         .frame(width: 950, height: 850)
-        .background { carouselBackdrop }
-        .offset(carouselArrivalOffset)
-        .opacity(carouselTransition == nil ? 1 : 0.42 + 0.58 * carouselProgress)
-        .overlay { carouselDeparture }
-        .animation(feedback, value: model.carouselPreviews.map(\.id))
+        .background { if showsCarousel { carouselBackdrop } }
     }
 
     @ViewBuilder private var carouselBackdrop: some View {
         ZStack {
             ForEach(model.carouselPreviews) { preview in
                 carouselGhost(preview)
-                    .offset(x: CGFloat(preview.position.x) * 340,
-                            y: CGFloat(-preview.position.y) * 290)
             }
         }
         .allowsHitTesting(false)
@@ -1742,53 +1736,10 @@ struct AppExplorerView: View {
     }
 
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
-        HUDMiniWheel(preview: preview, theme: model.theme)
-            .scaleEffect(0.88)
-            .rotation3DEffect(.degrees(13),
-                axis: (x: Double(preview.position.y), y: Double(-preview.position.x), z: 0), perspective: 0.75)
-            .opacity(0.42)
-            .grayscale(0.7)
-            .shadow(color: .black.opacity(0.32), radius: 10, y: 6)
-    }
-
-    @ViewBuilder private var carouselDeparture: some View {
-        if let transition = carouselTransition, let outgoing = transition.outgoing, animates {
-            let vector = transition.direction.screenVector
-            Image(nsImage: outgoing)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 950, height: 850)
-                .offset(x: -vector.dx * 820 * carouselProgress,
-                        y: -vector.dy * 700 * carouselProgress)
-                .opacity(1 - 0.88 * carouselProgress)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-    }
-
-    private func beginCarouselTransition(_ transition: HUDCarouselTransition) {
-        guard animates, !isPreview else {
-            carouselTransition = nil
-            carouselProgress = 1
-            DispatchQueue.main.async { model.carouselTransition = nil }
-            return
-        }
-        var instant = Transaction()
-        instant.animation = nil
-        withTransaction(instant) {
-            carouselTransition = transition
-            carouselProgress = 0
-        }
-        DispatchQueue.main.async {
-            withAnimation(.timingCurve(0.45, 0, 0.25, 1, duration: 0.34)) {
-                carouselProgress = 1
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
-                guard carouselTransition?.id == transition.id else { return }
-                carouselTransition = nil
-                if model.carouselTransition?.id == transition.id { model.carouselTransition = nil }
-            }
-        }
+        HUDOrbitSatellite(preview: preview, theme: model.theme)
+            .modifier(HUDOrbitTransform(position: preview.position,
+                phase: model.orbitPosition == preview.position && animates ? 1 - model.orbitProgress : 1))
+            .opacity(model.orbitPosition == nil || model.orbitPosition == preview.position ? 1 : 1 - model.orbitProgress)
     }
 
     private var settingsFooter: some View {

@@ -86,7 +86,21 @@ import Foundation
         precondition(!AppExplorerSettings(favorites: [keyedAction,
             AppExplorerFavorite(direction: .left, name: "Duplicate", url: "https://example.com/other",
                 activationShortcut: actionKey)]).hasValidFavorites)
-        precondition(AppExplorerAction.macOSCommands == [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop, .lockScreen])
+        precondition(Set(AppExplorerAction.macOSCommands).count == AppExplorerAction.macOSCommands.count)
+        for command in AppExplorerAction.allCases {
+            precondition(!command.description.isEmpty)
+            let action = BindingAction.command(command)
+            precondition(action.isValid && !action.description.isEmpty)
+            precondition(try! JSONDecoder().decode(BindingAction.self, from: JSONEncoder().encode(action)) == action)
+        }
+        for command in [AppExplorerAction.toggleDock, .previousApp, .nextAppWindow, .previousAppWindow, .hideApp, .hideOtherApps, .appExpose] {
+            precondition(command.resolvedMacOSShortcut(symbolicHotKeys: nil) != nil)
+            precondition(AppExplorerAction.macOSCommands.contains(command))
+        }
+        precondition(AppExplorerAction.previousApp.macOSShortcut?.keyCode == 48)
+        precondition(AppExplorerAction.nextAppWindow.macOSShortcut?.keyCode == 50)
+        precondition(AppExplorerAction.moveWindowNextDesktop.macOSShortcut == nil)
+        precondition(AppExplorerAction.moveWindowPreviousDesktop.macOSShortcut == nil)
         precondition(AppExplorerAction.missionControl.resolvedMacOSShortcut(symbolicHotKeys: nil) == RecordedShortcut(keyCode: 126,
             modifiers: UInt64(1 << 18), keyLabel: "Up Arrow"))
         let customized: [String: Any] = ["32": ["enabled": NSNumber(value: true), "value": ["parameters": [

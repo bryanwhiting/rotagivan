@@ -1245,7 +1245,7 @@ extension AppExplorerPresenting {
         else { dismiss() }
     }
 
-    private static func showWindowError(_ message: String) {
+    static func showWindowError(_ message: String) {
         let alert = NSAlert(); alert.messageText = "Window unavailable"; alert.informativeText = message
         alert.addButton(withTitle: "OK"); alert.runModal()
     }

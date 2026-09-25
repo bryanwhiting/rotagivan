@@ -95,7 +95,7 @@ struct TapActionEditor: View {
                         Divider()
                     }
                     if !physicalKeysOnly && !dictionary.isEmpty {
-                        Menu("Keybindings and Macros") {
+                        Menu("Macros") {
                             ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
                                 Button("\(entry.name) (\(entry.summary))") { shortcut = .macro(entry); action = .shortcut }
                             }

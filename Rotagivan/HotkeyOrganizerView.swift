@@ -54,7 +54,7 @@ struct HotkeyOrganizerView: View {
             Text("Create reusable actions, app launchers and macros. Search every keyboard and trackpad assignment, then review conflicts and overrides in one place.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("View", selection: $tab) {
-                Text("Saved actions").tag("Dictionary")
+                Text("Actions").tag("Dictionary")
                 Text("Conflicts").tag("Conflicts")
                 Text("All assignments").tag("Assignments")
                 Text("Keyboard").tag("Keyboard")
@@ -172,11 +172,51 @@ struct HotkeyOrganizerView: View {
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: .openApp(bundleID: app.bundleID, name: app.name))
     }
 
+    private func assign(_ action: BindingAction) {
+        migratingNamedHotkeyID = nil
+        editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
+    }
+
+    private var builtInActions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            actionGroup("Mac controls", actions: AppExplorerAction.macOSCommands.map { BindingAction(kind: .command, command: $0) })
+            actionGroup("Windows", actions: AppExplorerAction.windowCommands.map { BindingAction(kind: .command, command: $0) })
+            actionGroup("Window layouts", actions: ExplorerWindowLayout.allCases.flatMap { layout in
+                SwipeDirection.allCases.map { BindingAction(kind: .windowPlacement, windowPlacement: ExplorerWindowPlacement(direction: $0, layout: layout)) }
+            })
+            actionGroup("Audio and media", actions: ExplorerMediaAction.allCases.map { BindingAction(kind: .media, media: $0) })
+            actionGroup("HUDs", actions: [AppExplorerAction.windowManager, .mediaControls].map { BindingAction(kind: .command, command: $0) }
+                + HUDNavigationAction.allCases.map { BindingAction(kind: .hudNavigation, hudNavigation: $0) })
+            actionGroup("Pointer and keys", actions: TapAction.allCases.filter { $0 != .none && $0 != .shortcut }.map { BindingAction(kind: .tap, tap: $0) })
+        }
+    }
+
+    private func actionGroup(_ title: String, actions: [BindingAction]) -> some View {
+        let visible = actions.filter { textMatches($0.title + " " + $0.description) }
+        return Group {
+            if !visible.isEmpty {
+                DisclosureGroup(title) {
+                    ForEach(visible, id: \.identity) { action in
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(action.title).fontWeight(.medium)
+                                Text(action.description).font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Button("Assign…") { assign(action) }.help("Assign a keybinding or gesture to this action")
+                        }.padding(8)
+                    }
+                }
+            }
+        }
+    }
+
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            globalBindings
+            builtInActions
             HStack {
-                Text("Saved actions: \(store.settings.resolvedHotkeyDictionary.count)").foregroundStyle(.secondary)
+                Text("Macros: \(store.settings.resolvedHotkeyDictionary.count)").foregroundStyle(.secondary)
                 Spacer()
                 Menu {
                     Button("Add keyboard action or macro") { beginNewAction() }
@@ -184,7 +224,7 @@ struct HotkeyOrganizerView: View {
                 } label: { Label("Add action", systemImage: "plus") }
                 .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
             }
-            Text("A saved action can have its own global hotkey, including an app-only launcher. The same action can also be assigned to any tap, swipe or HUD tile and travels with YAML/sync.")
+            Text("Macros are reusable actions made of ordered steps. Assign keybindings or gestures to an action, or choose it in a HUD tile.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             let entries = store.settings.resolvedHotkeyDictionary.filter(dictionaryMatches)
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -206,10 +246,12 @@ struct HotkeyOrganizerView: View {
                     }
                     Spacer()
                     Text(entry.summary).monospaced().foregroundStyle(.secondary).lineLimit(2)
+                    Button("Assign…") { assign(.macro(entry)) }
                     Button("Edit") { editing = entry }
                     Button { deleting = entry } label: { Image(systemName: "trash") }.help("Remove saved action")
                 }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
+            globalBindings
             let taps = audit.displayAssignments.filter { $0.kind == "Tap or gesture" && $0.enabled && assignmentMatches($0) }
             if !taps.isEmpty {
                 Divider().padding(.vertical, 2)

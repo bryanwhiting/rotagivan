@@ -2,7 +2,14 @@ import AppKit
 
 @main struct WindowTilingTests {
     static func main() throws {
-        let area = CGRect(x: -1512, y: -800, width: 1511, height: 951)
+        precondition(WindowDesktopTransfer.adjacent(to: 2, step: -1, displays: [[1, 2, 3], [4, 5]]) == 1)
+        precondition(WindowDesktopTransfer.adjacent(to: 2, step: 1, displays: [[1, 2, 3], [4, 5]]) == 3)
+        precondition(WindowDesktopTransfer.adjacent(to: 3, step: 1, displays: [[1, 2, 3], [4, 5]]) == nil)
+        precondition(WindowDesktopTransfer.adjacent(to: 4, step: -1, displays: [[1, 2, 3], [4, 5]]) == nil)
+        precondition(WindowDesktopTransfer.adjacent(to: 99, step: 1, displays: [[1, 2]]) == nil)
+        precondition(WindowDesktopTransfer.adjacent(to: 1, step: 0, displays: [[1, 2]]) == nil)
+        let area =
+ CGRect(x: -1512, y: -800, width: 1511, height: 951)
         for direction in SwipeDirection.allCases {
             let tile = WindowTile.frame(direction, in: area)
             precondition(area.contains(tile) && tile.width > 0 && tile.height > 0)

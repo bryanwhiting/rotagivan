@@ -192,6 +192,8 @@ enum WindowTile {
             case .closeWindow:
                 guard let value = attribute(window, kAXCloseButtonAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return "This window has no close button." }
                 return AXUIElementPerformAction(unsafeBitCast(value, to: AXUIElement.self), kAXPressAction as CFString) == .success ? nil : "This window could not be closed."
+            case .moveWindowPreviousDesktop, .moveWindowNextDesktop:
+                return WindowDesktopTransfer.move(window: window, step: command == .moveWindowPreviousDesktop ? -1 : 1)
             case .maximize:
                 guard let current = frame(window), let primary = NSScreen.screens.first else { return "The window is no longer available." }
                 let screens = NSScreen.screens
@@ -317,5 +319,82 @@ struct WindowTileIcon: View {
             RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: tile.width, height: tile.height)
                 .offset(x: tile.minX, y: tile.minY)
         }.frame(width: 42, height: 30).frame(height: 42).accessibilityHidden(true)
+    }
+}
+
+// Private WindowServer functions are optional: fail closed on unsupported systems.
+// Never alter Mission Control preferences or security protections.
+@MainActor enum WindowDesktopTransfer {
+    static func adjacent(to source: UInt64, step: Int, displays: [[UInt64]]) -> UInt64? {
+        guard abs(step) == 1 else { return nil }
+        for spaces in displays {
+            if let index = spaces.firstIndex(of: source) {
+                let next = index + step
+                return spaces.indices.contains(next) ? spaces[next] : nil
+            }
+        }
+        return nil
+    }
+
+    static func move(window: AXUIElement, step: Int) -> String? {
+        typealias Connection = @convention(c) () -> Int32
+        typealias WindowID = @convention(c) (AXUIElement, UnsafeMutablePointer<UInt32>) -> Int32
+        typealias Displays = @convention(c) (Int32) -> Unmanaged<CFArray>?
+        typealias Spaces = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+        typealias Move = @convention(c) (Int32, CFArray, UInt64) -> Void
+        typealias Compatibility = @convention(c) (Int32, UInt64, Int32) -> Int32
+        typealias Workspace = @convention(c) (Int32, UnsafeMutablePointer<UInt32>, Int32, Int32) -> Int32
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY),
+              let ax = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_LAZY) else {
+            return "Moving windows between desktops is unavailable on this macOS version."
+        }
+        defer { dlclose(handle); dlclose(ax) }
+        func symbol<T>(_ name: String, _ type: T.Type) -> T? {
+            guard let pointer = dlsym(handle, name) else { return nil }
+            return unsafeBitCast(pointer, to: type)
+        }
+        guard let connection = symbol("SLSMainConnectionID", Connection.self),
+              let displays = symbol("SLSCopyManagedDisplaySpaces", Displays.self),
+              let spaces = symbol("SLSCopySpacesForWindows", Spaces.self),
+              let axPointer = dlsym(ax, "_AXUIElementGetWindow") else {
+            return "Moving windows between desktops is unsupported on this macOS version."
+        }
+        var windowID: UInt32 = 0
+        let getWindow = unsafeBitCast(axPointer, to: WindowID.self)
+        guard getWindow(window, &windowID) == 0, windowID != 0 else { return "Could not identify the focused window." }
+        let cid = connection()
+        let windows = [NSNumber(value: windowID)] as CFArray
+        guard let membership = spaces(cid, 7, windows)?.takeRetainedValue() as? [NSNumber],
+              membership.count == 1,
+              let topology = displays(cid)?.takeRetainedValue() as? [[String: Any]] else {
+            return "Only windows assigned to a single normal desktop can be moved."
+        }
+        let desktops: [[UInt64]] = topology.map { display in
+            (display["Spaces"] as? [[String: Any]] ?? []).compactMap { space in
+                guard (space["type"] as? NSNumber)?.intValue == 0 else { return nil }
+                return (space["ManagedSpaceID"] as? NSNumber)?.uint64Value
+            }
+        }
+        guard let destination = adjacent(to: membership[0].uint64Value, step: step, displays: desktops) else {
+            return "There is no normal desktop in that direction on this display."
+        }
+        if #available(macOS 14.5, *) {
+            guard let compat = symbol("SLSSpaceSetCompatID", Compatibility.self),
+                  let workspace = symbol("SLSSetWindowListWorkspace", Workspace.self) else {
+                return "This macOS version does not support moving this window."
+            }
+            let tag: Int32 = 0x726f7461
+            guard compat(cid, destination, tag) == 0 else { return "macOS refused access to the destination desktop." }
+            defer { _ = compat(cid, destination, 0) }
+            guard workspace(cid, &windowID, 1, tag) == 0 else { return "macOS could not move this window." }
+        } else {
+            guard let move = symbol("SLSMoveWindowsToManagedSpace", Move.self) else { return "Moving windows is unsupported." }
+            move(cid, windows, destination)
+        }
+        guard let result = spaces(cid, 7, windows)?.takeRetainedValue() as? [NSNumber],
+              result.contains(where: { $0.uint64Value == destination }) else {
+            return "macOS did not confirm the window move. This window or macOS version may not support it."
+        }
+        return nil
     }
 }

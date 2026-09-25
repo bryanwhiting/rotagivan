@@ -33,12 +33,12 @@ import SwiftUI
         slot.performClick(nil)
         let candidates = popups.compactMap(\.menu)
         candidates.forEach { $0.update() }
-        guard let menu = candidates.first(where: { $0.items.contains { $0.title == "Keybindings and Macros" } }) else {
+        guard let menu = candidates.first(where: { $0.items.contains { $0.title == "Actions" } }) else {
             print("Native menu titles:", candidates.map { $0.items.map(\.title) })
             fatalError("Tile actions must be backed by a native macOS menu")
         }
         let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-        for title in ["Keybindings and Macros", "App launches", "Built-in HUD layers", "Create HUD layer…", "Window management", "Mac commands", "Media controls"] {
+        for title in ["Actions", "App launches", "Built-in HUD layers", "Create HUD layer…", "Window management", "Mac commands", "Media controls"] {
             precondition(titles.contains(title), "Missing action category: \(title)")
         }
         func submenu(_ title: String, in menu: NSMenu) -> NSMenu {
@@ -67,7 +67,7 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         precondition(store.settings.appExplorer?.favorites.first?.action == .missionControl)
         precondition(submenu("App launches", in: menu).items.contains { $0.title == "Open URL…" })
-        precondition(submenu("Keybindings and Macros", in: menu).items.contains { $0.title == "Assign macro or keystroke…" })
+        precondition(submenu("Actions", in: menu).items.contains { $0.title == "Assign macro or keystroke…" })
         // Selecting a menu entry configures a tile; it must not act on a real window.
         let minimizeIndex = windows.items.firstIndex { $0.title == "Minimize window" }!
         windows.performActionForItem(at: minimizeIndex)

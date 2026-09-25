@@ -55,14 +55,14 @@ struct ContentView: View {
     private let layerColumnWidth: CGFloat = 468
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
-        ("Calibration", "dial.low"), ("Macros", "keyboard"), ("App overrides", "app.badge"),
+        ("Calibration", "dial.low"), ("Actions", "bolt.circle"), ("App overrides", "app.badge"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "HUD", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros"].contains(initialSection) ? "Macros" :
+        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros", "Macros"].contains(initialSection) ? "Actions" :
             ["App Explorer", "Window Manager", "Layers", "Layer actions", "Tap actions"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
@@ -71,7 +71,7 @@ struct ContentView: View {
 
     private func sectionTitle(_ section: String) -> String {
         switch section {
-        case "Macros": return "Keybindings and Macros"
+        case "Actions": return "Actions"
         default: return section
         }
     }
@@ -212,7 +212,7 @@ struct ContentView: View {
         case "General": general
         case "Devices": devices
         case "HUD": hudAndTapSettings
-        case "Macros": HotkeyOrganizerView(store: store)
+        case "Actions": HotkeyOrganizerView(store: store)
         case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
         case "App overrides": AppOverridesView(store: store)
         case "Pointer & scrolling": pointerSettings

@@ -291,7 +291,7 @@ final class NavigatorHIDManager: ObservableObject {
             default:
                 if let shortcut = command.macOSShortcut { EventPoster().performTap(.shortcut, shortcut: shortcut) }
                 else if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                        let target = WindowTiling.capture(pid: pid) { _ = target.command(command) }
+                        let target = WindowTiling.capture(pid: pid) { if let error = target.command(command) { AppExplorerController.showWindowError(error) } }
             }
         case .media:
             if let media = action.media { ExplorerMediaAction.perform(media) }

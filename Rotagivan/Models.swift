@@ -199,6 +199,43 @@ struct BindingAction: Codable, Equatable {
         case .tap: return tap?.title ?? "Pointer action"
         }
     }
+    var description: String {
+        switch kind {
+        case .keystroke: return "Send \(shortcut?.readableCombination ?? "the chosen keys") to the active app. This is the output, not the keybinding that triggers it."
+        case .macro: return "Run the saved macro’s steps in order. A macro can contain keystrokes and app launches."
+        case .hudLayer: return "Open \(name ?? "the selected HUD layer") so you can choose one of its actions."
+        case .hudNavigation: return "Move to \(hudNavigation?.title ?? "the selected HUD") in the fixed HUD map without closing it."
+        case .openApp: return "Launch or activate \(name ?? bundleID ?? "the selected app")."
+        case .openURL: return "Open \(url ?? "the selected URL") in the default browser."
+        case .command: return command?.description ?? "Choose a Mac or window command."
+        case .media:
+            switch media {
+            case .volumeUp: return "Increase system output volume by one step."
+            case .volumeDown: return "Decrease system output volume by one step."
+            case .mute: return "Toggle system output mute."
+            case .playPause: return "Play or pause the current media session."
+            case .next: return "Skip to the next track in the current media session."
+            case .previous: return "Return to the previous track in the current media session."
+            case nil: return "Choose an audio or playback action."
+            }
+        case .windowPlacement: return "Move and resize the focused window to \(windowPlacement?.title ?? "the selected layout") within its current desktop."
+        case .tap:
+            switch tap {
+            case .leftClick: return "Send a left mouse click at the pointer."
+            case .doubleLeftClick: return "Send a double left click at the pointer."
+            case .tripleLeftClick: return "Send a triple left click at the pointer."
+            case .rightClick: return "Open the context menu with a right click at the pointer."
+            case .enter: return "Send the Return key to the active app."
+            case .optionF19: return "Send Option–F19 to the active app."
+            case .appExplorer: return "Open the main HUD."
+            case .windowManager: return AppExplorerAction.windowManager.description
+            case .some(.none): return "Do not perform an action."
+            case .shortcut: return "Send the configured keystroke."
+            case nil: return "Choose a pointer or HUD action."
+            }
+        }
+    }
+
     var identity: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -491,6 +528,8 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
+    case toggleDock, previousApp, nextAppWindow, previousAppWindow, appExpose, hideApp, hideOtherApps
+    case moveWindowPreviousDesktop, moveWindowNextDesktop
     case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop, lockScreen
     case maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
     var title: String {
@@ -502,6 +541,15 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "Previous desktop"
         case .nextDesktop: return "Next desktop"
         case .showDesktop: return "Show Desktop"
+        case .toggleDock: return "Show / hide Dock"
+        case .previousApp: return "Previous app"
+        case .nextAppWindow: return "Next window in app"
+        case .previousAppWindow: return "Previous window in app"
+        case .appExpose: return "App Exposé"
+        case .hideApp: return "Hide current app"
+        case .hideOtherApps: return "Hide other apps"
+        case .moveWindowPreviousDesktop: return "Move window to left desktop"
+        case .moveWindowNextDesktop: return "Move window to right desktop"
         case .lockScreen: return "Lock Screen"
         case .maximize: return "Fill desktop"
         case .toggleFullScreen: return "Toggle full screen"
@@ -519,6 +567,15 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .previousDesktop: return "arrow.left.square"
         case .nextDesktop: return "arrow.right.square"
         case .showDesktop: return "menubar.dock.rectangle"
+        case .toggleDock: return "dock.rectangle"
+        case .previousApp: return "arrow.left.arrow.right"
+        case .nextAppWindow: return "macwindow.on.rectangle"
+        case .previousAppWindow: return "macwindow.on.rectangle"
+        case .appExpose: return "rectangle.on.rectangle"
+        case .hideApp: return "eye.slash"
+        case .hideOtherApps: return "eye"
+        case .moveWindowPreviousDesktop: return "arrow.left.square"
+        case .moveWindowNextDesktop: return "arrow.right.square"
         case .lockScreen: return "lock.display"
         case .maximize: return "arrow.up.left.and.arrow.down.right"
         case .toggleFullScreen: return "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
@@ -527,8 +584,34 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .closeWindow: return "xmark.rectangle"
         }
     }
+    var description: String {
+        switch self {
+        case .toggleDock: return "Toggle automatic hiding of the Dock with Option–Command–D."
+        case .previousApp: return "Switch to the most recently used other app with Command–Tab. Repeating toggles between the last two apps."
+        case .nextAppWindow: return "Cycle forward through windows of the current app with Command–backtick—not through different apps."
+        case .previousAppWindow: return "Cycle backward through windows of the current app with Shift–Command–backtick."
+        case .appExpose: return "Show macOS App Exposé for the current app using its configured shortcut or Control–Down."
+        case .hideApp: return "Hide the current app and its windows with Command–H."
+        case .hideOtherApps: return "Hide other apps while keeping the current app visible with Option–Command–H."
+        case .moveWindowPreviousDesktop: return "Move only the focused window to the adjacent normal desktop on the left, on the same display. Does not switch desktops or wrap; full-screen and all-desktop windows are not supported."
+        case .moveWindowNextDesktop: return "Move only the focused window to the adjacent normal desktop on the right, on the same display. Does not switch desktops or wrap; full-screen and all-desktop windows are not supported."
+        case .windowManager: return "Open the HUD for arranging the current app’s window."
+        case .mediaControls: return "Open volume, playback, and track controls. A single tap plays or pauses."
+        case .appWindows: return "Open Rotagivan’s window picker for the current app; choosing a window brings it forward."
+        case .missionControl: return "Show Mission Control using your configured macOS shortcut, or Control–Up."
+        case .previousDesktop: return "Switch to the desktop or full-screen Space on the left using your macOS shortcut."
+        case .nextDesktop: return "Switch to the desktop or full-screen Space on the right using your macOS shortcut."
+        case .showDesktop: return "Reveal the desktop using your macOS shortcut; invoke again to restore windows."
+        case .lockScreen: return "Lock this Mac immediately with Control–Command–Q. Unlock with your usual credentials."
+        case .maximize: return "Resize the focused window to fill the usable desktop without entering full screen."
+        case .toggleFullScreen: return "Enter or leave the focused window’s separate full-screen Space."
+        case .exitFullScreen: return "Leave full-screen mode for the focused window."
+        case .minimize: return "Minimize the focused window into the Dock."
+        case .closeWindow: return "Close the focused window. The app may ask about unsaved changes."
+        }
+    }
     static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
-    static let macOSCommands: [Self] = [.missionControl, .appWindows, .previousDesktop, .nextDesktop, .showDesktop, .lockScreen]
+    static let macOSCommands: [Self] = [.toggleDock, .previousApp, .nextAppWindow, .previousAppWindow, .appExpose, .missionControl, .appWindows, .previousDesktop, .nextDesktop, .moveWindowPreviousDesktop, .moveWindowNextDesktop, .showDesktop, .hideApp, .hideOtherApps, .lockScreen]
     /// Uses the current System Settings shortcut when present, then the macOS default.
     /// App windows uses Rotagivan's accessible window picker instead.
     var macOSShortcut: RecordedShortcut? {
@@ -538,9 +621,20 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         if self == .lockScreen {
             return RecordedShortcut(keyCode: 12, modifiers: UInt64((1 << 18) | (1 << 20)), keyLabel: "Q")
         }
+        let command = UInt64(1 << 20), option = UInt64(1 << 19), shift = UInt64(1 << 17)
+        switch self {
+        case .toggleDock: return RecordedShortcut(keyCode: 2, modifiers: option | command, keyLabel: "D")
+        case .previousApp: return RecordedShortcut(keyCode: 48, modifiers: command, keyLabel: "Tab")
+        case .nextAppWindow: return RecordedShortcut(keyCode: 50, modifiers: command, keyLabel: "Backtick")
+        case .previousAppWindow: return RecordedShortcut(keyCode: 50, modifiers: shift | command, keyLabel: "Backtick")
+        case .hideApp: return RecordedShortcut(keyCode: 4, modifiers: command, keyLabel: "H")
+        case .hideOtherApps: return RecordedShortcut(keyCode: 4, modifiers: option | command, keyLabel: "H")
+        default: break
+        }
         let ids: [Int]
         switch self {
         case .missionControl: ids = [32, 34]
+        case .appExpose: ids = [33, 35]
         case .previousDesktop: ids = [79, 80]
         case .nextDesktop: ids = [81, 82]
         case .showDesktop: ids = [36, 37]
@@ -558,6 +652,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         }
         let control = UInt64(1 << 18)
         switch self {
+        case .appExpose: return RecordedShortcut(keyCode: 125, modifiers: control, keyLabel: "Down Arrow")
         case .missionControl: return RecordedShortcut(keyCode: 126, modifiers: control, keyLabel: "Up Arrow")
         case .previousDesktop: return RecordedShortcut(keyCode: 123, modifiers: control, keyLabel: "Left Arrow")
         case .nextDesktop: return RecordedShortcut(keyCode: 124, modifiers: control, keyLabel: "Right Arrow")

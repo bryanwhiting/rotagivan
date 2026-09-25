@@ -275,7 +275,7 @@ private struct LayerActionValueMenu: View {
             Section("Keyboard") {
                 Button("Record a shortcut…") { showingRecorder = true }
                 if !dictionary.isEmpty {
-                    Menu("Keybindings and macros") {
+                    Menu("Macros") {
                         ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
                             Button("\(entry.name) · \(entry.summary)") {
                                 shortcut = .macro(entry)

@@ -66,19 +66,19 @@ struct BindingActionPicker: View {
 
     var body: some View {
         Menu {
-            Section("Keybindings") {
+            Section("Keystrokes") {
                 Button("Record keystroke…", systemImage: "keyboard") { recording = true }
+            }
+            Section("Macros") {
                 ForEach(dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
                     Button("\(entry.name) · \(entry.summary)") { action = .macro(entry) }
                 }
             }
             Section("HUD layers") {
-                Button("Previous HUD", systemImage: HUDNavigationAction.previous.symbol) {
-                    action = .hudNavigation(.previous)
+                ForEach(HUDNavigationAction.allCases, id: \.self) { navigation in
+                    Button(navigation.title, systemImage: navigation.symbol) { action = .hudNavigation(navigation) }
+                        .help(BindingAction.hudNavigation(navigation).description)
                 }
-                Button("Next HUD", systemImage: HUDNavigationAction.next.symbol) { action = .hudNavigation(.next) }
-                Button("HUD above", systemImage: HUDNavigationAction.above.symbol) { action = .hudNavigation(.above) }
-                Button("HUD below", systemImage: HUDNavigationAction.below.symbol) { action = .hudNavigation(.below) }
                 if hudDestinations.isEmpty {
                     Button("Default", systemImage: "square.stack.3d.up") { action = .hudLayer(nil) }
                     ForEach(hudLayers) { layer in
@@ -100,7 +100,7 @@ struct BindingActionPicker: View {
                     action = .command(.mediaControls)
                 }
                 ForEach(AppExplorerAction.macOSCommands + AppExplorerAction.windowCommands, id: \.self) { command in
-                    Button(command.title, systemImage: command.symbol) { action = .command(command) }
+                    Button(command.title, systemImage: command.symbol) { action = .command(command) }.help(command.description)
                 }
                 ForEach(ExplorerWindowLayout.allCases, id: \.self) { layout in
                     Menu("Place window · \(layout.title)") {
@@ -113,14 +113,14 @@ struct BindingActionPicker: View {
             }
             Section("Media") {
                 ForEach(ExplorerMediaAction.allCases, id: \.self) { media in
-                    Button(media.title, systemImage: media.symbol) { action = .media(media) }
+                    Button(media.title, systemImage: media.symbol) { action = .media(media) }.help(BindingAction.media(media).description)
                 }
             }
             if allowPointerActions {
                 Section("Pointer and HUD") {
                     ForEach([TapAction.leftClick, .doubleLeftClick, .tripleLeftClick, .rightClick,
                              .appExplorer, .windowManager, .enter, .optionF19], id: \.self) { tap in
-                        Button(tap.title) { action = .tap(tap) }
+                        Button(tap.title) { action = .tap(tap) }.help(BindingAction.tap(tap).description)
                     }
                 }
             }
@@ -137,7 +137,8 @@ struct BindingActionPicker: View {
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.11)))
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .accessibilityLabel("\(title): \(dictionary.title(for: action))")
+        .help(action.description)
+        .accessibilityLabel("\(title): \(dictionary.title(for: action)). \(action.description)")
         .popover(isPresented: $recording) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Keystroke").font(.headline)
@@ -224,7 +225,10 @@ struct BindingEditor: View {
             }
             HStack(spacing: 12) {
                 Text("Run").frame(width: 46, alignment: .leading)
-                BindingActionPicker(action: $binding.action).frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 6) {
+                    BindingActionPicker(action: $binding.action).frame(maxWidth: .infinity)
+                    Text(binding.action.description).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
             if collision {
                 Label("This trigger already has an action in this layer.", systemImage: "exclamationmark.triangle.fill")

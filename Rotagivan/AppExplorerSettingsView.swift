@@ -987,6 +987,10 @@ struct AppExplorerSettingsView: View {
                         edit { $0.setFavorite(preservingHotkey(replacement,
                             at: groupPath + [direction]), at: direction, in: groupPath) }
                     }))
+                    if let selected = favorite.flatMap(BindingAction.from(favorite:)) {
+                        Text(selected.description).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Text("ACTIONS")
@@ -1021,7 +1025,7 @@ struct AppExplorerSettingsView: View {
                     Button {
                         editingShortcutPath = groupPath + [direction]
                     } label: {
-                        ExplorerTileActionLabel(title: "Keyboard & macros", detail: "Keys, shortcuts, sequences", systemImage: "keyboard")
+                        ExplorerTileActionLabel(title: "Macros & keystrokes", detail: "Keys, shortcuts, sequences", systemImage: "keyboard")
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
@@ -1315,7 +1319,7 @@ struct AppExplorerSettingsView: View {
             Button(favorite?.shortcut != nil ? "Edit action…" : "Assign macro or keystroke…", systemImage: "keyboard") {
                 editingShortcutPath = groupPath + [direction]
             }
-        } label: { Label("Keybindings and Macros", systemImage: "keyboard") }
+        } label: { Label("Actions", systemImage: "keyboard") }
         Menu {
             Button("Choose app…", systemImage: "app") { editingApplicationPath = groupPath + [direction] }
             Button(favorite?.url != nil ? "Edit URL…" : "Open URL…", systemImage: "globe") { editingURLPath = groupPath + [direction] }
@@ -1383,7 +1387,7 @@ struct AppExplorerSettingsView: View {
             edit { $0.setFavorite(preservingHotkey(AppExplorerFavorite(direction: direction, name: action.title, action: action),
                 at: groupPath + [direction]), at: direction, in: groupPath) }
             if closeEditor { previewEditing = nil }
-        }
+        }.help(action.description)
     }
 
     private func updateSlotDrag(from source: ExplorerSlot, at point: CGPoint) {

@@ -51,6 +51,7 @@ extension AppExplorerPresenting {
     private var localGestureTimer: Timer?
     private let model = ExplorerModel()
     private var voicePreparation: Task<Void, Never>?
+    private var voiceSwipeMatchID: String?
     var voiceCatalog: (() -> [VoiceRegisteredAction])?
     var prepareVoice: ((VoiceSession, [VoiceRegisteredAction]) -> Void)?
     var displayedVoiceSession: VoiceSession? { model.voiceSession }
@@ -749,15 +750,29 @@ extension AppExplorerPresenting {
         guard contextIsValid?() != false else { dismiss(); return }
         guard !isEditing else { return }
         if let voice = model.voiceSession {
-            // Lifting after a swipe never executes a voice match.
+            // Match the ordinary HUD: preview on movement, commit on lift.
+            // Only arm a result that was ready when the finger selected it.
             switch input.process(report) {
-            case .highlight(let direction): if let direction { voice.select(direction) }
+            case .highlight(let direction):
+                voiceSwipeMatchID = nil
+                if let direction {
+                    voice.select(direction)
+                    voiceSwipeMatchID = voice.selectedMatch?.id
+                }
             case .select(let direction):
-                voice.select(direction); input = makeSelection(waitingForLift: false)
-            case .back:
-                if voice.phase == .listening { voice.finishListening() }
+                voice.select(direction)
+                let armedID = voiceSwipeMatchID
+                voiceSwipeMatchID = nil
                 input = makeSelection(waitingForLift: false)
-            case .cancel: input = makeSelection(waitingForLift: contactIsDown)
+                if direction == .left { endVoiceMode() }
+                else if let armedID, voice.selectedMatch?.id == armedID { confirmVoiceAction() }
+            case .back:
+                voiceSwipeMatchID = nil
+                centerTap()
+                input = makeSelection(waitingForLift: false)
+            case .cancel:
+                voiceSwipeMatchID = nil
+                input = makeSelection(waitingForLift: contactIsDown)
             default: break
             }
             return
@@ -1316,7 +1331,15 @@ extension AppExplorerPresenting {
     func centerTap() {
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
-        if let voice = model.voiceSession { if voice.phase == .listening { voice.finishListening() }; return }
+        if let voice = model.voiceSession {
+            switch voice.phase {
+            case .listening: voice.finishListening()
+            case .ready: confirmVoiceAction()
+            case .failed, .cancelled: beginVoiceMode()
+            case .preparing, .matching: break
+            }
+            return
+        }
         if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingMediaControls {
             beginVoiceMode(); return
         }
@@ -1376,6 +1399,7 @@ extension AppExplorerPresenting {
     }
 
     func endVoiceMode() {
+        voiceSwipeMatchID = nil
         voicePreparation?.cancel(); voicePreparation = nil
         model.voiceSession?.cancel(); model.voiceSession = nil
         input = makeSelection(waitingForLift: contactIsDown)

@@ -184,7 +184,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                 try mic.start()
                 self.microphone = mic
                 self.started = self.now(); self.sentAt = -.infinity
-                self.phase = .listening; self.message = "Listening… say an action · Space/Enter to finish"
+                self.phase = .listening; self.message = "Listening… say an action · tap the center to finish"
                 guard self.automaticTicks else { return }
                 let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
@@ -207,14 +207,14 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         if elapsed >= 12 || (speechAt != nil && now() - speechAt! > 0.85 && elapsed > 0.8) {
             finishListening(); return
         }
-        if speechAt == nil && elapsed > 5 { fail(VoiceError.message("No speech heard. Tap Listen again to retry.")); return }
+        if speechAt == nil && elapsed > 5 { fail(VoiceError.message("No speech heard. Tap the center to retry.")); return }
         if speechAt != nil && elapsed > 0.7 && now() - sentAt >= 1.2 {
             sentAt = now(); enqueue(VoiceAudioBuffer.wav(pcm), final: false)
         }
     }
     private func checkMatchingDeadline() {
         if phase == .matching, let deadline = finalDeadline, now() >= deadline {
-            fail(VoiceError.message("Voice matching timed out. Tap Listen again to retry. Nothing was run."))
+            fail(VoiceError.message("Voice matching timed out. Tap the center to retry. Nothing was run."))
         }
     }
     func finishListening() {
@@ -222,7 +222,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         microphone.stop()
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         microphone.buffer.clear(); self.microphone = nil
-        guard !failed, speechAt != nil, !pcm.isEmpty else { fail(VoiceError.message("No speech heard. Tap Listen again to retry.")); return }
+        guard !failed, speechAt != nil, !pcm.isEmpty else { fail(VoiceError.message("No speech heard. Tap the center to retry.")); return }
         phase = .matching; message = "Matching your command…"
         finalPending = true
         finalDeadline = now() + max(0, finalMatchingBudget)
@@ -267,7 +267,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                     }
                     if !text.isEmpty, self.transcript != text { self.transcript = text }
                     guard !text.isEmpty else {
-                        if isFinal { throw VoiceError.message("No speech recognized. Tap Listen again to retry.") }
+                        if isFinal { throw VoiceError.message("No speech recognized. Tap the center to retry.") }
                         return
                     }
                     if !isFinal, self.lastProvisionalTranscript == text { return }
@@ -313,7 +313,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
             finalDeadline = nil; timer?.invalidate(); timer = nil
             phase = .ready
             selected = decision.noMatch ? .left : .up
-            message = decision.noMatch ? "No matching action. Nothing will run." : "Swipe to select · Space or Enter to run"
+            message = decision.noMatch ? "No matching action. Swipe left to cancel." : "Swipe to an action and lift to run · swipe left to cancel"
             if !decision.noMatch, selectedMatch != nil { onFinalMatch?() }
         }
     }
@@ -433,7 +433,7 @@ struct VoiceHUDView: View {
                 .frame(height: 48).accessibilityIdentifier("voice.status")
             Text(session.decision.map {
                 "Confidence \(Int(($0.confidence * 100).rounded()))% · \($0.shortlisted ? "Finalist scores" : "Action match scores")"
-            } ?? "Select a match, then confirm · Esc to cancel")
+            } ?? "Swipe and lift to choose · swipe left to cancel")
                 .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 12)
             Text("Audio → OpenRouter / xAI · Text + actions → Jev\nAudio and transcript are not saved by Rotagivan.")
                 .font(.system(size: 8)).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -457,7 +457,7 @@ struct VoiceHUDView: View {
             } label: {
                 VStack(spacing: 3) {
                     Image(systemName: session.phase == .listening ? "stop.fill" :
-                        session.phase == .ready ? (session.selected == .left ? "xmark" : "return") : "mic.fill")
+                        session.phase == .ready ? (session.selected == .left ? "xmark" : "checkmark") : "mic.fill")
                         .font(.system(size: 13, weight: .medium))
                     Text(centerTitle).font(.system(size: 9, weight: .semibold))
                 }
@@ -481,10 +481,8 @@ struct VoiceHUDView: View {
         let point = ExplorerStarburstLayout.point(direction, radius: 108, center: CGPoint(x: 209, y: 155))
         let title = direction == .left ? "Cancel / Ignore" : (match?.record.title ?? "No match")
         return Button {
-            // Cancelling an in-flight recording is always available; ready results
-            // select Ignore and still require confirmation.
-            if direction == .left && session.phase != .ready { onExit() }
-            else { session.select(direction) }
+            if direction == .left { onExit() }
+            else { session.select(direction); onConfirm() }
         } label: {
             ZStack {
                 ExplorerSectorChrome(theme: theme, shape: shape, selected: selected, available: available, opaque: opaque)

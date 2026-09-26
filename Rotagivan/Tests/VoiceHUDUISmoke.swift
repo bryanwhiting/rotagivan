@@ -70,7 +70,7 @@ private final class HUDCloud: VoiceCloudServing {
         noMatch.receive(VoiceDecision(matches: [], confidence: 0.8, noMatch: true), final: true)
         let failed = fixture()
         failed.fail(VoiceError.message("Microphone access is off. Enable Rotagivan in System Settings → Privacy & Security → Microphone, then try again. Nothing was run."))
-        let timeout = fixture(); timeout.fail(VoiceError.message("No speech heard. Tap Listen again to retry."))
+        let timeout = fixture(); timeout.fail(VoiceError.message("No speech heard. Tap the center to retry."))
         let disconnected = fixture()
         disconnected.makeCloud = { HUDCloud(ready, transcriptionError: URLError(.notConnectedToInternet)) }
         disconnected.start(catalog: catalog)
@@ -121,8 +121,8 @@ private final class HUDCloud: VoiceCloudServing {
                         }) else { preconditionFailure("Right tile must have a native accessible button") }
                         precondition(right.accessibilityPerformPress?() == true)
                         RunLoop.main.run(until: Date().addingTimeInterval(0.08))
-                        precondition(session.selected == .right && confirms == 0,
-                            "Selecting a directional tile must not execute an action")
+                        precondition(session.selected == .right && confirms == 1,
+                            "Clicking a directional tile must confirm immediately")
                         precondition(session.selectedMatch?.id == ready.matches[1].id)
                         let updated = views(host).flatMap(elements).first {
                             $0.accessibilityLabel?() == "Run selected action"
@@ -130,7 +130,7 @@ private final class HUDCloud: VoiceCloudServing {
                         precondition(updated.accessibilityFrame?() == before,
                             "Selection updates must preserve the wheel center")
                         precondition(updated.accessibilityPerformPress?() == true)
-                        precondition(confirms == 1, "Manual confirmation must invoke the confirm callback")
+                        precondition(confirms == 2, "Center confirmation remains an optional alternative")
                     }
                     if name == "no-match" {
                         precondition(button("Ignore command").accessibilityPerformPress?() == true)
@@ -142,6 +142,11 @@ private final class HUDCloud: VoiceCloudServing {
                             "Failed or cancelled voice must not expose executable stale candidates")
                         precondition(button("Listen again").accessibilityPerformPress?() == true); precondition(retries == 1)
                     }
+                    guard let left = buttons.first(where: {
+                        $0.accessibilityIdentifier?() == "voice.tile.\(ExplorerSlot.left.rawValue)"
+                    }) else { preconditionFailure("Cancel sector must be accessible in every voice state") }
+                    precondition(left.accessibilityPerformPress?() == true && exits == 2,
+                        "The left tile must cancel immediately in every state")
                     let center = CGPoint(x: 235, y: 250)
                     for direction in [ExplorerSlot.up, .right, .down, .left] {
                         let sector = ExplorerStarburstSector(direction: direction, innerRadius: 48,

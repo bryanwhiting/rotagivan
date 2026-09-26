@@ -589,14 +589,14 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         precondition(controller.displayedVoiceSession != nil, "Main center tap activates voice")
         controller.process(report(true))
         controller.process(report(true, x: 600))
-        controller.process(report(false))
         precondition(controller.displayedVoiceSession?.selected == .right)
-        precondition(executed.isEmpty && controller.isVisible, "Swipe release must not execute")
+        precondition(executed.isEmpty && controller.isVisible, "Highlight alone must not execute")
         precondition(controller.processLayerKey(key(49, repeatKey: true)))
         precondition(executed.isEmpty)
-        precondition(controller.processLayerKey(key(49)))
+        controller.process(report(false))
+        controller.process(report(false))
         try await Task.sleep(nanoseconds: 80_000_000)
-        precondition(executed == [mute.action] && !controller.isVisible, "Space executes selected ID exactly once")
+        precondition(executed == [mute.action] && !controller.isVisible, "Swipe release executes selected ID exactly once without Enter")
 
         controller.show(waitingForLift: false); controller.centerTap()
         precondition(controller.processLayerKey(key(36)))
@@ -618,6 +618,73 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         controller.confirmVoiceAction()
         precondition(executed.count == 2, "No-match results cannot execute even if an action is selected")
         controller.dismiss()
+
+        // Exercise the real controller's four-sector report path, including
+        // every result, inversion, failures, retry, and readiness races.
+        let gestureController = AppExplorerController(defaults: defaults)
+        var pickerInverted = false
+        gestureController.configuration = { AppExplorerSettings(invertPickerDirection: pickerInverted) }
+        gestureController.frontmostPID = { 4242 }
+        gestureController.frontmostBundleID = { "com.apple.finder" }
+        gestureController.contextIsValid = { true }
+        var gestureCatalog = catalog
+        gestureController.voiceCatalog = { gestureCatalog }
+        gestureController.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
+        var gestureExecuted: [BindingAction] = []
+        gestureController.onKeyboardBindingAction = { gestureExecuted.append($0) }
+        func move(_ dx: Double, _ dy: Double) {
+            gestureController.process(report(true))
+            gestureController.process(report(true, x: 500 + dx, y: 500 + dy))
+        }
+        for inverted in [false, true] {
+            pickerInverted = inverted
+            let sign = inverted ? -1.0 : 1.0
+            for (index, delta) in [(0, (0.0, -100.0)), (1, (100.0, 0.0)), (2, (0.0, 100.0))] {
+                gestureController.show(waitingForLift: false); gestureController.beginVoiceMode()
+                let count = gestureExecuted.count
+                move(delta.0 * sign, delta.1 * sign)
+                precondition(gestureExecuted.count == count, "Movement only highlights")
+                gestureController.process(report(false)); gestureController.process(report(false))
+                try await Task.sleep(nanoseconds: 80_000_000)
+                precondition(gestureExecuted.count == count + 1 && gestureExecuted.last == decision.matches[index].record.action,
+                    "Each directional result must execute once on lift, respecting picker inversion")
+            }
+        }
+        pickerInverted = false
+        let gestureCount = gestureExecuted.count
+        for state in ["ready", "no-match", "failed", "preparing"] {
+            gestureController.prepareVoice = { voice, _ in
+                if state == "ready" { voice.receive(decision, final: true) }
+                if state == "no-match" { voice.receive(noMatch, final: true) }
+                if state == "failed" { voice.fail(VoiceError.message("No speech recognized")) }
+            }
+            gestureController.show(waitingForLift: false); gestureController.beginVoiceMode()
+            move(-100, 0); gestureController.process(report(false))
+            precondition(gestureController.displayedVoiceSession == nil && gestureController.isVisible,
+                "Left swipe must leave voice mode even with no speech or while preparing")
+            gestureController.dismiss()
+        }
+        var retries = 0
+        gestureController.prepareVoice = { voice, _ in retries += 1; voice.fail(VoiceError.message("No speech recognized")) }
+        gestureController.show(waitingForLift: false); gestureController.beginVoiceMode()
+        gestureController.process(report(true)); gestureController.process(report(false))
+        precondition(retries == 2, "A center tap after failure must retry without keyboard input")
+        gestureController.dismiss()
+        gestureController.prepareVoice = { _, _ in }
+        gestureController.show(waitingForLift: false); gestureController.beginVoiceMode()
+        move(0, -100)
+        gestureController.displayedVoiceSession!.receive(decision, final: true)
+        gestureController.process(report(false))
+        precondition(gestureExecuted.count == gestureCount && gestureController.displayedVoiceSession != nil,
+            "Results arriving during a swipe must not turn a disabled tile into an armed action")
+        gestureController.dismiss()
+        gestureController.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
+        gestureController.show(waitingForLift: false); gestureController.beginVoiceMode()
+        move(0, -100); gestureCatalog = []
+        gestureController.process(report(false))
+        precondition(gestureController.displayedVoiceSession?.phase == .failed && gestureExecuted.count == gestureCount,
+            "Swipe execution must revalidate the action catalog")
+        gestureController.dismiss(); gestureCatalog = catalog
 
         precondition(!AppExplorerSettings().resolvedVoiceAutoDecide)
         var automatic = AppExplorerSettings()

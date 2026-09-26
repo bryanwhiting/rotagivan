@@ -27,7 +27,7 @@ struct VoiceModeSettingsView: View {
                         store.settings.appExplorer = settings
                     }))
                     .accessibilityIdentifier("voice-auto-decide")
-                Text("Off by default: choose among three matches in the voice HUD, then press Space or Enter. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
+                Text("Off by default: swipe to a match and lift to run it, or click its HUD tile. Swipe left to cancel. Space or Enter also work. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Assign Activate voice mode and edit voice keywords in Actions.")
                     .font(.caption).foregroundStyle(.secondary)

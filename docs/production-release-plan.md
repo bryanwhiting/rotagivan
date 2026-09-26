@@ -29,6 +29,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [x] Show live audio activity, transcription, processing status, and ranked action matches with scores.
 - [x] Use four directional tiles: best match, second match, third match, and cancel.
 - [x] Keep manual confirmation as the default; retain an explicit **Auto-decide** option.
+  - A swipe and lift, or a click on a ready action tile, is confirmation. Enter is optional. Left swipe cancels in every state; center tap finishes listening, confirms a ready choice, or retries after an error.
 - [x] Add a setting to start listening automatically when the HUD opens.
 - [x] Create a dedicated **Voice mode** sidebar page and move all voice settings out of General.
 - [ ] Reduce latency through streaming transcription, connection reuse, and incremental matching where supported.
@@ -208,6 +209,13 @@ The per-computer application index now warms at startup independently of setting
 Run `zsh Rotagivan/test.sh` to reproduce the suite. A passing local suite is not a claim of cross-Mac validation, provider latency guarantees, notarization, or public-release readiness. Those gates remain unchecked.
 
 This document tracks reviewed implementation and remaining release work; unchecked items are not claimed complete.
+
+### Voice HUD swipe follow-up — 1.1.184 (186)
+
+- Voice choices now behave like ordinary HUD tiles: movement highlights a ready result, and lifting executes it once. Clicking a result tile also confirms immediately; Space/Enter remain optional. Left swipe cancels in every phase, including no-speech errors. Center tap finishes recording, confirms a ready choice, or retries after failure.
+- Swipe confirmation only arms a match already ready when highlighted. Results arriving mid-swipe cannot unexpectedly execute. Existing action identity, enabled-state, app-scope, and context validation remain enforced; provisional/no-match results do not execute. Auto-decide remains opt-in and unchanged.
+- `AppExplorerTests`, `VoiceTests`, and `VoiceHUDUISmoke` passed with synthetic inputs/providers. Tests cover all three result directions, inverted picking, once-only release execution, left cancellation, center retry, late-result safety, removed actions, and native tile callbacks. Ready/error captures were visually reviewed at `/private/tmp/rotagivan-hud-empty-circles/Rotagivan/build/voice-release-verification`. This does not claim live speech-provider or physical-trackpad validation.
+- Built, installed using `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`; persistent pinned signature verified. Built/installed executable SHA-256: `f041ab08e61e485f016da5933a3a516a994dd9c87c798f71f263832e98bf20c7`. Build sources remained unchanged. Unfinished note-entry changes were excluded.
 
 ### HUD empty-position follow-up — 1.1.183 (185)
 

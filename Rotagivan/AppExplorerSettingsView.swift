@@ -3,28 +3,28 @@ import SwiftUI
 struct HUDSettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var selectedGroup: ExplorerReservedGroup?
+    private let onEditDefaultTaps: () -> Void
 
-    init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil) {
+    init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil, onEditDefaultTaps: @escaping () -> Void = {}) {
         self.store = store
+        self.onEditDefaultTaps = onEditDefaultTaps
         _selectedGroup = State(initialValue: initialGroup)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            AppExplorerSettingsView(store: store)
-            GroupBox("Built-in HUD layers") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Ready-made HUD layers, available from every tile’s HUD Layers menu.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        ForEach(ExplorerReservedGroup.allCases) { group in
-                            Button { selectedGroup = group } label: {
-                                Label(group.title, systemImage: group.symbol).frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered).help(group.summary)
-                        }
+            HStack {
+                Text("HUD workspace").font(.title2.weight(.semibold))
+                Spacer()
+                Button("Default taps…", action: onEditDefaultTaps)
+                    .accessibilityIdentifier("hud-default-taps")
+                Menu("Built-in layers") {
+                    ForEach(ExplorerReservedGroup.allCases) { group in
+                        Button(group.title) { selectedGroup = group }
                     }
-                }.padding(8)
+                }.fixedSize()
             }
+            AppExplorerSettingsView(store: store, workspace: true)
         }
         .sheet(item: $selectedGroup) { group in
             VStack(alignment: .leading, spacing: 16) {
@@ -40,6 +40,7 @@ struct HUDSettingsView: View {
                 }
             }.padding(24).frame(width: 660, height: 640)
         }
+        .padding(16)
     }
 }
 
@@ -74,6 +75,8 @@ struct ReservedGroupPreview: View {
 
 struct WindowManagerSettingsView: View {
     @ObservedObject var store: SettingsStore
+    var workspace = false
+    var showCanvas = true
     @State private var error: String?
     @State private var shortcutAction: TapAction = .shortcut
     @State private var editingBinding: ActionBinding?
@@ -90,7 +93,8 @@ struct WindowManagerSettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Customize this HUD layer like the main HUD. Each tile can place the window, run a command, or open another HUD layer. Drag tiles to rearrange them; use the layer rail for alternate layouts.")
                 .font(.callout).foregroundStyle(.secondary)
-            AppExplorerSettingsView(store: store, configurationOverride: Binding(get: {
+            if showCanvas {
+            AppExplorerSettingsView(store: store, workspace: workspace, configurationOverride: Binding(get: {
                 explorer.windowEditor()
             }, set: { updated in
                 var next = explorer
@@ -98,6 +102,7 @@ struct WindowManagerSettingsView: View {
                 store.settings.appExplorer = next; error = nil
             }), scopeTitle: "Window Manager", windowManagerOnly: true, windowApplet: true,
                 windowOwnerPath: [])
+            }
             Divider()
             HStack {
                 Text("Window Manager actions").font(.headline)
@@ -192,6 +197,7 @@ struct AppExplorerSettingsView: View {
     @State private var previewDrag: ExplorerSlotDrag?
     @State private var previewEditing: ExplorerSlot?
     @State private var editingTileBinding: ActionBinding?
+    @State private var workspaceDetails = false
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
     private let transferPrefix: [ExplorerTilePathStep]
@@ -206,6 +212,12 @@ struct AppExplorerSettingsView: View {
     private let scopeTitle: String?
     private let windowManagerOnly: Bool
     private let windowApplet: Bool
+    private let workspace: Bool
+    private let workspaceCanvasOnly: Bool
+    private let workspaceMap: AppExplorerSettings?
+    private let workspaceLayerID: UUID?
+    private let onWorkspaceLayer: ((UUID?) -> Void)?
+    private var editingWindowManager: Bool { workspace && selectedBuiltIn == .windowManager }
     private var settings: AppExplorerSettings { baseSettings.projected(layerID: selectedLayerID) }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
     private var scopeBindings: [ActionBinding] {
@@ -280,8 +292,9 @@ struct AppExplorerSettingsView: View {
     private var visualHUDPreview: some View {
         ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
             dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
-            layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name,
-            rootSettings: baseSettings, selectedLayerID: selectedLayerID, onSelectLayer: { id in selectedLayerID = id; groupPath = [] },
+            layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle,
+            rootSettings: workspaceMap ?? baseSettings, selectedLayerID: workspaceMap == nil ? selectedLayerID : workspaceLayerID,
+            onSelectLayer: onWorkspaceLayer ?? { id in selectedLayerID = id; groupPath = [] },
             selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
             onDrag: { source, target in
                 if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
@@ -290,27 +303,118 @@ struct AppExplorerSettingsView: View {
                 guard let drag = previewDrag, let target else { return }
                 var next = settings
                 if drag.apply(to: target, in: groupPath, settings: &next), save(next) { previewSelection = target }
-            }, editingTile: $previewEditing, editor: generatedBuiltIn == nil ? { direction in tilePopover(direction) } : nil)
-            .padding(.top, -20)
+            }, editingTile: $previewEditing, editor: generatedBuiltIn == nil ? { direction in tilePopover(direction) } : nil,
+            workspace: workspace)
+            .padding(.top, workspace ? 0 : -20)
             .frame(maxWidth: .infinity)
     }
 
     private var visualHUDControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Picker("Editing HUD", selection: $selectedLayerID) {
-                    Text("Main HUD").tag(nil as UUID?)
-                    ForEach(baseSettings.holdLayers ?? []) { layer in
-                        Text(layer.name).tag(Optional(layer.id))
+            visualHUDControlRow
+            if workspace {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: 8) {
+                        layerRailButton(nil, name: "Main HUD", symbol: "safari")
+                        ForEach(baseSettings.holdLayers ?? []) { layer in
+                            layerRailButton(layer.id, name: layer.name, symbol: layer.builtIn?.symbol ?? "square.3.layers.3d")
+                        }
+                    }.padding(.vertical, 4)
+                }.accessibilityIdentifier("hud-layer-rail")
+            }
+            if !workspace {
+                Text("Click any surrounding HUD to bring it forward and edit it. Use Actions & hotkeys to add actions to the selected HUD.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private var workspaceOptions: some View {
+        Menu {
+            Picker("Theme", selection: themeBinding) {
+                ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+                Divider()
+                Toggle("Invert picker direction", isOn: invertPickerBinding)
+                Picker("Two-finger HUD navigation", selection: swipeDirectionBinding) {
+                    ForEach(HUDSwipeDirection.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Divider()
+                Toggle("Animate HUD feedback", isOn: animationBinding)
+                Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
+        } label: { Image(systemName: "slider.horizontal.3") }
+        .fixedSize().help("Theme and HUD options").accessibilityLabel("Theme and HUD options")
+    }
+    private var windowWorkspace: some View {
+        AppExplorerSettingsView(store: store, workspace: true, workspaceCanvasOnly: true,
+            workspaceMap: baseSettings, workspaceLayerID: selectedLayerID,
+            onWorkspaceLayer: { id in selectedLayerID = id; groupPath = [] },
+            configurationOverride: Binding(get: { baseSettings.windowEditor() }, set: { updated in
+                var next = baseSettings
+                guard next.saveWindowEditor(updated), next.hasValidFavorites else {
+                    groupError = "This Window Manager layout exceeds the nesting or tile limits."; return
+                }
+                _ = saveBase(next)
+            }), scopeTitle: "Window Manager", windowManagerOnly: true, windowApplet: true,
+            windowOwnerPath: [])
+    }
+    private var workspaceLocation: some View {
+        HStack(spacing: 6) {
+            Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle ?? "Main HUD") { groupPath = [] }
+                .buttonStyle(.link).lineLimit(1)
+            ForEach(groupPath.indices, id: \.self) { index in
+                Image(systemName: "chevron.right").font(.caption2)
+                Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD layer") {
+                    groupPath = Array(groupPath.prefix(index + 1))
+                }.buttonStyle(.link).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if generatedBuiltIn == nil {
+                Menu {
+                    Picker("Slots", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
+                        var next = settings
+                        guard next.resize(to: count, at: groupPath) else {
+                            groupError = "Remove some tiles before choosing fewer slots. Your existing tiles have been kept."; return
+                        }
+                        _ = save(next)
+                    })) { ForEach(Array(2...16), id: \.self) { Text("\($0) slots").tag($0) } }
+                    if !groupPath.isEmpty, settings.favorite(at: groupPath)?.isPureGroup == true {
+                        Picker("Contents", selection: Binding(get: { settings.favorite(at: groupPath)?.groupMode ?? .favorites }, set: { mode in
+                            guard let direction = groupPath.last, var group = settings.favorite(at: groupPath) else { return }
+                            group.groupMode = mode
+                            edit { $0.setFavorite(group, at: direction, in: Array(groupPath.dropLast())) }
+                        })) {
+                            Text("Assigned favorites").tag(AppExplorerMode.favorites)
+                            Text("Recent apps").tag(AppExplorerMode.recent)
+                        }
+                        Button("Rename…") { editingGroupPath = groupPath }
                     }
-                }.frame(maxWidth: 260)
-                Button("Actions & hotkeys…") {
+                } label: { Text("\(settings.count(at: groupPath)) slots") }
+                .fixedSize()
+                .accessibilityIdentifier("hud-workspace-slots")
+            }
+        }.font(.caption).accessibilityIdentifier("hud-workspace-location")
+    }
+    private func layerRailButton(_ id: UUID?, name: String, symbol: String) -> some View {
+        Button { selectedLayerID = id; groupPath = [] } label: {
+            Label(name, systemImage: symbol).lineLimit(1).padding(.horizontal, 4)
+        }.buttonStyle(.bordered).tint(selectedLayerID == id ? .teal : nil)
+            .accessibilityIdentifier("hud-layer-button-" + (id?.uuidString ?? "main"))
+            .accessibilityValue(selectedLayerID == id ? "Selected" : "Not selected")
+    }
+    private var visualHUDControlRow: some View {
+            HStack {
+                if workspace {
+                    hudLayerPicker.labelsHidden().frame(width: 160)
+                        .accessibilityLabel(workspaceCanvasOnly ? "Window layout" : "Editing HUD")
+                } else { hudLayerPicker.frame(maxWidth: 260) }
+                Button(workspace ? "Actions…" : "Actions & hotkeys…") {
                     if !groupPath.isEmpty { openGroupHotkeys() }
                     else if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                         creatingLayer = false; editingLayer = layer
                     } else { editingDefaultLayer = true }
                 }
                 .accessibilityIdentifier("hud-visual-actions")
+                .help("Actions and hotkeys for this HUD")
                 Spacer(minLength: 8)
                 Menu {
                     Button("Custom HUD…") { creatingLayer = true; editingLayer = .empty() }
@@ -344,6 +448,7 @@ struct AppExplorerSettingsView: View {
                         }
                     }
                 } label: { Label("Add HUD", systemImage: "plus") }
+                .fixedSize()
                 .disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
                 .accessibilityIdentifier("hud-visual-add")
@@ -360,16 +465,29 @@ struct AppExplorerSettingsView: View {
                         Button("Remove HUD…", role: .destructive) { removingLayer = true }
                     }
                 } label: { Label("Manage", systemImage: "ellipsis.circle") }
+                    .fixedSize()
+                if workspace && !workspaceCanvasOnly {
+                    Button { workspaceDetails = true } label: { Image(systemName: "gearshape") }
+                        .help("Layer settings").accessibilityLabel("Layer settings…")
+                        .accessibilityIdentifier("hud-layer-settings")
+                    workspaceOptions
+                }
             }
-            Text("Click any surrounding HUD to bring it forward and edit it. Use Actions & hotkeys to add actions to the selected HUD.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
+    }
+    private var hudLayerPicker: some View {
+        Picker(workspaceCanvasOnly ? "Window layout" : "Editing HUD", selection: $selectedLayerID) {
+            Text(scopeTitle ?? "Main HUD").tag(nil as UUID?)
+            ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
+        }.accessibilityIdentifier("hud-layer-picker")
     }
 
     var compact = false
     var onGroupPathChange: (([ExplorerSlot]) -> Void)? = nil
 
-    init(store: SettingsStore, groupPath: [ExplorerSlot] = [], compact: Bool = false, initialLayerID: UUID? = nil,
+    init(store: SettingsStore, groupPath: [ExplorerSlot] = [], compact: Bool = false, initialLayerID: UUID? = nil, workspace: Bool = false,
+         workspaceCanvasOnly: Bool = false,
+         workspaceMap: AppExplorerSettings? = nil, workspaceLayerID: UUID? = nil,
+         onWorkspaceLayer: ((UUID?) -> Void)? = nil,
          configurationOverride: Binding<AppExplorerSettings>? = nil, scopeTitle: String? = nil, windowManagerOnly: Bool = false, windowApplet: Bool = false,
          transferRoot: (() -> AppExplorerSettings)? = nil, transferSave: ((AppExplorerSettings) -> Bool)? = nil,
          transferPrefix: [ExplorerTilePathStep] = [], windowOwnerPath: [ExplorerTilePathStep]? = nil,
@@ -378,6 +496,11 @@ struct AppExplorerSettingsView: View {
         _groupPath = State(initialValue: groupPath)
         _selectedLayerID = State(initialValue: initialLayerID)
         self.compact = compact
+        self.workspace = workspace
+        self.workspaceCanvasOnly = workspaceCanvasOnly
+        self.workspaceMap = workspaceMap
+        self.workspaceLayerID = workspaceLayerID
+        self.onWorkspaceLayer = onWorkspaceLayer
         self.configurationOverride = configurationOverride
         self.scopeTitle = scopeTitle
         self.windowManagerOnly = windowManagerOnly
@@ -391,6 +514,13 @@ struct AppExplorerSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if workspace {
+                if !workspaceCanvasOnly { visualHUDControls }
+                else { visualHUDControlRow }
+                if !editingWindowManager { workspaceLocation }
+                if editingWindowManager { windowWorkspace }
+                else { visualHUDPreview.frame(maxWidth: .infinity, maxHeight: .infinity) }
+            } else {
             if let scopeTitle {
                 Label("Layers for \(scopeTitle)", systemImage: "square.3.layers.3d").font(.headline)
                 Text(windowApplet ? "These layers belong to Window Manager. Hold a key temporarily, or tap a toggle key to switch tiles until you close the applet." : "These keys work only inside this tile. Hold temporarily or tap to toggle; leaving the tile returns to its default.")
@@ -479,14 +609,14 @@ struct AppExplorerSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let builtIn = generatedBuiltIn {
-                if !compact { visualHUDPreview }
+                if !compact && !(workspace && builtIn == .windowManager) { visualHUDPreview }
                 GroupBox {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(builtIn.title, systemImage: builtIn.symbol).font(.headline)
                         Text("This position opens the built-in HUD directly. Swipe to another position to leave it.")
                             .font(.callout).foregroundStyle(.secondary)
                         if builtIn == .windowManager {
-                            WindowManagerSettingsView(store: store)
+                            WindowManagerSettingsView(store: store, workspace: workspace)
                         } else if builtIn == .recentApps {
                             Text("The active app is outlined on the left. Other recent apps start at top-left and continue clockwise.")
                         } else {
@@ -573,6 +703,7 @@ struct AppExplorerSettingsView: View {
                 : "Click a tile to edit it right there. Drag to rearrange, or choose Send to HUD layer to move it across layers. Preview clicks never launch apps or run actions.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if let groupError { Text(groupError).font(.caption).foregroundStyle(.red).padding(6).background(.regularMaterial) }
@@ -593,6 +724,21 @@ struct AppExplorerSettingsView: View {
                     groupError = nil
                     return true
                 }, onCancel: { importingBookmarks = false })
+        }
+        .sheet(isPresented: $workspaceDetails) {
+            VStack(alignment: .trailing, spacing: 12) {
+                ScrollView {
+                    if editingWindowManager { WindowManagerSettingsView(store: store, showCanvas: false) }
+                    else {
+                        AppExplorerSettingsView(store: store, groupPath: groupPath, compact: true,
+                            initialLayerID: selectedLayerID, configurationOverride: configurationOverride,
+                            scopeTitle: scopeTitle, windowManagerOnly: windowManagerOnly, windowApplet: windowApplet,
+                            transferRoot: transferRoot, transferSave: transferSave, transferPrefix: transferPrefix,
+                            windowOwnerPath: windowOwnerPath)
+                    }
+                }
+                Button("Done") { workspaceDetails = false }.keyboardShortcut(.cancelAction)
+            }.padding(24).frame(width: 660, height: 640)
         }
         .sheet(item: $tileTransfer) { transfer in
             ExplorerTileTransferEditor(transfer: transfer, onSave: { destination, slot, copy in
@@ -1550,6 +1696,13 @@ private final class ExplorerSlotDragView: NSView {
 
 /// Uses the actual HUD view and entry mapping; only its callbacks are different.
 /// No controller, input monitor, app activation, or keyboard posting is started.
+struct HUDWorkspaceViewportAnchors: PreferenceKey {
+    static let defaultValue: [Anchor<CGRect>] = []
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 struct ExplorerHUDSettingsPreview: View {
     let settings: AppExplorerSettings
     let theme: ExplorerTheme
@@ -1565,6 +1718,7 @@ struct ExplorerHUDSettingsPreview: View {
     var onDrop: (ExplorerSlot, ExplorerSlot?) -> Void
     var editingTile: Binding<ExplorerSlot?> = .constant(nil)
     var editor: ((ExplorerSlot) -> AnyView)? = nil
+    var workspace = false
     @StateObject private var model = ExplorerModel()
 
     var body: some View {
@@ -1573,7 +1727,7 @@ struct ExplorerHUDSettingsPreview: View {
         GeometryReader { viewport in
         AppExplorerView(model: model, onSelect: { slot in
             if !model.showingRecents { selection = slot; if editor != nil { editingTile.wrappedValue = slot } }
-        }, onCancel: {}, onBack: onBack, isPreview: true,
+        }, onCancel: {}, onBack: onBack, isPreview: true, settingsWorkspace: workspace,
             onPreviewLayer: onSelectLayer.map { select in { id in
                 guard let node = rootSettings?.hudMap(includingUnavailable: true).first(where: { $0.id == id }) else { return }
                 editingTile.wrappedValue = nil
@@ -1605,8 +1759,12 @@ struct ExplorerHUDSettingsPreview: View {
             .onChange(of: selection) { _, selected in model.selected = selected }
             .position(x: viewport.size.width / 2, y: viewport.size.height / 2)
         }
-        .frame(height: 850)
+        .frame(height: workspace ? nil : 850)
+        .anchorPreference(key: HUDWorkspaceViewportAnchors.self, value: .bounds) { workspace ? [$0] : [] }
         .clipped()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("HUD layout workspace")
+        .accessibilityIdentifier(workspace ? "hud-workspace" : "hud-orbit-workspace")
     }
 
     private func refresh() {

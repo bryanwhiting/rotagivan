@@ -89,7 +89,7 @@ struct ExplorerHUDBackdrop: View {
         if theme == .native {
             RoundedRectangle(cornerRadius: 26).fill(.ultraThinMaterial)
                 .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(.white.opacity(0.2)))
-                .overlay { if reduceTransparency { RoundedRectangle(cornerRadius: 26).fill(Color(nsColor: .windowBackgroundColor)) } }
+                .overlay { if opaque { RoundedRectangle(cornerRadius: 26).fill(Color(nsColor: .windowBackgroundColor)) } }
         } else if theme == .starburst {
             RoundedRectangle(cornerRadius: 26)
                 .fill(LinearGradient(colors: [theme.surface, Color(red: 0.09, green: 0.065, blue: 0.17)],

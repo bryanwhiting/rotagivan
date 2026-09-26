@@ -67,7 +67,8 @@ struct RotagivanApp: App {
                     hotKeys.configureActionBindings(settings.enabled ? settings.actionBindings ?? [] : [])
                 }
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 940, height: 740)
 
         MenuBarExtra {
             NavigatorPanel(store: store, hid: hid)

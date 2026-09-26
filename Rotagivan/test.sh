@@ -196,9 +196,11 @@ settings_sources=()
 while IFS= read -r source; do
   settings_sources+=("Rotagivan/$source")
 done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)" \\/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
+for test in ReleaseSettingsTests HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
-  -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" Rotagivan/Tests/ReleaseSettingsTests.swift \
+  -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit \
-  -framework Carbon -framework Security -framework ServiceManagement -o "$test_dir/ReleaseSettingsTests"
-"$test_dir/ReleaseSettingsTests" "$test_dir"
+  -framework Carbon -framework Security -framework ServiceManagement -o "$test_dir/$test"
+"$test_dir/$test" "$test_dir"
+done
 echo "All tests passed. Test binaries: $test_dir"

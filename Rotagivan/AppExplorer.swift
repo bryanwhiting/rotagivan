@@ -1836,6 +1836,9 @@ struct AppExplorerView: View {
     var forceReduceTransparency = false
     var isPreview = false
     var showsCarousel = true
+    // Settings supply their own persistent controls outside the orbit canvas.
+    // Keep live HUD presentation and all legacy inline previews unchanged.
+    var settingsWorkspace = false
     var onPreviewLayer: ((String) -> Void)? = nil
     var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
@@ -1922,9 +1925,14 @@ struct AppExplorerView: View {
             }
             }
         }
-        .padding(26)
-        .frame(width: 470, height: 520)
-        .background(ExplorerHUDBackdrop(theme: model.theme, forceReduceTransparency: forceReduceTransparency))
+        .padding(.horizontal, 26)
+        // The settings canvas has no runtime footer. Fit the 310-point tile
+        // layout and its chrome without clipping rectangular themes at the
+        // minimum window height; tile sizes and live HUD geometry stay intact.
+        .padding(.vertical, isPreview && settingsWorkspace ? 20 : 26)
+        .frame(width: 470, height: isPreview && settingsWorkspace ? 350 : 520)
+        .background(ExplorerHUDBackdrop(theme: model.theme,
+            forceReduceTransparency: forceReduceTransparency || (isPreview && settingsWorkspace && model.theme == .native)))
         .tint(accent)
         .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
         .scaleEffect(animates && !appeared ? 0.985 : 1)
@@ -1948,11 +1956,13 @@ struct AppExplorerView: View {
             }
         }
         .modifier(HUDOrbitTransform(x: -cameraX, y: -cameraY))
-        .offset(y: showsCarousel ? -38 : 0)
+        .offset(y: showsCarousel && !(isPreview && settingsWorkspace) ? -38 : 0)
         .frame(width: 950, height: 850)
-        .background { if showsCarousel { carouselBackdrop.offset(y: -38) } }
+        .background {
+            if showsCarousel { carouselBackdrop.offset(y: isPreview && settingsWorkspace ? 0 : -38) }
+        }
         .overlay(alignment: .bottom) {
-            if showsCarousel {
+            if showsCarousel && !(isPreview && settingsWorkspace) {
                 ScrollView(.vertical, showsIndicators: false) {
                     fixedHUDControls
                 }

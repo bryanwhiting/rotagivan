@@ -115,6 +115,7 @@ struct ContentView: View {
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
     @State private var pendingLayerDeletion: PendingLayerDeletion?
+    @State private var editingDefaultTaps = false
     private let initialHUDGroup: ExplorerReservedGroup?
     private let layerColumnWidth: CGFloat = 468
 
@@ -165,7 +166,20 @@ struct ContentView: View {
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
         .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
-        .frame(width: 940, height: 740)
+        .frame(minWidth: 860, idealWidth: 940, maxWidth: .infinity,
+               minHeight: 680, idealHeight: 740, maxHeight: .infinity)
+        .sheet(isPresented: $editingDefaultTaps) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Default tap actions").font(.title2.weight(.semibold))
+                    Spacer()
+                    Button("Done") { editingDefaultTaps = false }.keyboardShortcut(.cancelAction)
+                }
+                ScrollView { defaultTapSettings }
+            }
+            .padding(24).frame(width: 660, height: 580)
+            .accessibilityIdentifier("default-tap-settings")
+        }
         .sheet(item: $renamingProfile) { profile in
             ProfileNameEditor(name: profile.name, onSave: { name in
                 guard store.renameConfiguration(name, for: profile.id) else { return false }
@@ -259,17 +273,29 @@ struct ContentView: View {
     }
 
     private var page: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if selection != "HUD" && selection != "Pointer & scrolling" {
-                    Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
-                    Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
-                        .font(.callout).foregroundStyle(.secondary)
+        Group {
+            if selection == "HUD" {
+                hudAndTapSettings
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id(store.activeConfigurationID)
+            } else {
+                GeometryReader { viewport in
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if selection != "Pointer & scrolling" {
+                            Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
+                                .accessibilityIdentifier("settings-page-heading")
+                            Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        pageContent
+                    }
+                    .frame(width: 708, alignment: .leading).padding(22)
+                    .frame(minWidth: viewport.size.width, minHeight: viewport.size.height, alignment: .topLeading)
+                    .id(store.activeConfigurationID)
                 }
-                pageContent
+                }
             }
-            .frame(width: 708, alignment: .leading).padding(22)
-            .id(store.activeConfigurationID)
         }
         .background {
             if selection == "HUD" {
@@ -297,8 +323,11 @@ struct ContentView: View {
     }
 
     private var hudAndTapSettings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("HUD and tap actions").font(.system(size: 24, weight: .semibold))
+        HUDSettingsView(store: store, initialGroup: initialHUDGroup,
+                        onEditDefaultTaps: { editingDefaultTaps = true })
+    }
+
+    private var defaultTapSettings: some View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top) {
@@ -325,8 +354,6 @@ struct ContentView: View {
                 }
                 .padding(10).frame(maxWidth: .infinity, alignment: .leading)
             }
-            HUDSettingsView(store: store, initialGroup: initialHUDGroup)
-        }
     }
 
     private var footer: some View {

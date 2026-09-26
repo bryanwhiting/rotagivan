@@ -74,7 +74,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 
 - [x] Move **Calibration** under Actions and rename it **Tap calibration**.
 - [x] Remove pointer layers from Pointer & scrolling while preserving the effective pointer behavior.
-- [ ] Redesign HUD settings around the selected, centered HUD with direct layer and tile editing.
+- [x] Redesign HUD settings around the selected, centered HUD with direct layer and tile editing.
   - Replace the fixed 850-point preview inside the scrolling settings column with a workspace centered in the visible viewport.
   - Keep every layer reachable at narrow widths; retain shared rendering, tile popovers, drag/drop, and save paths.
   - Show Window Manager in the same workspace instead of adding a second editor below it.
@@ -89,7 +89,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Complete first-run onboarding for permissions, voice credentials, privacy, and sync.
 - [ ] Test clean installs, upgrades, migration, multiple Macs, and recovery from failures.
 - [x] Fix the observed quit stall so updates can close the running app without a separate termination step.
-  - A three-second sample of installed 1.1.176 (178) during the next update found the main thread blocked in `SettingsSync.start → SyncCredentials.keychain → SyncKeychain.read → SecItemCopyMatching → SecurityServer decrypt`. Investigate nonblocking credential initialization and cancellation; this sample does not implicate input-device teardown.
+  - The main-thread Keychain startup block was resolved in 1.1.178 (180) with nonblocking credential initialization and cancellation. Normal quit and reopening were verified; see the fourth-batch record below.
 - [ ] Package a signed, notarized Mac download with a repeatable release process.
 - [ ] Establish updates, version checks, release notes, and rollback/recovery.
 - [ ] Build a landing page with a demo, requirements, download, privacy policy, and support contact.
@@ -151,6 +151,18 @@ The startup/quit investigation found synchronous Keychain access on the main thr
 - **1.1.178 (180)** was built, installed with `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built/installed executable SHA-256 matches (`61d6ae9fd0cb3864c88e5324482fefded3ee2f3bb1688ddecd1f4639d7c4e852`), with the existing certificate-pinned signature verified independently.
 - Installed startup and reopened-process samples show normal AppKit main-thread event-loop activity, with the pending Keychain read confined to `local.rotagivan.credentials`. Normal quit completed immediately without forced termination, and reopening succeeded. Only the old, already-blocked 1.1.177 process needed scoped termination during installation. Accessibility, Keychain trust, and settings were not reset.
 - Keychain authorization itself may still be pending; this does not claim that credentials were successfully unlocked or that live cloud/voice requests were exercised. The verified fix is that pending credential access no longer freezes the app or prevents normal quit.
+
+### Fifth batch: centered HUD settings workspace
+
+The selected HUD now stays centered in a bounded, resizable settings workspace instead of a fixed-height preview inside the page scroll view. Surrounding HUDs remain clickable; a layer rail and picker keep every saved layer reachable, including legacy overflow layers. Default tap controls remain available in a native sheet.
+
+- Window Manager uses one editable canvas with its own layout selector and the existing window-scoped save path. Tile popovers, nested navigation, drag/drop, templates, action assignments, and theme/options controls reuse existing components.
+- Settings default to 940 × 740 with an 860 × 680 minimum and can expand. Other pages preserve their original top alignment and gain horizontal scrolling when needed at narrow widths.
+- `HUDWorkspaceUISmoke` verifies the actual `ContentView` in native windows at 860 × 680, 940 × 740, and 1240 × 900. It measures the real viewport anchor and rendered tile bounds, checks exactly one canvas, browses mapped/overflow layers without changing settings, and exercises selected-layer renaming, root/nested dragging, native popovers, default-tap dismissal, and Window Manager-only persistence.
+- All three themes were rendered at the minimum size and visually reviewed. Settings-only presentation keeps the selected card fully visible and prevents satellite content showing through the native theme. Live HUD orbit geometry, tile dimensions, input routing, and animation behavior remain unchanged; no new input timer or background polling was introduced.
+- The complete regression suite passed, including the new workspace test and existing HUD preview/reserved-sheet checks now included in `Rotagivan/test.sh`. Final artifacts: `/private/tmp/rotagivan-tests.SUfOvx`. An earlier run stopped on disk exhaustion; only obsolete, rebuildable test executables from completed runs were removed, preserving source and screenshots, before the successful rerun.
+- **1.1.179 (181)** was built, installed using `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built/installed executable SHA-256 matches (`1e5333724e7326d4c6743764fe9433e7113eb527aadb68ff490e4a3797bcd479`), and the existing certificate-pinned signature verifies. Normal quit completed without forced termination; reopening showed a normal AppKit main-thread event loop, with pending Keychain work confined to the background worker. Accessibility permissions and signing trust were preserved.
+- Verification boundary: resizing was exercised through native windows hosting the actual settings page. External automation of the installed window was unavailable because the tool host lacks Accessibility access; no new grant was requested. Public-release and cross-Mac gates remain open.
 
 ### Remaining implementation boundaries
 

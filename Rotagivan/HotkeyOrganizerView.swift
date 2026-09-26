@@ -1,6 +1,52 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct ActionApplicationIcon: View {
+    let bundleID: String
+    @State private var icon: NSImage?
+    var body: some View {
+        Group {
+            if let icon { Image(nsImage: icon).resizable().scaledToFit() }
+            else { Image(systemName: "app") }
+        }.frame(width: 20, height: 20).accessibilityHidden(true)
+            .task(id: bundleID) {
+                icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { NSWorkspace.shared.icon(forFile: $0.path) }
+            }
+    }
+}
+
+struct ActionVocabularyEditor: View {
+    let row: ActionTableRow
+    var onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    init(row: ActionTableRow, onSave: @escaping (String) -> Void) {
+        self.row = row; self.onSave = onSave
+        _text = State(initialValue: row.keywords)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Voice dictionary · \(row.name)").font(.title2.weight(.semibold))
+            Label("Reserved description", systemImage: "lock").font(.headline)
+            Text(row.detail).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Keyword sets").font(.headline)
+            Text("One set per line; separate related phrases with commas. For example: team chat, open Slack. Up to 20 sets, 12 phrases per set, 120 characters per phrase. These hints improve matching; they do not retrain the model.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.body).frame(height: 180)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+                .accessibilityLabel("Voice keyword sets")
+            Text("Keyword sets are saved with your settings and sent with action descriptions for voice matching.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Clear") { text = "" }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { onSave(text); dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }.padding(24).frame(width: 540)
+    }
+}
+
 struct HotkeyOrganizerView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var keys = ShortcutSettings.shared
@@ -8,6 +54,9 @@ struct HotkeyOrganizerView: View {
     @State private var tab = "Dictionary"
     @AppStorage("actions.showIDs") private var showActionIDs = false
     @State private var actionGroupFilter = "All groups"
+    @State private var actionSubgroupFilter = "All subgroups"
+    @State private var vocabularyRow: ActionTableRow?
+    @State private var overrideRow: ActionTableRow?
     @State private var search = ""
     @State private var searchShortcut: RecordedShortcut?
     @State private var tapFilter: AppGestureTrigger?
@@ -84,6 +133,21 @@ struct HotkeyOrganizerView: View {
             }
         }
         .font(.system(size: 12))
+        .sheet(item: $vocabularyRow) { row in
+            ActionVocabularyEditor(row: row) { text in
+                var entries = store.settings.actionVocabulary ?? []
+                entries.removeAll { $0.actionID == row.id }
+                let sets = ActionVocabulary.parse(text)
+                if !sets.isEmpty { entries.append(ActionVocabulary(actionID: row.id, keywordSets: sets)) }
+                store.settings.actionVocabulary = entries.isEmpty ? nil : entries
+            }
+        }
+        .sheet(item: $overrideRow) { row in
+            VStack(alignment: .leading) {
+                AppOverridesView(store: store, initialBundleID: row.appBundleID ?? "com.google.Chrome")
+                HStack { Spacer(); Button("Done") { overrideRow = nil }.keyboardShortcut(.defaultAction) }
+            }.padding(24).frame(width: 720, height: 580)
+        }
         .sheet(item: $editingBinding) { binding in
             BindingEditor(binding: binding, existing: store.settings.actionBindings ?? [], global: true,
                 reservedKeys: reservedGlobalKeys,
@@ -184,7 +248,8 @@ struct HotkeyOrganizerView: View {
         let rows = ActionTableRow.make(settings: store.settings, applications: voiceApps.applications, audit: audit)
         let visible = rows.filter { row in
             (actionGroupFilter == "All groups" || row.group == actionGroupFilter) &&
-                textMatches(row.id + " " + row.group + " " + row.name + " " + row.detail + " " + row.keybindings)
+                (actionSubgroupFilter == "All subgroups" || row.subgroup == actionSubgroupFilter) &&
+                textMatches([row.id, row.group, row.subgroup, row.name, row.detail, row.keybindings, row.keywords].joined(separator: " "))
         }
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -192,6 +257,11 @@ struct HotkeyOrganizerView: View {
                     Text("All groups").tag("All groups")
                     ForEach(Array(Set(rows.map(\.group))).sorted(), id: \.self) { Text($0).tag($0) }
                 }.frame(maxWidth: 220)
+                .onChange(of: actionGroupFilter) { _ in actionSubgroupFilter = "All subgroups" }
+                Picker("Subgroup", selection: $actionSubgroupFilter) {
+                    Text("All subgroups").tag("All subgroups")
+                    ForEach(Array(Set(rows.filter { actionGroupFilter == "All groups" || $0.group == actionGroupFilter }.map(\.subgroup))).filter { !$0.isEmpty }.sorted(), id: \.self) { Text($0).tag($0) }
+                }.frame(maxWidth: 230)
                 Toggle("Show action IDs", isOn: $showActionIDs).toggleStyle(.checkbox)
                 Spacer()
                 Text("\(visible.count) actions").foregroundStyle(.secondary)
@@ -209,10 +279,22 @@ struct HotkeyOrganizerView: View {
                     }.width(min: 160, ideal: 190)
                 }
                 TableColumn("Action group", value: \.group).width(min: 85, ideal: 110, max: 150)
+                TableColumn("Subgroup") { row in
+                    HStack(spacing: 6) {
+                        if let bundleID = row.appBundleID { ActionApplicationIcon(bundleID: bundleID) }
+                        Text(row.subgroup.isEmpty ? "—" : row.subgroup).lineLimit(1).help(row.subgroup)
+                    }
+                }.width(min: 110, ideal: 140)
                 TableColumn("Action name", value: \.name).width(min: 125, ideal: 170)
-                TableColumn("Action description") { row in
+                TableColumn("Reserved description") { row in
                     Text(row.detail).lineLimit(2).help(row.detail)
                 }.width(min: 160, ideal: 290)
+                TableColumn("Keyword sets") { row in
+                    Button { vocabularyRow = row } label: {
+                        Text(row.keywords.isEmpty ? "Add keywords…" : row.keywords)
+                            .lineLimit(2).help(row.keywords.isEmpty ? "Teach voice alternative phrases for this action" : row.keywords)
+                    }.buttonStyle(.link)
+                }.width(min: 115, ideal: 170)
                 TableColumn("Keybindings") { row in
                     HStack(spacing: 6) {
                         Text(row.keybindings.isEmpty ? "—" : row.keybindings)
@@ -220,7 +302,18 @@ struct HotkeyOrganizerView: View {
                             .lineLimit(2).help(row.keybindings)
                         Spacer(minLength: 0)
                         Menu {
-                            Button("Add keybinding or gesture…") { assign(row.action) }
+                            Button("Edit voice keywords…") { vocabularyRow = row }
+                            if let bundleID = row.appBundleID {
+                                Button("Application overrides…") {
+                                    var apps = store.settings.resolvedAppOverrides
+                                    if !apps.contains(where: { $0.bundleID == bundleID }) {
+                                        apps.append(AppGestureOverride(bundleID: bundleID, name: row.subgroup))
+                                        store.settings.appOverrides = apps
+                                    }
+                                    overrideRow = row
+                                }
+                            }
+                            Button("Add keybinding or gesture…") { assign(row.action) }.disabled(row.isAppScoped)
                             ForEach((store.settings.actionBindings ?? []).filter { $0.action.identity == row.action.identity }) { binding in
                                 Button("Edit \(binding.trigger.title)…") { editingBinding = binding }
                                 Button("Remove \(binding.trigger.title)", role: .destructive) {
@@ -241,7 +334,7 @@ struct HotkeyOrganizerView: View {
             .frame(height: 520)
             .accessibilityIdentifier("actions-table")
             if visible.isEmpty { Text("No actions match this search.").foregroundStyle(.secondary) }
-            Text("Keybindings show input shortcuts and their scope. Use the row menu to assign or edit. Full descriptions are available on hover.")
+            Text("App defaults are keys sent inside that app, not global registrations. App overrides and voice shortcuts apply only in their app. Reserved descriptions are read-only; add keyword sets to teach voice your phrases.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task { await voiceApps.load() }

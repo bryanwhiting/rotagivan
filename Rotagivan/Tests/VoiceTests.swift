@@ -224,6 +224,20 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         levels.clear()
         precondition(levels.waveform().allSatisfy { $0 == 0 })
 
+        controller.configuration = { AppExplorerSettings() }
+        let scoped = VoiceActionRegistry.slackDefaults.first { $0.title == "Activity" }!
+        var frontApp = "com.tinyspeck.slackmacgap"
+        controller.frontmostBundleID = { frontApp }
+        available = [scoped]
+        controller.prepareVoice = { voice, _ in
+            voice.receive(VoiceDecision(matches: [VoiceMatch(record: scoped, probability: 1)], confidence: 1, noMatch: false), final: true)
+        }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        frontApp = "com.apple.finder"
+        controller.confirmVoiceAction()
+        precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Application actions cannot execute after switching apps")
+        controller.dismiss()
+
         // Render without recording or network access.
 
         let preview = VoiceSession()
@@ -249,4 +263,3 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         print("Voice API validation, credentials, bounded audio, cancellation, catalog, swipe/confirm runtime, and HUD render: PASS")
     }
 }
-

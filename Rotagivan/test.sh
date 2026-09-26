@@ -120,7 +120,7 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/ExplorerAppearance.swift \
   Rotagivan/MediaControls.swift \
   Rotagivan/ActionPicker.swift Rotagivan/BindingEditor.swift \
-  Rotagivan/HotkeyOrganizer.swift \
+  Rotagivan/HotkeyOrganizer.swift Rotagivan/AppOverridesView.swift \
   Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \

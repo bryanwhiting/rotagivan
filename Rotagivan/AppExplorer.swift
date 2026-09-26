@@ -1312,7 +1312,7 @@ extension AppExplorerPresenting {
     private func currentVoiceCatalog() -> [VoiceRegisteredAction] {
         if let voiceCatalog { return voiceCatalog() }
         guard let store = editingStore else { return [] }
-        return VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications)
+        return VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications, activeBundleID: sourceBundleID)
     }
 
     func beginVoiceMode() {
@@ -1350,6 +1350,9 @@ extension AppExplorerPresenting {
         if voice.selected == .left { endVoiceMode(); return }
         if voice.phase == .listening { voice.finishListening(); return }
         guard let match = voice.selectedMatch else { return }
+        if let requiredApp = match.record.appBundleID, frontmostBundleID() != requiredApp {
+            voice.fail(VoiceError.message("The active application changed. Please try again.")); return
+        }
         guard let action = currentVoiceCatalog().first(where: { $0.id == match.id })?.action, action.isValid else {
             voice.fail(VoiceError.message("This action changed or was removed. Please try again.")); return
         }

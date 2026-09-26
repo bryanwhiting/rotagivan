@@ -7,6 +7,10 @@ struct ActionTableRow: Identifiable {
     let name: String
     let detail: String
     let keybindings: String
+    let subgroup: String
+    let appBundleID: String?
+    let keywords: String
+    let isAppScoped: Bool
 
     static func group(for action: BindingAction) -> String {
         switch action.kind {
@@ -27,7 +31,7 @@ struct ActionTableRow: Identifiable {
     static func make(settings: StoredSettings, applications: [ExplorerApplication], audit: HotkeyAudit) -> [Self] {
         let inputs = audit.assignments.filter { $0.inputScope != nil && $0.shortcut?.isPhysicalShortcut == true && $0.boundAction != nil }
         let byAction = Dictionary(grouping: inputs, by: { $0.boundAction!.identity })
-        let records = VoiceActionRegistry.make(settings: settings, applications: applications)
+        let records = VoiceActionRegistry.make(settings: settings, applications: applications, includeInactiveApplications: true)
         var rows: [Self] = []
         for record in records {
             let assignments = byAction[record.action.identity] ?? []
@@ -37,13 +41,21 @@ struct ActionTableRow: Identifiable {
                 return input.trigger + " · " + scope + status
             }
             let macro = settings.resolvedHotkeyDictionary.first { $0.id == record.action.macroID }
-            let name = macro?.name ?? record.action.name ?? record.title
-            let keybindings = Array(Set(keys)).sorted().joined(separator: "\n")
-            rows.append(Self(action: record.action, id: record.id, group: group(for: record.action),
-                name: name, detail: record.detail, keybindings: keybindings))
+            let name = record.actionName ?? macro?.name ?? record.action.name ?? record.title
+            var keybindings = Array(Set(keys)).sorted().joined(separator: "\n")
+            if record.appBundleID != nil {
+                keybindings = record.overrideTrigger.map { $0.title + (record.enabled ? "" : " (disabled)") }
+                    ?? ((record.action.shortcut?.readableCombination ?? "") + " · App default")
+            }
+            let bundleID = record.appBundleID ?? record.action.bundleID
+            let subgroup = record.appName ?? (record.action.kind == .openApp ? name : "")
+            rows.append(Self(action: record.action, id: record.id, group: bundleID == nil ? group(for: record.action) : "Applications",
+                name: name, detail: record.detail, keybindings: keybindings, subgroup: subgroup, appBundleID: bundleID,
+                keywords: record.keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "\n"), isAppScoped: record.appBundleID != nil))
         }
         return rows.sorted {
             if $0.group != $1.group { return $0.group < $1.group }
+            if $0.subgroup != $1.subgroup { return $0.subgroup.localizedStandardCompare($1.subgroup) == .orderedAscending }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }

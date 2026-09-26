@@ -5,6 +5,10 @@ struct AppOverridesView: View {
     @ObservedObject var store: SettingsStore
     @State private var selected = "com.google.Chrome"
     @State private var error: String?
+    init(store: SettingsStore, initialBundleID: String = "com.google.Chrome") {
+        self.store = store
+        _selected = State(initialValue: initialBundleID)
+    }
     private var apps: [AppGestureOverride] { store.settings.resolvedAppOverrides }
     private var app: AppGestureOverride? { apps.first { $0.bundleID == selected } }
 

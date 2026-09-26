@@ -1,5 +1,21 @@
 import Foundation
 
+/// User-authored voice aliases, separate from the reserved action definition.
+struct ActionVocabulary: Codable, Equatable, Identifiable {
+    var actionID: String
+    var keywordSets: [[String]]
+    var id: String { actionID }
+    static func parse(_ text: String) -> [[String]] {
+        text.components(separatedBy: .newlines).prefix(20).compactMap { line in
+            let words = line.split(separator: ",").prefix(12).map {
+                String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+            }.filter { !$0.isEmpty }
+            return words.isEmpty ? nil : words
+        }
+    }
+    var text: String { keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "\n") }
+}
+
 struct BindingTrigger: Codable, Equatable {
     var keyboard: RecordedShortcut? = nil
     var gesture: AppGestureTrigger? = nil
@@ -245,7 +261,7 @@ struct BindingAction: Codable, Equatable {
         case .macro: return "Run the saved macro’s steps in order. A macro can contain keystrokes and app launches."
         case .hudLayer: return "Open \(name ?? "the selected HUD layer") so you can choose one of its actions."
         case .hudNavigation: return "Move to \(hudNavigation?.title ?? "the selected HUD") in the fixed HUD map without closing it."
-        case .openApp: return "Launch or activate \(name ?? bundleID ?? "the selected app")."
+        case .openApp: return "Launch, open, or activate \(name ?? bundleID ?? "the selected app") application."
         case .openURL: return "Open \(url ?? "the selected URL") in the default browser."
         case .command: return command?.description ?? "Choose a Mac or window command."
         case .media:
@@ -2112,6 +2128,7 @@ struct StoredSettings: Codable {
     }
     var devices: ProfileDevices? = nil
     var resolvedDevices: ProfileDevices { devices ?? ProfileDevices() }
+    var actionVocabulary: [ActionVocabulary]? = nil
     var appOverrides: [AppGestureOverride]? = nil
     var resolvedAppOverrides: [AppGestureOverride] { appOverrides ?? AppGestureOverride.defaults }
     var enabled = true

@@ -4,8 +4,21 @@ import CryptoKit
 struct VoiceRegisteredAction: Identifiable {
     let action: BindingAction
     let detail: String
-    var title: String { action.title }
-    var id: String { Self.id(for: action) }
+    var appBundleID: String? = nil
+    var appName: String? = nil
+    var actionName: String? = nil
+    var keywordSets: [[String]] = []
+    var overrideTrigger: AppGestureTrigger? = nil
+    var enabled = true
+    var title: String { actionName ?? action.title }
+    var id: String {
+        guard let appBundleID else { return Self.id(for: action) }
+        let identity = appBundleID + ":" + (overrideTrigger?.rawValue ?? "default") + ":" + action.identity
+        return "action_" + SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    var matchingDescription: String {
+        detail + (keywordSets.isEmpty ? "" : " User vocabulary (alternative phrases): " + keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "; "))
+    }
     static func id(for action: BindingAction) -> String {
         "action_" + SHA256.hash(data: Data(action.identity.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -13,7 +26,8 @@ struct VoiceRegisteredAction: Identifiable {
 
 /// Shared Actions-manager / voice allowlist. Remote output may select IDs only.
 enum VoiceActionRegistry {
-    static func make(settings: StoredSettings, applications: [ExplorerApplication] = []) -> [VoiceRegisteredAction] {
+    static func make(settings: StoredSettings, applications: [ExplorerApplication] = [], activeBundleID: String? = nil,
+                     includeInactiveApplications: Bool = false) -> [VoiceRegisteredAction] {
         var records: [String: VoiceRegisteredAction] = [:]
         func add(_ action: BindingAction, detail: String? = nil) {
             guard action.isValid else { return }
@@ -44,12 +58,61 @@ enum VoiceActionRegistry {
             }
             // Input bindings are not output actions. In particular, never offer
             // an activation hotkey as a keystroke that voice could send back.
-            let inputFields: Set<String> = ["trigger", "activationShortcut", "holdShortcut", "shortcuts"]
+            let inputFields: Set<String> = ["trigger", "activationShortcut", "holdShortcut", "shortcuts", "appOverrides", "actionVocabulary"]
             for (key, child) in object where !inputFields.contains(key) { visit(child) }
         }
         if let data = try? JSONEncoder().encode(settings), let object = try? JSONSerialization.jsonObject(with: data) { visit(object) }
         applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name)) }
-        return records.values.sorted { $0.title == $1.title ? $0.id < $1.id : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        var scoped = slackDefaults
+        for app in settings.resolvedAppOverrides {
+            for binding in app.bindings where binding.action != .none {
+                let action: BindingAction
+                if binding.action == .shortcut {
+                    guard let shortcut = binding.shortcut else { continue }
+                    action = .from(shortcut: shortcut)
+                } else { action = .tap(binding.action) }
+                guard action.isValid else { continue }
+                let knownName = slackDefaults.first { $0.appBundleID == app.bundleID && $0.action.shortcut?.identity == action.shortcut?.identity }?.title
+                scoped.append(VoiceRegisteredAction(action: action,
+                    detail: "In \(app.name), \(knownName ?? action.title). App override for \(binding.trigger.title). " + action.description,
+                    appBundleID: app.bundleID, appName: app.name, actionName: knownName ?? action.title,
+                    overrideTrigger: binding.trigger, enabled: app.enabled))
+            }
+        }
+        for record in scoped where includeInactiveApplications || (record.enabled && record.appBundleID == activeBundleID) {
+            records[record.id] = record
+        }
+        return records.values.map { record in
+            var enriched = record
+            enriched.keywordSets = settings.actionVocabulary?.first { $0.actionID == record.id }?.keywordSets ?? []
+            return enriched
+        }.sorted { $0.title == $1.title ? $0.id < $1.id : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    // Slack's documented English-layout macOS defaults, not global hotkey registrations.
+    // https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts
+    static var slackDefaults: [VoiceRegisteredAction] {
+        let cmd: UInt64 = 1 << 20, shift: UInt64 = 1 << 17
+        let definitions: [(String, UInt16, UInt64, String)] = [
+            ("New message", 45, cmd, "N"), ("Set status", 16, cmd | shift, "Y"),
+            ("Preferences", 43, cmd, ","), ("Hide right sidebar", 47, cmd, "."),
+            ("New canvas", 45, cmd | shift, "N"), ("Upload file", 31, cmd, "O"),
+            ("Downloads", 38, cmd | shift, "J"), ("New snippet", 36, cmd | shift, "Return"),
+            ("Search Slack", 5, cmd, "G"), ("Search conversation", 3, cmd, "F"),
+            ("Toggle huddle", 4, cmd | shift, "H"), ("Toggle huddle mute", 49, cmd | shift, "Space"),
+            ("People", 14, cmd | shift, "E"), ("Recent unread message", 38, cmd, "J"),
+            ("Back", 33, cmd, "["), ("Forward", 30, cmd, "]"),
+            ("Direct messages", 40, cmd | shift, "K"), ("Activity", 46, cmd | shift, "M"),
+            ("Threads", 17, cmd | shift, "T"), ("Browse channels", 37, cmd | shift, "L"),
+            ("Conversation details", 34, cmd | shift, "I"), ("All unread messages", 0, cmd | shift, "A"),
+            ("Workspace switcher", 1, cmd | shift, "S")
+        ]
+        return definitions.map { name, code, modifiers, label in
+            var action = BindingAction.keystroke(RecordedShortcut(keyCode: code, modifiers: modifiers, keyLabel: label))
+            action.name = name
+            return VoiceRegisteredAction(action: action, detail: "\(name) in Slack. Send \(action.shortcut!.readableCombination). Available to voice only while Slack is active.",
+                appBundleID: "com.tinyspeck.slackmacgap", appName: "Slack", actionName: name)
+        }
     }
 }
 
@@ -160,7 +223,7 @@ final class OpenRouterVoiceCloud: NSObject, VoiceCloudServing, URLSessionTaskDel
         return text
     }
     private func decide(_ transcript: String, catalog: [VoiceRegisteredAction]) async throws -> VoiceDecision {
-        var criteria = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0.title + ". " + $0.detail) })
+        var criteria = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0.title + ". " + $0.matchingDescription) })
         criteria["none"] = "Speech is incomplete, unrelated, requests cancellation, or no listed action matches."
         let data = try await post("api/alpha/decisions", body: ["model": "typesafe/jev-1.13",
             "state": ["transcript": transcript], "questions": ["action": ["type": "choice",

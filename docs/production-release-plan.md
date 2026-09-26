@@ -33,6 +33,8 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [x] Create a dedicated **Voice mode** sidebar page and move all voice settings out of General.
 - [ ] Reduce latency through streaming transcription, connection reuse, and incremental matching where supported.
 - [ ] Verify whether Jev supports the desired streaming/WebSocket workflow; provide a responsive fallback if it doesn’t.
+  - [x] Review published provider contracts and define the supported architecture in [Voice streaming architecture](voice-streaming-architecture.md).
+  - [ ] Implement and verify the responsive fallback, preserving live candidate updates and prioritizing final speech. Native streaming remains a separate integration gate; no undocumented Jev WebSocket endpoint is assumed.
 - [ ] Make microphone permissions, cancellation, timeouts, connection failures, and “no match” states clear and safe.
 
 **Interpretation for review:** “Real-time TTS” appears to mean **real-time STT/transcription** here. Spoken responses would be a separate, optional feature.

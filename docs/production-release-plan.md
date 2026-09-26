@@ -51,15 +51,18 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Define browser-profile and URL-matching behavior so the wrong account or tab isn’t selected.
 - [ ] Evaluate Rust for background indexing if its performance and packaging benefits justify it.
 
-## 4. Memory and temporary intent
+## 4. Browser memory and temporary notes
 
-- [ ] Let users set a temporary intention, such as “I’m working on the marketing campaign.”
-- [ ] Expire that intention after 30 minutes; show its status and allow clearing it early.
-- [ ] Use intention to improve ranking—not to bypass action scope or confirmation.
+- [ ] Let users type or dictate a temporary note, such as “I’m working on the marketing campaign,” then review and explicitly save it.
+  - OpenRouter transcription is allowed for dictation. Store the resulting note only in memory on this Mac; do not sync it or send it to Jev.
+- [ ] Expire the note 30 minutes after saving; show its status and allow replacing or clearing it early.
+- [ ] Keep notes entirely separate from action matching: saving, changing, clearing, or expiring a note must not change application choices, action ranking, confidence scores, or confirmation behavior.
 - [ ] Offer opt-in browser-history indexing with retention controls and a clear delete function.
 - [ ] Reuse the browser’s existing signed-in sessions when navigating.
 
 **Privacy boundary for review:** Browser memory should not mean copying passwords, cookies, or login tokens. History backup, if wanted, should be a separate opt-in feature.
+
+**Note voice-entry boundary:** Dictate note sends audio through the existing OpenRouter/xAI transcription path, not through Jev classification. Transcription fills a draft; it does not execute an action or save automatically. This supersedes the earlier on-device-only and intention-based ranking proposals. The saved note is simply a local, temporary note.
 
 ## 5. Encrypted settings and secrets
 
@@ -197,6 +200,7 @@ The per-computer application index now warms at startup independently of setting
 
 ### Remaining implementation boundaries
 
+- Temporary notes are being implemented as memory-only, 30-minute notes with shared Voice settings/HUD controls. The user explicitly permits OpenRouter transcription, but notes must never influence app/action choices or be sent to Jev. Dictation is a separate transcription-only flow with explicit review and save. Opening the note editor stops action voice capture and prevents it restarting while editing. Earlier intention/on-device draft checks are superseded; the new note-only implementation still needs final verification. Candidate version: 1.1.182 (184); installed version remains 1.1.181 (183).
 - Application commands support named physical shortcuts and explicitly app-targeted HTTP(S) URLs. Browser-profile selection, existing-tab reuse, and browser-history indexing remain unfinished. The chosen application currently decides which window/profile receives a URL.
 - The secrets vault is encrypted, but settings encryption remains unfinished: local YAML/backups, settings in UserDefaults, and remote settings storage require coordinated migration. Encrypting only an export would not complete this feature.
 

@@ -107,7 +107,8 @@ struct ActionPickerModal: View {
     let layers: [ExplorerHoldLayer]
     let destinations: [HUDActionDestination]
     var allowPointerActions = true
-    var loadApplications: () -> [ExplorerApplication] = { ExplorerApplicationCatalog.scan() }
+    var loadApplications: (@Sendable () -> [ExplorerApplication])? = nil
+    @ObservedObject var applicationIndex = VoiceApplicationIndex.shared
     let onSelect: (BindingAction) -> Void
     let onCancel: () -> Void
     @State private var applications: [ExplorerApplication] = []
@@ -121,7 +122,7 @@ struct ActionPickerModal: View {
 
     private var items: [ActionPickerItem] {
         ActionPickerCatalog.make(dictionary: dictionary, layers: layers, destinations: destinations,
-            applications: applications, allowPointer: allowPointerActions)
+            applications: loadApplications == nil ? applicationIndex.applications : applications, allowPointer: allowPointerActions)
     }
     private var results: [ActionPickerItem] { ActionPickerCatalog.search(items, query: query, category: category) }
     private var selected: BindingAction? {
@@ -246,10 +247,15 @@ struct ActionPickerModal: View {
             if !results.contains(where: { $0.id == selectedID }) { selectFirst() }
         }
         .task {
-            let loader = loadApplications
-            let loaded = await Task.detached(priority: .userInitiated) { loader() }.value
+            if let loader = loadApplications {
+                let loaded = await Task.detached(priority: .userInitiated) { loader() }.value
+                guard !Task.isCancelled else { return }
+                applications = loaded
+            } else {
+                await applicationIndex.load()
+            }
             guard !Task.isCancelled else { return }
-            applications = loaded; loadingApps = false
+            loadingApps = false
             if selectedID == nil { selectFirst() }
         }
     }

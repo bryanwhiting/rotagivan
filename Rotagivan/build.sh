@@ -28,6 +28,7 @@ xcrun swiftc -O -parse-as-library \
   -I "$yaml_build/Modules" -L "$yaml_build" -lConfigurationYAML \
   -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
   -framework AppKit \
+  -framework CoreServices \
   -framework SwiftUI \
   -framework Carbon \
   -framework IOKit \
@@ -63,6 +64,8 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/MacroPlayback.swift" \
   "$script_dir/AppExplorerSelection.swift" \
   "$script_dir/ExplorerApplicationCatalog.swift" \
+  "$script_dir/ApplicationIndex.swift" \
+  "$script_dir/ApplicationIndexObservation.swift" \
   "$script_dir/BrowserBookmarks.swift" \
   "$script_dir/BrowserURLDispatcher.swift" \
   "$script_dir/ExplorerDestinationPicker.swift" \

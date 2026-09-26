@@ -13,9 +13,13 @@ struct ExplorerDestinationPicker: View {
     @State private var error: String?
     @FocusState private var searchFocused: Bool
 
-    // Inject a catalog for native UI tests; the real scan runs off the main thread.
-    var loadApplications: @Sendable () -> [ExplorerApplication] = { ExplorerApplicationCatalog.scan() }
-    private var results: [ExplorerApplication] { Array(ExplorerApplicationCatalog.search(query, in: applications).prefix(100)) }
+    // Fixtures can override discovery; production shares the off-main application index.
+    var loadApplications: (@Sendable () -> [ExplorerApplication])? = nil
+    @ObservedObject var applicationIndex = VoiceApplicationIndex.shared
+    private var results: [ExplorerApplication] {
+        Array(ExplorerApplicationCatalog.search(query,
+            in: loadApplications == nil ? applicationIndex.applications : applications).prefix(100))
+    }
     private var webURL: URL? { AppExplorerFavorite.webURL(query.trimmingCharacters(in: .whitespacesAndNewlines)) }
     private var selectedApp: ExplorerApplication? { results.first { $0.id == selectedID } }
 
@@ -75,10 +79,15 @@ struct ExplorerDestinationPicker: View {
             .background(Color(nsColor: .windowBackgroundColor))
             .task {
                 searchFocused = true
-                let loader = loadApplications
-                let loaded = await Task.detached(priority: .userInitiated) { loader() }.value
+                if let loader = loadApplications {
+                    let loaded = await Task.detached(priority: .userInitiated) { loader() }.value
+                    guard !Task.isCancelled else { return }
+                    applications = loaded
+                } else {
+                    await applicationIndex.load()
+                }
                 guard !Task.isCancelled else { return }
-                applications = loaded; loading = false
+                loading = false
                 selectedID = results.first?.id
             }
             .onChange(of: query) { _, _ in selectedID = results.first?.id; error = nil }

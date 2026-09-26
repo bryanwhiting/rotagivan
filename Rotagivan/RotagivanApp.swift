@@ -31,6 +31,7 @@ struct RotagivanApp: App {
         // Defer until SwiftUI has installed and retained its state objects, but
         // do not depend on either the settings window or menu being presented.
         DispatchQueue.main.async {
+            VoiceApplicationIndex.shared.start()
             sync.start()
             // Explicit local maintenance action, never a startup sync default.
             // Emits only a non-secret receipt; private material remains Keychain-only.
@@ -318,5 +319,8 @@ final class CloneDelegate: NSObject, NSApplicationDelegate {
         Task { await beforeQuit(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
-    func applicationWillTerminate(_ notification: Notification) { onQuit?() }
+    func applicationWillTerminate(_ notification: Notification) {
+        VoiceApplicationIndex.shared.stop()
+        onQuit?()
+    }
 }

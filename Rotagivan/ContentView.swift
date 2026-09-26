@@ -35,7 +35,7 @@ struct VoiceModeSettingsView: View {
         }
         GroupBox("Application index") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Installed applications are indexed on this Mac for voice matching.")
+                Text("Applications refresh automatically on this Mac at startup and after app changes. Voice, Actions, and app pickers share this local index.")
                     .foregroundStyle(.secondary)
                 HStack {
                     if index.isRefreshing {
@@ -53,6 +53,10 @@ struct VoiceModeSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let error = index.refreshError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if let error = index.observationError {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                 }

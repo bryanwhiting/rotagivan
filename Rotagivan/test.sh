@@ -20,6 +20,7 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tes
 for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
   xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift \
     Rotagivan/ActionPicker.swift Rotagivan/BindingEditor.swift Rotagivan/ExplorerApplicationCatalog.swift \
+    Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
     "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
@@ -115,6 +116,7 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
+  Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
   Rotagivan/BrowserURLDispatcher.swift \
   Rotagivan/WebsiteFavicon.swift \
   Rotagivan/WindowTiling.swift \
@@ -141,9 +143,11 @@ for test in ApplicationCommandTests BrowserURLDispatcherTests; do
     -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
-xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/ActionPickerTests.swift \
-  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionPickerTests"
-"$test_dir/ActionPickerTests" "$test_dir"
+for test in ActionPickerTests SharedApplicationPickerTests; do
+  xcrun swiftc -j 4 "${ui_sources[@]}" "Rotagivan/Tests/$test.swift" \
+    -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
+  "$test_dir/$test" "$test_dir"
+done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDTemplateTests"
 "$test_dir/HUDTemplateTests"
@@ -161,9 +165,12 @@ xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceTests.swift \
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceHUDUISmoke.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceHUDUISmoke"
 "$test_dir/VoiceHUDUISmoke" "$test_dir"
-xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceApplicationIndexTests.swift \
-  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceApplicationIndexTests"
-"$test_dir/VoiceApplicationIndexTests"
+for test in VoiceApplicationIndexTests ApplicationIndexObservationTests; do
+  xcrun swiftc -j 4 Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ApplicationIndex.swift \
+    Rotagivan/ApplicationIndexObservation.swift "Rotagivan/Tests/$test.swift" \
+    -framework AppKit -framework CoreServices -o "$test_dir/$test"
+  "$test_dir/$test"
+done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/CalibrationIntegrationTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/CalibrationIntegrationTests"
 "$test_dir/CalibrationIntegrationTests"

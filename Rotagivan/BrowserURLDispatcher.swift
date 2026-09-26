@@ -4,7 +4,7 @@ import AppKit
 @MainActor final class BrowserURLDispatcher {
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
     var validateApplication: (URL, String) -> Bool = { url, bundleID in
-        ExplorerApplicationCatalog.application(at: url)?.bundleID == bundleID
+        ExplorerApplicationCatalog.bundleIdentifier(at: url) == bundleID
     }
     var openDefault: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     var openTargeted: (URL, URL, @escaping @MainActor (Error?) -> Void) -> Void = { url, application, completion in

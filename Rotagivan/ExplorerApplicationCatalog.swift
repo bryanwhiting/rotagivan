@@ -24,14 +24,66 @@ enum ExplorerApplicationCatalog {
     }
 
     static func application(at url: URL) -> ExplorerApplication? {
-        guard url.isFileURL, url.pathExtension.lowercased() == "app",
-              (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
-              let bundle = Bundle(url: url), let id = bundle.bundleIdentifier,
-              !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, id != "local.rotagivan" else { return nil }
-        let display = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)?
+        guard let (id, metadata) = validatedMetadata(at: url) else { return nil }
+        let display = (localizedDisplayName(at: url) ?? (metadata["CFBundleDisplayName"] as? String))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let name = display?.isEmpty == false ? display! : url.deletingPathExtension().lastPathComponent
         return ExplorerApplication(bundleID: id, name: name, url: url.standardizedFileURL)
+    }
+
+    /// Identity checks need fresh Info.plist data, but never enumerate Resources
+    /// or read localized names. Full catalog entries reuse this same single read.
+    static func bundleIdentifier(at url: URL) -> String? {
+        validatedMetadata(at: url)?.identifier
+    }
+
+    private static func validatedMetadata(at url: URL) -> (identifier: String, metadata: [String: Any])? {
+        guard url.isFileURL, url.pathExtension.lowercased() == "app",
+              (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+              let metadata = metadata(at: url), let id = metadata["CFBundleIdentifier"] as? String,
+              !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, id != "local.rotagivan" else { return nil }
+        return (id, metadata)
+    }
+
+    /// Bundle caches metadata by path, which can retain the old identity after
+    /// an installer atomically replaces an application. Read only its bounded
+    /// property list afresh; support both standard macOS and flat bundles.
+    private static func metadata(at application: URL) -> [String: Any]? {
+        for relative in ["Contents/Info.plist", "Info.plist"] {
+            if let metadata = propertyList(at: application.appendingPathComponent(relative)) { return metadata }
+        }
+        return nil
+    }
+
+    private static func propertyList(at url: URL) -> [String: Any]? {
+        let file = url.resolvingSymlinksInPath()
+        guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+        guard let input = InputStream(url: file) else { return nil }
+        input.open(); defer { input.close() }
+        var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = input.read(&buffer, maxLength: buffer.count)
+            if count == 0 { break }
+            if count < 0 || data.count + count > 1_048_576 { return nil }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        guard let value = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else { return nil }
+        return value as? [String: Any]
+    }
+
+    private static func localizedDisplayName(at application: URL) -> String? {
+        for resources in [application.appendingPathComponent("Contents/Resources"), application] {
+            guard let entries = try? FileManager.default.contentsOfDirectory(at: resources,
+                includingPropertiesForKeys: nil, options: .skipsHiddenFiles) else { continue }
+            let localizations = entries.filter { $0.pathExtension == "lproj" }
+                .map { $0.deletingPathExtension().lastPathComponent }.sorted()
+            for locale in Bundle.preferredLocalizations(from: localizations) {
+                let url = resources.appendingPathComponent(locale + ".lproj/InfoPlist.strings")
+                if let name = propertyList(at: url)?["CFBundleDisplayName"] as? String,
+                   !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return name }
+            }
+        }
+        return nil
     }
 
     static func scan(roots: [URL] = Self.roots) -> [ExplorerApplication] {
@@ -44,15 +96,19 @@ enum ExplorerApplicationCatalog {
         var result: [ExplorerApplication] = []
         var errors: [String] = []
         for root in roots {
+            // An explicitly selected application root may be a symlink (for
+            // example ~/Applications on another volume). Traverse its target,
+            // while still skipping symlinked descendants below that root.
+            let scanRoot = root.resolvingSymlinksInPath()
             // A user Applications directory is optional. Other read failures are surfaced.
-            do { _ = try root.resourceValues(forKeys: [.isDirectoryKey]) }
+            do { _ = try scanRoot.resourceValues(forKeys: [.isDirectoryKey]) }
             catch {
                 if (error as NSError).code != NSFileReadNoSuchFileError {
                     errors.append("Could not read \(root.path): \(error.localizedDescription)")
                 }
                 continue
             }
-            guard let walker = manager.enumerator(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey],
+            guard let walker = manager.enumerator(at: scanRoot, includingPropertiesForKeys: [.isSymbolicLinkKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, error in
                     if errors.count < 5 { errors.append("Could not read \(url.path): \(error.localizedDescription)") }
                     return true
@@ -122,8 +178,8 @@ enum ExplorerApplicationCatalog {
 
     static func applicationURL(for bundleID: String, defaults: UserDefaults = .standard) -> URL? {
         if let path = (defaults.dictionary(forKey: "appExplorer.localApplicationPaths") as? [String: String])?[bundleID],
-           let app = application(at: URL(fileURLWithPath: path)), app.bundleID == bundleID {
-            return app.url
+           bundleIdentifier(at: URL(fileURLWithPath: path)) == bundleID {
+            return URL(fileURLWithPath: path).standardizedFileURL
         }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
     }

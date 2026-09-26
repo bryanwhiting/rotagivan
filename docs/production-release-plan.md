@@ -43,6 +43,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 
 - [ ] Build a per-computer index of installed applications, bookmarks, and optionally browser history.
 - [ ] Refresh efficiently at startup and when relevant data changes; add **Reindex now**, status, and error reporting.
+  - [x] Application startup warming and recursive change observation: focused checks, full regression, and installed verification passed in 1.1.181 (183). Browser indexing remains separate.
 - [ ] Keep machine-specific paths and browser data local; sync user preferences and action vocabulary separately.
 - [x] Make newly installed applications discoverable without restarting Rotagivan.
 - [ ] Add Chrome recent/open-tab search and a **Recent tabs** HUD.
@@ -84,6 +85,8 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [x] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
 - [x] Default inverted two-finger navigation on, applying inversion consistently to every direction—including diagonals.
 - [ ] Refine pointer response for smoother low-speed movement and a gentler acceleration ramp, without adding noticeable lag.
+  - Measure the shared response pipeline before changing defaults: low-speed pixel stepping, gain ramp, first-motion/reversal delay, stopping distance, and timing invariance.
+  - Preserve deliberate user tuning. An optional preset alone does not complete the requested default-response improvement; verify the result on an installed device as well as synthetic replays.
 
 ## 7. Production release and distribution
 
@@ -179,6 +182,18 @@ Final audio now cancels superseded preview work immediately, then starts its fin
 - The complete frozen-source regression suite passed, including gesture/pointer routing, Actions, configuration and sync, credentials, and the centered HUD workspace. Final artifacts: `/private/tmp/rotagivan-tests.YEpS5N`. Obsolete test executables from completed earlier runs were removed to recover space; screenshots and source were preserved.
 - **1.1.180 (182)** was built, installed using `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built/installed executable SHA-256 matches (`2593d90081f2d22faaafbe0b5164f6ec56e1b0ebaa49ec032665557c48fbd538`), with the persistent certificate-pinned signature verified independently. Normal quit and reopening succeeded without force termination. Installed/reopened samples show a normal AppKit main-thread event loop; pending Keychain work remains on the background credential worker. No Accessibility or signing-trust reset occurred.
 - Native audio streaming remains unimplemented. This release uses bounded OpenRouter WAV snapshots and complete Jev decisions; it does not invent a Jev WebSocket API, switch providers, or claim measured live-network latency. Live microphone authorization, provider access, and cross-Mac/public-release gates remain separate verification work.
+
+### Seventh batch: automatic application discovery
+
+The per-computer application index now warms at startup independently of settings-window presentation. Recursive filesystem notifications request debounced background refreshes; Voice, Actions, the action picker, and the HUD destination picker share the same complete snapshot. No application-root scans or polling timers were added to rendering. The cache remains local and in memory; browser bookmarks, history, and open tabs are not part of this batch.
+
+- One physical scan stays admitted until it returns, with one pending invalidation. Stop/restart generations discard late results and callbacks without overlapping the old scan. Cached reads remain immediate during refresh, failed scans preserve the last complete catalog, and watcher failures have separate visible status from scan failures.
+- Native fixtures cover initially absent application roots, nested installs, atomic replacement, removals, unrelated-parent filtering, stop/restart, and symlink-root retargeting. Physical filesystem spellings are resolved off-main with POSIX `realpath`; event filtering uses strings without per-event filesystem resolution. Three consecutive native runs passed, followed by a final recompiled pass after the metadata compatibility fix.
+- Fresh, bounded property-list reads avoid Foundation's stale same-path bundle cache. Catalog fixtures cover localized names, flat bundles, corrupt/oversized metadata, regular-file metadata symlinks, explicit root symlinks, and existing duplicate/helper/descendant-symlink filtering.
+- Remembered-path and targeted-browser validation use the same fresh identity parser without enumerating localized resource directories. Localized names are loaded only for full catalog entries and explicit app selection. An initial regression run was deliberately interrupted to make this hot-path correction; only its rebuildable executables were removed to recover disk space, preserving captures and source. The complete suite subsequently passed against the final frozen source.
+- The new native shared-picker fixture proves one initial scan across both open pickers, live snapshot replacement, removal of old rows, and scan-free native searching. Final captures were visually reviewed. Focused artifacts: `/private/tmp/rotagivan-index-lifecycle.n34MwU` and `/private/tmp/rotagivan-shared-pickers.qzJMFs`. Fixtures use synthetic applications and isolated temporary directories, not browser data, credentials, or provider calls.
+- The complete regression suite passed, including native shared-picker replacement, input routing, voice, configuration, credentials, sync, and settings/workspace checks. Final artifacts: `/private/tmp/rotagivan-tests.B4uUvS`. Shared-picker captures from this final run were visually reviewed; the source fingerprint remained unchanged through verification and build.
+- **1.1.181 (183)** was built, installed using `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built/installed executable SHA-256 matches (`9e9ea7680c6505fef6f97101786de13b6ab7629274f068e7cbcbb5248ebc343c`), with the persistent certificate-pinned signature independently verified. Normal quit and reopening succeeded without forced termination. Both installed-process samples show a normal AppKit main-thread event loop, with pending Keychain work confined to the background credential worker. Accessibility and signing trust were preserved. This does not claim successful credential unlocking, live provider testing, browser indexing, or cross-Mac/public-release readiness.
 
 ### Remaining implementation boundaries
 

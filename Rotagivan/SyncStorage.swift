@@ -15,12 +15,12 @@ enum SyncKeychain {
          kSecAttrService as String: "local.rotagivan.sync",
          kSecAttrAccount as String: server]
     }
-    static func read(server: String) throws -> SyncAccount? {
+    static func read(server: String, allowInteraction: Bool = false) throws -> SyncAccount? {
         var request = query(server)
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(request as CFDictionary, &result)
+        let status = try CredentialKeychainRead.copy(request, result: &result, allowInteraction: allowInteraction)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else {
             throw ConfigurationError("Keychain could not read the saved login (\(status)).")

@@ -31,17 +31,23 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     private var taskSession: URLSession
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
     private let readLocal: (String, String) async throws -> VaultLocal?
+    private let unlockLocal: (String, String) async throws -> VaultLocal?
     private let writeLocal: (VaultLocal, String, String) async throws -> Void
 
     init(server: String, transport: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
-         read: @escaping (String, String) async throws -> VaultLocal? = { server, userID in
-             try await CredentialWorker.shared.run { try VaultKeychain.read(server: server, userID: userID) }
-         },
+         read: ((String, String) async throws -> VaultLocal?)? = nil,
+         unlock: ((String, String) async throws -> VaultLocal?)? = nil,
          write: @escaping (VaultLocal, String, String) async throws -> Void = { value, server, userID in
              try await CredentialWorker.shared.run { try VaultKeychain.save(value, server: server, userID: userID) }
          }) {
         self.server = server
-        readLocal = read; writeLocal = write
+        readLocal = read ?? { server, userID in
+            try await CredentialWorker.shared.run { try VaultKeychain.read(server: server, userID: userID) }
+        }
+        unlockLocal = unlock ?? read ?? { server, userID in
+            try await CredentialWorker.shared.run { try VaultKeychain.read(server: server, userID: userID, allowInteraction: true) }
+        }
+        writeLocal = write
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 30
         config.urlCache = nil; config.httpCookieStorage = nil
@@ -60,15 +66,16 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         status = account == nil ? "Sign in to use encrypted API keys." : "Load the vault, or import your key to create it."
         if account != nil { beginLocalRestore() }
     }
-    private func beginLocalRestore() {
+    private func beginLocalRestore(interactive: Bool = false) {
         guard !stopped, let account else { return }
         let token = generation
         restoringLocal = true; localReady = false; error = nil
         status = "Restoring local encrypted keys…"
+        let read = interactive ? unlockLocal : readLocal
         restoreTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let value = try await self.readLocal(self.server, account.userID)
+                let value = try await read(self.server, account.userID)
                 try self.checked(token, account)
                 if let value, let record = value.cached, let master = value.masterKey {
                     _ = try VaultCrypto.open(record, master: master, userID: account.userID)
@@ -79,17 +86,18 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
                     self.status = "Load the vault, or import your key to create it."
                 }
                 self.local = value; self.localReady = true; self.restoringLocal = false
+                VaultKeychain.cache(value, server: self.server, userID: account.userID)
             } catch {
                 guard self.generation == token, !self.stopped, self.account == account else { return }
                 self.restoringLocal = false; self.localReady = false
-                self.status = "Local encrypted keys are unavailable."
+                self.status = "Unlock API keys to enable voice. Keychain will only prompt when you choose Unlock."
                 self.error = (error as? CredentialWorkerError)?.localizedDescription ?? "Local vault could not be restored. Retry before using the vault."
             }
         }
     }
     func retryLocalRestore() {
         guard !stopped, !busy, !restoringLocal, !localReady, account != nil else { return }
-        beginLocalRestore()
+        beginLocalRestore(interactive: true)
     }
     func awaitLocalRestore() async { await restoreTask?.value }
     func shutdown() {
@@ -108,6 +116,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         try await writeLocal(value, server, account.userID)
         try checked(token, account)
         local = value
+        VaultKeychain.cache(value, server: server, userID: account.userID)
     }
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                                       account: VaultAccount, token: UUID) async throws -> T {

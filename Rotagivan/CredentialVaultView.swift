@@ -33,8 +33,10 @@ struct CredentialVaultView: View {
                 SecureField("New OpenRouter key (optional)", text: $apiKey).textContentType(.password)
                     .disabled(unavailable)
                 if vault.account != nil && !vault.localReady && !vault.restoringLocal {
-                    Button("Retry local key restore") { vault.retryLocalRestore() }
+                    Button("Unlock API keys") { vault.retryLocalRestore() }
                         .accessibilityIdentifier("vault-restore-retry")
+                    Text("This button may ask for your login Keychain password. Once unlocked, voice reuses the keys in memory; it does not request access on each command.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
                     Button("Save encrypted key") {

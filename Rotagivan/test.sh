@@ -151,7 +151,7 @@ done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDTemplateTests"
 "$test_dir/HUDTemplateTests"
-xcrun swiftc -j 4 Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
+xcrun swiftc -j 4 Rotagivan/CredentialWorker.swift Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
 "$test_dir/VaultCryptoTests"
 for test in CredentialVaultTests VaultRestoreUISmoke VoiceTransportTests; do
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift \

@@ -1,9 +1,21 @@
 import CryptoKit
 import Foundation
+import Security
 
 @main struct VaultCryptoTests {
     static func check(_ value: Bool, _ message: String = "") { precondition(value, message) }
     static func main() throws {
+        var policies: [Bool] = []
+        let status: OSStatus = try CredentialKeychainRead.withoutUI(
+            get: { (errSecSuccess, true) }, set: { policies.append($0); return errSecSuccess },
+            operation: { errSecInteractionNotAllowed })
+        check(status == errSecInteractionNotAllowed && policies == [false, true], "Silent reads restore UI policy even on denied access")
+        var accessed = false
+        do {
+            _ = try CredentialKeychainRead.withoutUI(get: { (errSecSuccess, true) },
+                set: { _ in errSecAuthFailed }, operation: { accessed = true })
+            fatalError("Unsafe read was allowed")
+        } catch { check(!accessed, "Fail closed if UI cannot be disabled") }
         let user = "test-user", id = UUID().uuidString.lowercased()
         let master = VaultCrypto.randomMaster()
         let payload = VaultPayload(openRouterAPIKey: "fixture-api-key-not-real")
@@ -40,4 +52,3 @@ import Foundation
         print("Vault cryptography PASS: authenticated encryption, fresh nonces, account/revision/recipient binding, recovery, tamper rejection")
     }
 }
-

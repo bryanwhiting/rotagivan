@@ -1,9 +1,42 @@
 import Foundation
+import Security
 
 enum CredentialWorkerError: LocalizedError {
     case busy
+    case interactionControl
     var errorDescription: String? {
-        "Another Keychain operation is still waiting. Finish that operation, then retry."
+        switch self {
+        case .busy: return "Another Keychain operation is still waiting. Finish that operation, then retry."
+        case .interactionControl: return "Keychain access could not be checked safely. Unlock your keys explicitly in settings."
+        }
+    }
+}
+
+/// Legacy login-keychain items can ignore the per-query authentication flag.
+/// Run only on CredentialWorker's serialized queue; restore the process-local
+/// UI policy immediately. This does not alter any item's ACL or signing trust.
+enum CredentialKeychainRead {
+    static func withoutUI<T>(
+        get: () -> (OSStatus, Bool) = {
+            var value = DarwinBoolean(false)
+            let status = SecKeychainGetUserInteractionAllowed(&value)
+            return (status, value.boolValue)
+        },
+        set: (Bool) -> OSStatus = { SecKeychainSetUserInteractionAllowed($0) },
+        operation: () -> T
+    ) throws -> T {
+        let (status, previous) = get()
+        guard status == errSecSuccess, set(false) == errSecSuccess else { throw CredentialWorkerError.interactionControl }
+        let result = operation()
+        guard set(previous) == errSecSuccess else { throw CredentialWorkerError.interactionControl }
+        return result
+    }
+    static func copy(_ query: [String: Any], result: UnsafeMutablePointer<CFTypeRef?>,
+                     allowInteraction: Bool) throws -> OSStatus {
+        if allowInteraction { return SecItemCopyMatching(query as CFDictionary, result) }
+        var silent = query
+        silent[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        return try withoutUI { SecItemCopyMatching(silent as CFDictionary, result) }
     }
 }
 

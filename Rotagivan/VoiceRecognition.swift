@@ -223,7 +223,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         microphone.buffer.clear(); self.microphone = nil
         guard !failed, speechAt != nil, !pcm.isEmpty else { fail(VoiceError.message("No speech heard. Tap the center to retry.")); return }
-        phase = .matching; message = "Matching your command…"
+        phase = .matching; message = "Transcribing your speech…"
         finalPending = true
         finalDeadline = now() + max(0, finalMatchingBudget)
         // Priority starts with final audio, not after the final STT response.
@@ -257,6 +257,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                 var completedTranscript: String?
                 let operation = Task { @MainActor in
                   do {
+                    self.message = isFinal ? "Transcribing your speech…" : "Listening · transcribing a preview…"
                     let text = try await cloud.transcribe(audio)
                     guard token == self.generation, !Task.isCancelled else { return }
                     guard !self.finalPending || isFinal else { return }
@@ -271,6 +272,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                         return
                     }
                     if !isFinal, self.lastProvisionalTranscript == text { return }
+                    self.message = isFinal ? "Jev is ranking your available actions…" : "Listening · Jev is ranking a preview…"
                     let decision = try await cloud.classify(text, catalog: self.catalog)
                     guard token == self.generation, !Task.isCancelled else { return }
                     guard !self.finalPending || isFinal else { return }
@@ -282,6 +284,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                     guard token == self.generation, !Task.isCancelled else { return }
                     if isFinal { self.fail(error); return }
                     // A transient partial failure may recover on the final request.
+                    if !self.finalPending { self.message = "Preview unavailable · still listening. Tap the center to finish and retry matching." }
                   }
                 }
                 self.operation = operation
@@ -313,8 +316,10 @@ final class VoiceAudioBuffer: @unchecked Sendable {
             finalDeadline = nil; timer?.invalidate(); timer = nil
             phase = .ready
             selected = decision.noMatch ? .left : .up
-            message = decision.noMatch ? "No matching action. Swipe left to cancel." : "Swipe to an action and lift to run · swipe left to cancel"
+            message = decision.noMatch ? "No confident match. Alternatives shown for reference; nothing will run. Swipe left to cancel." : "Swipe to an action and lift to run · swipe left to cancel"
             if !decision.noMatch, selectedMatch != nil { onFinalMatch?() }
+        } else {
+            message = "Preview candidates · still listening. Finish speaking to choose an action."
         }
     }
     func select(_ direction: ExplorerSlot) {
@@ -343,6 +348,14 @@ final class VoiceAudioBuffer: @unchecked Sendable {
 }
 
 /// A fixed four-sector layer: changing speech and status never moves the wheel.
+/// Pending choices are readouts, not unavailable content: keep their text
+/// legible while the Button's disabled state still blocks execution and AX presses.
+private struct VoiceCandidateButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
 struct VoiceHUDView: View {
     @ObservedObject var session: VoiceSession
     let theme: ExplorerTheme
@@ -472,14 +485,23 @@ struct VoiceHUDView: View {
     }
     private func option(_ direction: ExplorerSlot) -> some View {
         let index = [ExplorerSlot.up, .right, .down].firstIndex(of: direction)
-        let match = index.flatMap { i in session.decision.flatMap { i < $0.matches.count && !$0.noMatch ? $0.matches[i] : nil } }
-        let available = direction == .left || (session.phase == .ready && match != nil)
+        let match = index.flatMap { i in session.decision.flatMap { i < $0.matches.count ? $0.matches[i] : nil } }
+        let available = direction == .left || (session.phase == .ready && session.decision?.noMatch == false && match != nil)
         let selected = session.selected == direction && available
         let shape = ExplorerStarburstSector(direction: direction,
             innerRadius: ExplorerStarburstLayout.innerRadius(depth: 0), outerRadius: 143,
             tip: theme.isFloating ? 2 : 11, halfAngle: 43, roundedRim: theme.isFloating)
         let point = ExplorerStarburstLayout.point(direction, radius: 108, center: CGPoint(x: 209, y: 155))
-        let title = direction == .left ? "Cancel / Ignore" : (match?.record.title ?? "No match")
+        let placeholder: String = {
+            switch session.phase {
+            case .preparing: return "Preparing…"
+            case .listening: return "Listening…"
+            case .matching: return "Matching…"
+            case .ready: return "No candidate"
+            case .failed, .cancelled: return "Try again"
+            }
+        }()
+        let title = direction == .left ? "Cancel / Ignore" : (match?.record.title ?? placeholder)
         return Button {
             if direction == .left { onExit() }
             else { session.select(direction); onConfirm() }
@@ -491,13 +513,13 @@ struct VoiceHUDView: View {
                         .font(.system(size: 16, weight: .light)).foregroundStyle(theme.accent)
                     Text(title).font(.system(size: 10, weight: .medium))
                         .lineLimit(3).multilineTextAlignment(.center)
-                    Text(match.map { "\(Int(($0.probability * 100).rounded()))% match" }
+                    Text(match.map { "\(Int(($0.probability * 100).rounded()))% · \(session.phase == .ready ? (session.decision?.noMatch == true ? "Not selected" : "Match") : "Preview")" }
                         ?? (direction == .left ? "Nothing will run" : ["Best match", "Second match", "Third match"][index ?? 0]))
                         .font(.system(size: 8)).foregroundStyle(theme.accent)
                 }.frame(width: 84, height: 72).position(point)
-                    .foregroundStyle(theme.isHUD ? Color.white.opacity(available ? 0.9 : 0.45) : Color.primary)
+                    .foregroundStyle(theme.isHUD ? Color.white.opacity(available || match != nil ? 0.95 : 0.7) : Color.primary)
             }.frame(width: 418, height: 310).contentShape(shape)
-        }.buttonStyle(.plain).disabled(!available)
+        }.buttonStyle(VoiceCandidateButtonStyle()).disabled(!available)
             .modifier(ExplorerSectorFocus(theme: theme, shape: shape))
             .accessibilityLabel("\(direction.title): \(title)" + (match.map { ", \(Int(($0.probability * 100).rounded())) percent match" } ?? ""))
             .accessibilityIdentifier("voice.tile.\(direction.rawValue)")

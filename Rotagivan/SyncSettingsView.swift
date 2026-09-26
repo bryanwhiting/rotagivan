@@ -33,6 +33,8 @@ struct SyncSettingsView: View {
                 if !sync.restoringLogin {
                     Button("Retry account restore") { sync.retryLoginRestore() }
                         .accessibilityIdentifier("sync-restore-retry")
+                    Text("Retry may ask for your login Keychain password. Background startup never opens that prompt.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             } else if let account = sync.account {
                 LabeledContent("Signed in as", value: account.email)

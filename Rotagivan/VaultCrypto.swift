@@ -157,22 +157,30 @@ enum VaultKeychain {
     private static let lock = NSLock()
     private static var active: (String, String)?
     private static var activeGeneration: UInt64 = 0
+    private static var cachedLocal: VaultLocal?
+    private static var cacheReady = false
     static func setActive(server: String, userID: String?) {
         lock.lock(); defer { lock.unlock() }
         active = userID.map { (server, $0) }
         activeGeneration &+= 1
+        cachedLocal = nil; cacheReady = false
+    }
+    static func cache(_ value: VaultLocal?, server: String, userID: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard active?.0 == server, active?.1 == userID else { return }
+        cachedLocal = value; cacheReady = true
     }
     static func item(server: String, userID: String) -> String { server + "/" + userID }
     private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "local.rotagivan.vault.v1",
          kSecAttrAccount as String: account, kSecAttrSynchronizable as String: false]
     }
-    static func read(server: String, userID: String) throws -> VaultLocal? {
+    static func read(server: String, userID: String, allowInteraction: Bool = false) throws -> VaultLocal? {
         var query = query(item(server: server, userID: userID))
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = try CredentialKeychainRead.copy(query, result: &result, allowInteraction: allowInteraction)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw VaultFailure.message("Keychain could not unlock the vault (\(status)).") }
         return try JSONDecoder().decode(VaultLocal.self, from: data)
@@ -185,10 +193,16 @@ enum VaultKeychain {
         if status == errSecItemNotFound { status = SecItemAdd(query(account).merging(attributes) { _, new in new } as CFDictionary, nil) }
         guard status == errSecSuccess else { throw VaultFailure.message("Keychain could not save the vault (\(status)). Nothing was uploaded.") }
     }
-    static func currentAPIKey(readLocal: @Sendable (String, String) throws -> VaultLocal? = { try read(server: $0, userID: $1) }) throws -> String? {
-        lock.lock(); let scope = active; let generation = activeGeneration; lock.unlock()
+    static func currentAPIKey(readLocal: (@Sendable (String, String) throws -> VaultLocal?)? = nil) throws -> String? {
+        lock.lock(); let scope = active; let generation = activeGeneration
+        let cached = cachedLocal, ready = cacheReady; lock.unlock()
         guard let (server, userID) = scope else { return nil }
-        let local = try readLocal(server, userID)
+        let local: VaultLocal?
+        if let readLocal { local = try readLocal(server, userID) }
+        else {
+            guard ready else { throw VaultFailure.message("Your API keys are locked. Open General → Account & Sync → Unlock API keys, then retry. Voice will not open a Keychain password dialog.") }
+            local = cached
+        }
         let key: String?
         if let local, let master = local.masterKey, let cached = local.cached {
             key = try VaultCrypto.open(cached, master: master, userID: userID).openRouterAPIKey

@@ -52,10 +52,12 @@ struct SyncCredentials {
     var read: (String) async throws -> SyncAccount?
     var save: (SyncAccount, String) async throws -> Void
     var remove: (String) async throws -> Void
+    var unlock: ((String) async throws -> SyncAccount?)? = nil
     static var keychain: Self {
         Self(read: { server in try await CredentialWorker.shared.run { try SyncKeychain.read(server: server) } },
              save: { account, server in try await CredentialWorker.shared.run { try SyncKeychain.save(account, server: server) } },
-             remove: { server in try await CredentialWorker.shared.run { try SyncKeychain.remove(server: server) } })
+             remove: { server in try await CredentialWorker.shared.run { try SyncKeychain.remove(server: server) } },
+             unlock: { server in try await CredentialWorker.shared.run { try SyncKeychain.read(server: server, allowInteraction: true) } })
     }
 }
 
@@ -114,16 +116,16 @@ struct SyncCredentials {
     }
     func retryLoginRestore() {
         guard started, !shuttingDown, !restoringLogin, !credentialsReady else { return }
-        restoreLogin()
+        restoreLogin(interactive: true)
     }
     func awaitLoginRestore() async {
         await restoreTask?.value
     }
-    private func restoreLogin() {
+    private func restoreLogin(interactive: Bool = false) {
         generation = UUID()
         let token = generation
         restoringLogin = true; credentialsReady = false; error = nil
-        let read = credentials.read, server = server
+        let read = interactive ? (credentials.unlock ?? credentials.read) : credentials.read, server = server
         restoreTask = Task { [weak self] in
             do {
                 let restored = try await read(server)

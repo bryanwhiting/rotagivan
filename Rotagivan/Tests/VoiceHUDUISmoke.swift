@@ -66,8 +66,11 @@ private final class HUDCloud: VoiceCloudServing {
         matching.start(catalog: catalog)
         try waitFor(.listening, in: matching); matching.finishListening()
         precondition(matching.phase == .matching)
-        let noMatch = fixture(VoiceDecision(matches: [], confidence: 0.8, noMatch: true))
-        noMatch.receive(VoiceDecision(matches: [], confidence: 0.8, noMatch: true), final: true)
+        let noMatch = fixture(VoiceDecision(matches: ready.matches, confidence: 0.8, noMatch: true))
+        noMatch.receive(VoiceDecision(matches: ready.matches, confidence: 0.8, noMatch: true), final: true)
+        let preview = fixture()
+        preview.receive(ready, final: false)
+        precondition(preview.selectedMatch == nil && preview.message.contains("Preview"))
         let failed = fixture()
         failed.fail(VoiceError.message("Microphone access is off. Enable Rotagivan in System Settings → Privacy & Security → Microphone, then try again. Nothing was run."))
         let timeout = fixture(); timeout.fail(VoiceError.message("No speech heard. Tap the center to retry."))
@@ -80,7 +83,7 @@ private final class HUDCloud: VoiceCloudServing {
         precondition(disconnected.message.contains("connection") && disconnected.message.contains("Nothing was run"))
         let cancelled = fixture(); cancelled.cancel()
         let states = [("preparing", preparing), ("listening", listening), ("matching", matching), ("ready", result),
-            ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout),
+            ("preview", preview), ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout),
             ("connection-error", disconnected), ("cancelled", cancelled)]
         defer { listening.cancel(); result.cancel(); matching.cancel(); disconnected.cancel() }
         func elements(_ object: Any) -> [AnyObject] {
@@ -113,6 +116,17 @@ private final class HUDCloud: VoiceCloudServing {
                         return button
                     }
                     let cancel = button("Cancel voice mode")
+                    if ["preview", "no-match"].contains(name) {
+                        for direction in [ExplorerSlot.up, .right, .down] {
+                            let candidate = buttons.first {
+                                $0.accessibilityIdentifier?() == "voice.tile.\(direction.rawValue)"
+                            }!
+                            precondition(candidate.accessibilityLabel?()?.contains("percent match") == true,
+                                "Ranked alternatives must remain visible, even before final selection or with no confident match")
+                            precondition(candidate.isAccessibilityEnabled?() == false,
+                                "Preview and rejected candidates must not execute")
+                        }
+                    }
                     precondition(cancel.accessibilityPerformPress?() == true); precondition(exits == 1)
                     if name == "ready" {
                         let before = button("Run selected action").accessibilityFrame?()

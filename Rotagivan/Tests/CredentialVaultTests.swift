@@ -62,6 +62,21 @@ import CryptoKit
     @MainActor static func main() async throws {
         let server = VaultServerFixture()
         let account = VaultAccount(token: "fixture-token", userID: server.userID)
+        var silentReads = 0, explicitReads = 0
+        let locked = CredentialVault(server: "https://fixture.test",
+            read: { _, _ in silentReads += 1; throw CredentialWorkerError.busy },
+            unlock: { _, _ in explicitReads += 1; return nil },
+            write: { _, _, _ in fatalError("Restore must not write credentials") })
+        locked.setAccount(account)
+        await locked.awaitLocalRestore()
+        precondition(silentReads == 1 && explicitReads == 0 && !locked.localReady)
+        locked.retryLocalRestore()
+        await locked.awaitLocalRestore()
+        precondition(silentReads == 1 && explicitReads == 1 && locked.localReady)
+        locked.retryLocalRestore()
+        await locked.awaitLocalRestore()
+        precondition(explicitReads == 1, "Already unlocked vault must not prompt again")
+        locked.shutdown()
         var workStorage: VaultLocal?, homeStorage: VaultLocal?, recoveryStorage: VaultLocal?
         func client(read: @escaping () -> VaultLocal?, write: @escaping (VaultLocal) throws -> Void) -> CredentialVault {
             let result = CredentialVault(server: "https://fixture.test", transport: { try await server.call($0) },

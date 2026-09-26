@@ -529,6 +529,15 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         var local = VaultLocal.fresh(); local.masterKey = master; local.cached = record
         let fixtureLocal = local
         VaultKeychain.setActive(server: vaultServer, userID: vaultUser)
+        do {
+            _ = try VaultKeychain.currentAPIKey()
+            fatalError("Locked cache must require explicit unlock")
+        } catch { precondition(error.localizedDescription.contains("Unlock API keys")) }
+        VaultKeychain.cache(fixtureLocal, server: vaultServer, userID: vaultUser)
+        for _ in 0..<20 {
+            let cachedKey = try VaultKeychain.currentAPIKey()
+            precondition(cachedKey == "fixture-key", "Repeated voice starts reuse cached credentials without Security calls")
+        }
         let fixtureKey = try VaultKeychain.currentAPIKey(readLocal: { _, _ in fixtureLocal })
         precondition(fixtureKey == "fixture-key")
         do {

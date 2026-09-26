@@ -9,8 +9,12 @@ import SwiftUI
 private final class HUDCloud: VoiceCloudServing {
     let decision: VoiceDecision
     let delay: UInt64
-    init(_ decision: VoiceDecision, delay: UInt64 = 50_000_000) { self.decision = decision; self.delay = delay }
+    let transcriptionError: Error?
+    init(_ decision: VoiceDecision, delay: UInt64 = 50_000_000, transcriptionError: Error? = nil) {
+        self.decision = decision; self.delay = delay; self.transcriptionError = transcriptionError
+    }
     func transcribe(_ wav: Data) async throws -> String {
+        if let transcriptionError { throw transcriptionError }
         try await Task.sleep(nanoseconds: delay)
         return "Open the project workspace and review all the very long notes for the upcoming presentation with the design team"
     }
@@ -33,6 +37,9 @@ private final class HUDCloud: VoiceCloudServing {
         }, confidence: 0.85, noMatch: false)
         func fixture(_ decision: VoiceDecision = ready) -> VoiceSession {
             let session = VoiceSession()
+            // Each rendered scenario is independent; production sessions share
+            // admission so a retry cannot bypass an old transport still draining.
+            session.pipelineAdmission = VoicePipelineAdmission()
             session.makeCloud = { HUDCloud(decision) }
             session.makeMicrophone = { HUDMicrophone() }
             session.requestPermission = { true }
@@ -64,10 +71,18 @@ private final class HUDCloud: VoiceCloudServing {
         let failed = fixture()
         failed.fail(VoiceError.message("Microphone access is off. Enable Rotagivan in System Settings → Privacy & Security → Microphone, then try again. Nothing was run."))
         let timeout = fixture(); timeout.fail(VoiceError.message("No speech heard. Tap Listen again to retry."))
+        let disconnected = fixture()
+        disconnected.makeCloud = { HUDCloud(ready, transcriptionError: URLError(.notConnectedToInternet)) }
+        disconnected.start(catalog: catalog)
+        try waitFor(.listening, in: disconnected); disconnected.finishListening()
+        try waitFor(.failed, in: disconnected)
+        precondition(disconnected.selectedMatch == nil && disconnected.decision == nil)
+        precondition(disconnected.message.contains("connection") && disconnected.message.contains("Nothing was run"))
         let cancelled = fixture(); cancelled.cancel()
         let states = [("preparing", preparing), ("listening", listening), ("matching", matching), ("ready", result),
-            ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout), ("cancelled", cancelled)]
-        defer { listening.cancel(); result.cancel(); matching.cancel() }
+            ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout),
+            ("connection-error", disconnected), ("cancelled", cancelled)]
+        defer { listening.cancel(); result.cancel(); matching.cancel(); disconnected.cancel() }
         func elements(_ object: Any) -> [AnyObject] {
             let element = object as AnyObject
             return [element] + (element.accessibilityChildren?() ?? []).flatMap(elements)
@@ -121,7 +136,10 @@ private final class HUDCloud: VoiceCloudServing {
                         precondition(button("Ignore command").accessibilityPerformPress?() == true)
                         precondition(confirms == 1 && session.selectedMatch == nil)
                     }
-                    if ["permission-error", "timeout", "cancelled"].contains(name) {
+                    if ["permission-error", "timeout", "connection-error", "cancelled"].contains(name) {
+                        precondition(session.selectedMatch == nil && confirms == 0)
+                        precondition(!buttons.contains { $0.accessibilityLabel?() == "Run selected action" },
+                            "Failed or cancelled voice must not expose executable stale candidates")
                         precondition(button("Listen again").accessibilityPerformPress?() == true); precondition(retries == 1)
                     }
                     let center = CGPoint(x: 235, y: 250)
@@ -146,6 +164,6 @@ private final class HUDCloud: VoiceCloudServing {
                 }
             }
         }
-        print("Voice HUD: all themes/light-dark, fixed geometry, long names/transcript, preparing/listening/matching/ready/no-match/permission/timeout/cancel; forced opaque timeout, native AX tile selection/manual confirmation, stable center and exclusive sector hit targets passed. Synthetic microphone/cloud only.")
+        print("Voice HUD: all themes/light-dark, fixed geometry, long names/transcript, preparing/listening/matching/ready/no-match/permission/timeout/connection failure/cancel; forced opaque timeout, native AX tile selection/manual confirmation/retry, no executable stale error selection, stable center and exclusive sector hit targets passed. Synthetic microphone/cloud only.")
     }
 }

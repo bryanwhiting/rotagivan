@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-struct VoiceRegisteredAction: Identifiable {
+struct VoiceRegisteredAction: Identifiable, Equatable {
     let action: BindingAction
     let detail: String
     var appBundleID: String? = nil
@@ -227,22 +227,55 @@ struct VoiceDecision {
 protocol VoiceCloudServing {
     func transcribe(_ wav: Data) async throws -> String
     func classify(_ transcript: String, catalog: [VoiceRegisteredAction]) async throws -> VoiceDecision
+    /// Requests cancellation; awaiting the admitted call remains the drain ack.
+    func cancelRequests()
+    func close()
+}
+extension VoiceCloudServing {
+    func cancelRequests() {}
+    func close() { cancelRequests() }
 }
 final class OpenRouterVoiceCloud: NSObject, VoiceCloudServing, URLSessionTaskDelegate {
     private let key: String
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
+    private var session: URLSession!
+    private let requestLock = NSLock()
+    private var activeRequest: (UUID, Task<(Data, URLResponse), Error>)?
+    private var closed = false
+    init(key: String, configuration: URLSessionConfiguration? = nil) {
+        self.key = key
+        super.init()
+        let config = configuration ?? URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 30
         config.urlCache = nil
         config.httpCookieStorage = nil
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
-    }()
-    init(key: String) { self.key = key }
+        session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }
     // No credential/audio forwarding to redirect destinations.
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
-    func close() { session.invalidateAndCancel() }
+    func cancelRequests() {
+        requestLock.lock(); let task = activeRequest?.1; requestLock.unlock()
+        task?.cancel()
+    }
+    func close() {
+        requestLock.lock(); closed = true; let task = activeRequest?.1; requestLock.unlock()
+        task?.cancel(); session.invalidateAndCancel()
+    }
+    private func beginRequest(_ request: URLRequest) throws -> (UUID, Task<(Data, URLResponse), Error>) {
+        requestLock.lock(); defer { requestLock.unlock() }
+        guard !closed else { throw CancellationError() }
+        guard activeRequest == nil else { throw VoiceError.message("A voice request is still stopping. Please retry.") }
+        let id = UUID()
+        let session = self.session!
+        let task = Task { try Task.checkCancellation(); return try await session.data(for: request) }
+        activeRequest = (id, task)
+        return (id, task)
+    }
+    private func endRequest(_ id: UUID) {
+        requestLock.lock(); defer { requestLock.unlock() }
+        if activeRequest?.0 == id { activeRequest = nil }
+    }
     private func post(_ path: String, body: [String: Any]) async throws -> Data {
         try Task.checkCancellation()
         var request = URLRequest(url: URL(string: "https://openrouter.ai/" + path)!)
@@ -250,7 +283,12 @@ final class OpenRouterVoiceCloud: NSObject, VoiceCloudServing, URLSessionTaskDel
         request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: request)
+        let (id, task) = try beginRequest(request)
+        defer { endRequest(id) }
+        let (data, response) = try await withTaskCancellationHandler(operation: {
+            try await task.value
+        }, onCancel: { task.cancel() })
+        guard !task.isCancelled else { throw CancellationError() }
         try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             throw VoiceError.message("OpenRouter request failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)). Check your key, credits, and model access.")

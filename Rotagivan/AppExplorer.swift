@@ -1349,6 +1349,14 @@ extension AppExplorerPresenting {
         endVoiceMode()
         resetLocalGesture()
         let voice = VoiceSession()
+        let capturedApp = sourceBundleID
+        voice.isCatalogCurrent = { [weak self, weak voice] snapshot in
+            guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                  self.contextIsValid?() != false, self.frontmostBundleID() == capturedApp else { return false }
+            // Revalidate at response boundaries, not on microphone/render ticks.
+            // Includes learned vocabulary and descriptions, not just stable IDs.
+            return snapshot == self.currentVoiceCatalog()
+        }
         voice.onFinalMatch = { [weak self, weak voice] in
             guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
                   self.contextIsValid?() != false,

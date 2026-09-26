@@ -1,6 +1,6 @@
 # Voice live-candidate architecture
 
-Verified against public primary-source documentation on 2026-09-26. This is an architecture proposal, not a claim that streaming voice is implemented or installed. Research used no credentials or inference calls.
+Provider contracts verified against public primary-source documentation on 2026-09-26. The design below distinguishes a responsive snapshot fallback from native streaming; it does not claim that native streaming is implemented. Research used no credentials or inference calls.
 
 ## Published Jev contract
 
@@ -18,11 +18,11 @@ Current `Rotagivan/VoiceActions.swift` posts a completed WAV to OpenRouter `/api
 
 xAI separately documents direct `wss://api.x.ai/v1/stt`: binary audio frames, JSON transcript events, and partial results when enabled, authenticated with an **xAI** key. This is not the OpenRouter upload endpoint or an OpenRouter-key feature. Adopting it requires an explicit provider/credential/product decision, including direct native transport versus a backend proxy; never send an OpenRouter key to xAI or silently substitute/fall back. Jev itself accepts text, not native audio. [xAI streaming STT reference](https://docs.x.ai/developers/rest-api-reference/inference/speech-to-text), [Jev model input contract](https://openrouter.ai/typesafe/jev-1.13)
 
-## Proposed bounded live candidate updates
+## Bounded live candidate updates
 
 Keep transcription and classification distinct: a supported partial-text source feeds independent, complete Jev snapshots. Reuse HTTP connections for efficiency, without claiming provider inference-state reuse.
 
-The default OpenRouter fallback can refresh provisional candidates using repeated bounded WAV uploads; it remains snapshot polling, not true audio streaming. The next implementation must retain provisional updates rather than become final-only. Current gaps to close are final work blocked behind partial work, failure leaving credential preparation able to resume, a final latch checked after candidate mutation, and no whole matching deadline across batches. Separately, proposed strict latest-transcript filtering risks starving previews during continuous speech. Treat these as implementation acceptance gates, not fixes delivered by this document.
+The OpenRouter fallback refreshes provisional candidates using repeated bounded WAV uploads; it remains snapshot polling, not true audio streaming. Its implementation retains provisional updates rather than becoming final-only. The review identified final work blocked behind partial work, failure leaving credential preparation able to resume, a final latch checked after candidate mutation, and no whole matching deadline across batches. Strict latest-transcript filtering would also risk starving previews during continuous speech. These findings motivated the acceptance contract below.
 
 1. Debounce meaningful transcript changes. For the existing upload fallback, admit one serial STT→Jev work unit plus one replaceable latest-pending audio snapshot. For true streaming STT, separately bound one transcript producer and one classification request plus one replaceable latest-pending text snapshot—never a backlog per audio chunk.
 2. Each snapshot captures transcript revision, session generation, catalog revision, and active application scope. Publish completed provisional revisions monotonically while listening, even when newer work is pending, so continuous speech does not starve previews. Reject invalid session/catalog/scope results, backwards revisions, and previews superseded by the final latch. Check that latch before mutating candidate state.
@@ -32,3 +32,9 @@ The default OpenRouter fallback can refresh provisional candidates using repeate
 6. Immediately before execution, revalidate the original matched record against the current registered action, enabled state, and application scope. Stable IDs alone do not authorize an edited action. Unknown IDs, `none`, malformed distributions, stale generations, or failed revalidation fail closed.
 
 Offline acceptance tests should cover coalescing, final priority, cancellation drain, overall deadline, late responses, restart, scope switches, edited/removed actions, and malformed/unknown-option responses. Provider streaming support needs a documented Jev endpoint/event schema or explicit provider confirmation before a native Jev-stream implementation is proposed.
+
+## Snapshot fallback verification
+
+The implementation adds a shared admission gate across replacement HUD sessions, cancellation with actual request-completion acknowledgement, and a 15-second monotonic budget from final audio capture through cancellation drain, transcription, and all Jev batches. Repeated successful partial transcripts reuse their provisional classification; final transcripts always classify again. Catalog and active-app validation run at response boundaries, not waveform ticks. The existing HUD renderer, microphone buffer bounds, manual confirmation default, and opt-in final-only Auto-decide remain shared and unchanged.
+
+Focused lifecycle, offline URLSession transport, and native HUD tests pass. Gated fixtures cover cancellation-ignoring requests, late results, deadline expiry, new-session retries, live candidate progress, duplicate-transcript suppression, catalog changes, and actual recording endpoint branches. A catch-all URLProtocol fixture verifies the production transport without opening sockets, including a 300-action multibatch decision. These are not measurements of live provider latency or successful credential/microphone authorization. Full regression and installed-build delivery are tracked in the [production release plan](production-release-plan.md).

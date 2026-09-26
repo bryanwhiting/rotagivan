@@ -38,6 +38,88 @@ private final class FakeVoiceCloud: VoiceCloudServing {
     }
 }
 
+@MainActor private final class VoicePermissionGate {
+    var pending: [CheckedContinuation<Bool, Never>] = []
+    func request() async -> Bool { await withCheckedContinuation { pending.append($0) } }
+    func resolve(_ allowed: Bool) { pending.removeFirst().resume(returning: allowed) }
+}
+
+@MainActor private final class ThrowingVoicePreparationGate {
+    var pending: CheckedContinuation<VoiceCloudServing, Error>?
+    func prepare() async throws -> VoiceCloudServing {
+        try await withCheckedThrowingContinuation { pending = $0 }
+    }
+    func reject() { let continuation = pending!; pending = nil; continuation.resume(throwing: VoiceError.message("Late fixture error")) }
+}
+
+@MainActor private func voiceEventually(_ condition: () -> Bool, _ message: String) async {
+    for _ in 0..<2_000 {
+        if condition() { return }
+        await Task.yield()
+    }
+    preconditionFailure(message)
+}
+
+private final class VoiceTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: TimeInterval = 100
+    func now() -> TimeInterval { lock.lock(); defer { lock.unlock() }; return value }
+    func advance(_ seconds: TimeInterval) { lock.lock(); value += seconds; lock.unlock() }
+}
+
+@MainActor private final class ClockMicrophone: VoiceAudioCapturing {
+    let buffer: VoiceAudioBuffer
+    var starts = 0, stops = 0
+    init(clock: VoiceTestClock) { buffer = VoiceAudioBuffer(now: { clock.now() }) }
+    func start() throws { starts += 1 }
+    func speech() { buffer.append(Data(repeating: 1, count: 32000), rms: 0.1) }
+    func stop() { stops += 1 }
+}
+
+/// Cancellation requests deliberately do not resume a suspended operation.
+/// Tests explicitly drain it, matching transports that acknowledge cancellation
+/// later and preventing a Task.cancel-only fixture from hiding overlap.
+private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
+    private enum Response { case text(String), decision(VoiceDecision) }
+    private let lock = NSLock()
+    private var pending: [(String, CheckedContinuation<Response, Error>)] = []
+    private var history: [String] = []
+    private var active = 0, maximum = 0, cancellations = 0, closures = 0
+    var classificationSteps = 1
+    var stages: [String] { lock.lock(); defer { lock.unlock() }; return history }
+    var pendingStages: [String] { lock.lock(); defer { lock.unlock() }; return pending.map(\.0) }
+    var maxActive: Int { lock.lock(); defer { lock.unlock() }; return maximum }
+    var cancelCount: Int { lock.lock(); defer { lock.unlock() }; return cancellations }
+    private func gate(_ stage: String) async throws -> Response {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock(); history.append(stage); active += 1; maximum = max(maximum, active)
+            pending.append((stage, continuation)); lock.unlock()
+        }
+    }
+    func transcribe(_ wav: Data) async throws -> String {
+        precondition(String(data: wav.prefix(4), encoding: .ascii) == "RIFF")
+        guard case .text(let value) = try await gate("stt") else { preconditionFailure("Wrong fixture response") }
+        return value
+    }
+    func classify(_ transcript: String, catalog: [VoiceRegisteredAction]) async throws -> VoiceDecision {
+        var result: VoiceDecision?
+        for _ in 0..<classificationSteps {
+            guard case .decision(let value) = try await gate("classify") else { preconditionFailure("Wrong fixture response") }
+            result = value
+        }
+        return result!
+    }
+    func cancelRequests() { lock.lock(); cancellations += 1; lock.unlock() }
+    func close() { lock.lock(); closures += 1; lock.unlock(); cancelRequests() }
+    private func resolve(_ result: Result<Response, Error>) {
+        lock.lock(); let (_, continuation) = pending.removeFirst(); active -= 1; lock.unlock()
+        continuation.resume(with: result)
+    }
+    func text(_ value: String = "open Slack") { resolve(.success(.text(value))) }
+    func decision(_ value: VoiceDecision) { resolve(.success(.decision(value))) }
+    func error() { resolve(.failure(VoiceError.message("Fixture connection failed"))) }
+}
+
 @main struct VoiceTests {
     @MainActor static func main() async throws {
         let slack = VoiceRegisteredAction(action: .openApp(bundleID: "com.tinyspeck.slackmacgap", name: "Slack"),
@@ -194,6 +276,251 @@ private final class FakeVoiceCloud: VoiceCloudServing {
             "Busy credential work must show an actionable failure before permission or microphone access")
         busySession.cancel()
 
+        // Failure, unlike user cancellation, must also revoke suspended
+        // preparation's authority to ask permission or open the microphone.
+        let failedPreparation = VoiceSession()
+        let failedCloudGate = CloudPreparationGate()
+        let failedMic = FakeMicrophone()
+        var failedPermissionRequests = 0
+        failedPreparation.makeCloud = { await failedCloudGate.prepare() }
+        failedPreparation.makeMicrophone = { failedMic }
+        failedPreparation.requestPermission = { failedPermissionRequests += 1; return true }
+        failedPreparation.start(catalog: catalog)
+        await voiceEventually({ failedCloudGate.pending.count == 1 }, "Cloud preparation must suspend")
+        failedPreparation.fail(VoiceError.message("Fixture connection failed. Nothing was run."))
+        failedCloudGate.resolve(FakeVoiceCloud(decision))
+        for _ in 0..<20 { await Task.yield() }
+        precondition(failedPreparation.phase == .failed && failedPermissionRequests == 0 && failedMic.starts == 0,
+            "Late successful cloud preparation must not resurrect a failed session")
+        let permissionGate = VoicePermissionGate()
+        failedPreparation.makeCloud = { fake }
+        failedPreparation.requestPermission = { await permissionGate.request() }
+        failedPreparation.start(catalog: catalog)
+        await voiceEventually({ permissionGate.pending.count == 1 }, "Permission preparation must suspend")
+        failedPreparation.fail(VoiceError.message("Fixture preparation expired. Nothing was run."))
+        permissionGate.resolve(true)
+        for _ in 0..<20 { await Task.yield() }
+        precondition(failedPreparation.phase == .failed && failedMic.starts == 0,
+            "Late permission grant must not open the microphone after failure")
+        failedPreparation.cancel()
+        let latePreparationError = ThrowingVoicePreparationGate()
+        failedPreparation.makeCloud = { try await latePreparationError.prepare() }
+        failedPreparation.start(catalog: catalog)
+        await voiceEventually({ latePreparationError.pending != nil }, "Throwing preparation must suspend")
+        failedPreparation.fail(VoiceError.message("Current failure"))
+        latePreparationError.reject()
+        for _ in 0..<20 { await Task.yield() }
+        precondition(failedPreparation.phase == .failed && failedPreparation.message == "Current failure" && failedMic.starts == 0,
+            "Late preparation errors cannot replace the current failure")
+        failedPreparation.cancel()
+
+        let immutableFinal = VoiceSession()
+        var finalCallbacks = 0
+        immutableFinal.onFinalMatch = { finalCallbacks += 1 }
+        immutableFinal.receive(decision, final: true)
+        immutableFinal.receive(noMatch, final: false)
+        immutableFinal.receive(noMatch, final: true)
+        precondition(immutableFinal.phase == .ready && immutableFinal.selectedMatch?.id == slack.id && finalCallbacks == 1,
+            "A committed final decision is immutable under late partial or duplicate-final events")
+        immutableFinal.cancel()
+
+        func timedVoice(admission: VoicePipelineAdmission? = nil) -> (VoiceSession, ClockMicrophone, GatedVoiceCloud, VoiceTestClock) {
+            let clock = VoiceTestClock(), cloud = GatedVoiceCloud()
+            let microphone = ClockMicrophone(clock: clock), voice = VoiceSession()
+            voice.now = { clock.now() }; voice.automaticTicks = false
+            voice.finalMatchingBudget = 3
+            voice.pipelineAdmission = admission ?? VoicePipelineAdmission()
+            voice.makeCloud = { cloud }; voice.makeMicrophone = { microphone }; voice.requestPermission = { true }
+            return (voice, microphone, cloud, clock)
+        }
+        func listening(_ voice: VoiceSession) async {
+            voice.start(catalog: catalog)
+            await voiceEventually({ voice.phase == .listening }, "Synthetic voice must reach listening")
+        }
+        func partial(_ voice: VoiceSession, _ microphone: ClockMicrophone, _ clock: VoiceTestClock) {
+            clock.advance(0.75); microphone.speech(); voice.tick()
+        }
+        // Final audio preempts either stage, but never starts another request
+        // until a cancellation-ignoring old transport actually returns.
+        for heldStage in ["stt", "classify"] {
+            let (voice, microphone, cloud, clock) = timedVoice()
+            await listening(voice); partial(voice, microphone, clock)
+            await voiceEventually({ cloud.pendingStages == ["stt"] }, "Partial STT must start")
+            if heldStage == "classify" {
+                cloud.text()
+                await voiceEventually({ cloud.pendingStages == ["classify"] }, "Partial classification must start")
+            }
+            voice.finishListening()
+            await voiceEventually({ cloud.cancelCount > 0 }, "Final audio must promptly cancel the partial transport")
+            for _ in 0..<20 { await Task.yield() }
+            precondition(cloud.stages.filter { $0 == "stt" }.count == 1 && cloud.maxActive == 1,
+                "Task cancellation is not transport drain; final STT cannot overlap the held partial")
+            if heldStage == "stt" { cloud.text("stale partial") } else { cloud.decision(noMatch) }
+            await voiceEventually({ cloud.pendingStages == ["stt"] }, "Final STT must start immediately after drain")
+            precondition(voice.transcript != "stale partial" && voice.decision == nil,
+                "Superseded partial success cannot publish after final audio")
+            cloud.text()
+            await voiceEventually({ cloud.pendingStages == ["classify"] }, "Final classification must start")
+            cloud.decision(decision)
+            await voiceEventually({ voice.phase == .ready }, "Final decision must publish")
+            precondition(cloud.maxActive == 1 && microphone.stops == 1 && microphone.buffer.snapshot().0.isEmpty)
+            voice.cancel()
+        }
+        // One deadline covers cancellation drain and every serial classification
+        // step, rather than resetting a fresh budget per request.
+        for deadlineStage in ["drain", "classification"] {
+            let (voice, microphone, cloud, clock) = timedVoice()
+            await listening(voice); partial(voice, microphone, clock)
+            await voiceEventually({ cloud.pendingStages == ["stt"] }, "Deadline fixture partial must start")
+            voice.finishListening()
+            if deadlineStage == "classification" {
+                cloud.error()
+                await voiceEventually({ cloud.pendingStages == ["stt"] }, "Final must follow drained partial")
+                cloud.classificationSteps = 3
+                cloud.text()
+                await voiceEventually({ cloud.pendingStages == ["classify"] }, "Serial classification must start")
+                clock.advance(1); cloud.decision(decision)
+                await voiceEventually({ cloud.pendingStages == ["classify"] }, "Second classification step must start")
+                clock.advance(1); cloud.decision(decision)
+                await voiceEventually({ cloud.pendingStages == ["classify"] }, "Third classification step must start")
+                clock.advance(1.01)
+            } else { clock.advance(3.01) }
+            voice.tick()
+            precondition(voice.phase == .failed && voice.selectedMatch == nil,
+                "Whole final deadline must expire during \(deadlineStage)")
+            let failure = voice.message
+            if deadlineStage == "classification" { cloud.decision(decision) } else { cloud.error() }
+            for _ in 0..<30 { await Task.yield() }
+            precondition(voice.phase == .failed && voice.message == failure && voice.decision == nil,
+                "Late result after final timeout cannot overwrite failure")
+            precondition(cloud.maxActive == 1)
+            voice.cancel()
+        }
+        for heldStage in ["stt", "classify"] {
+            for termination in ["fail-success", "fail-error", "cancel-success", "cancel-error"] {
+                let (voice, microphone, cloud, _) = timedVoice()
+                await listening(voice); microphone.speech(); voice.finishListening()
+                await voiceEventually({ cloud.pendingStages == ["stt"] }, "Final failure fixture must suspend")
+                if heldStage == "classify" {
+                    cloud.text(); await voiceEventually({ cloud.pendingStages == ["classify"] }, "Final classification must suspend")
+                }
+                if termination.hasPrefix("fail") { voice.fail(VoiceError.message("Current fixture failure")) }
+                else { voice.cancel() }
+                let phase = voice.phase, message = voice.message, transcript = voice.transcript
+                if termination.hasSuffix("error") { cloud.error() }
+                else if heldStage == "stt" { cloud.text("late obsolete transcript") }
+                else { cloud.decision(decision) }
+                for _ in 0..<30 { await Task.yield() }
+                precondition(voice.phase == phase && voice.message == message && voice.transcript == transcript && voice.decision == nil,
+                    "Late \(heldStage) \(termination) must not mutate a terminated session")
+                voice.cancel()
+            }
+        }
+        for boundary in ["stt", "classify"] {
+            let (voice, microphone, cloud, _) = timedVoice()
+            var currentCatalog = true
+            voice.isCatalogCurrent = { _ in currentCatalog }
+            await listening(voice); microphone.speech(); voice.finishListening()
+            await voiceEventually({ cloud.pendingStages == ["stt"] }, "Catalog boundary STT must suspend")
+            if boundary == "classify" {
+                cloud.text(); await voiceEventually({ cloud.pendingStages == ["classify"] }, "Catalog boundary classification must suspend")
+            }
+            currentCatalog = false
+            if boundary == "stt" { cloud.text() } else { cloud.decision(decision) }
+            await voiceEventually({ voice.phase == .failed }, "Changed catalog must fail at the \(boundary) response boundary")
+            precondition(voice.selectedMatch == nil && voice.decision == nil && voice.message.contains("changed"))
+            voice.cancel()
+        }
+        for boundary in ["stt", "classify"] {
+            let (voice, microphone, cloud, clock) = timedVoice()
+            await listening(voice); microphone.speech(); voice.finishListening()
+            await voiceEventually({ cloud.pendingStages == ["stt"] }, "Deadline boundary STT must suspend")
+            if boundary == "classify" {
+                cloud.text(); await voiceEventually({ cloud.pendingStages == ["classify"] }, "Deadline boundary classification must suspend")
+            }
+            clock.advance(3.01)
+            // Do not call tick: each response boundary must enforce the same
+            // monotonic deadline even if UI/timer servicing was delayed.
+            if boundary == "stt" { cloud.text() } else { cloud.decision(decision) }
+            await voiceEventually({ voice.phase == .failed }, "Expired \(boundary) response must enforce the final deadline without a timer tick")
+            precondition(voice.decision == nil && voice.selectedMatch == nil && voice.message.contains("timed out"))
+            voice.cancel()
+        }
+        // AppExplorer retries create distinct sessions. Admission must remain
+        // held across instances until the old transport drains, even after quit.
+        let sharedAdmission = VoicePipelineAdmission()
+        let (oldVoice, oldMic, oldCloud, oldClock) = timedVoice(admission: sharedAdmission)
+        await listening(oldVoice); partial(oldVoice, oldMic, oldClock)
+        await voiceEventually({ oldCloud.pendingStages == ["stt"] }, "Old session request must suspend")
+        oldVoice.cancel()
+        let (newVoice, newMic, newCloud, newClock) = timedVoice(admission: sharedAdmission)
+        newVoice.start(catalog: catalog)
+        precondition(newVoice.phase == .failed && newMic.starts == 0 && newCloud.stages.isEmpty,
+            "A new VoiceSession cannot bypass drain or reopen the microphone while the previous transport is stopping")
+        oldCloud.text("late old speech")
+        await voiceEventually({ !sharedAdmission.occupied }, "Old transport must actually drain before retry admission")
+        await listening(newVoice); newMic.speech(); newVoice.finishListening()
+        await voiceEventually({ newCloud.pendingStages == ["stt"] }, "Retry must proceed once old transport drains")
+        precondition(oldVoice.phase == .cancelled && oldVoice.transcript.isEmpty && oldVoice.decision == nil)
+        newClock.advance(3.01); newVoice.tick()
+        precondition(newVoice.phase == .failed)
+        newCloud.error()
+        for _ in 0..<30 { await Task.yield() }
+        newVoice.cancel()
+
+        // Continuous newer snapshots are coalesced, not an excuse to starve
+        // completed provisional results while the user is still speaking.
+        let (liveVoice, liveMic, liveCloud, liveClock) = timedVoice()
+        await listening(liveVoice); partial(liveVoice, liveMic, liveClock)
+        await voiceEventually({ liveCloud.pendingStages == ["stt"] }, "Live partial must start")
+        for _ in 0..<3 { liveClock.advance(1.21); liveMic.speech(); liveVoice.tick() }
+        liveCloud.text("first live command")
+        await voiceEventually({ liveCloud.pendingStages == ["classify"] }, "Completed partial must classify despite newer snapshots")
+        liveCloud.decision(decision)
+        await voiceEventually({ liveVoice.decision?.matches.first?.id == slack.id }, "Live provisional candidates must progress")
+        precondition(liveVoice.phase == .listening && liveVoice.selectedMatch == nil)
+        await voiceEventually({ liveCloud.pendingStages == ["stt"] }, "Only newest coalesced partial must follow")
+        precondition(liveCloud.stages.filter { $0 == "stt" }.count == 2 && liveCloud.maxActive == 1)
+        liveClock.advance(1.21); liveMic.speech(); liveVoice.tick()
+        liveCloud.text("second live command")
+        await voiceEventually({ liveCloud.pendingStages == ["classify"] }, "Next completed provisional must classify")
+        let secondLive = VoiceDecision(matches: [VoiceMatch(record: mute, probability: 1)], confidence: 1, noMatch: false)
+        liveCloud.decision(secondLive)
+        await voiceEventually({ liveVoice.decision?.matches.first?.id == mute.id }, "Newer completed provisional must advance the visible candidate")
+        await voiceEventually({ liveCloud.pendingStages == ["stt"] }, "Coalesced third partial must follow")
+        liveCloud.text("second live command")
+        await voiceEventually({ liveCloud.pendingStages.isEmpty }, "Duplicate provisional transcript must finish without another classifier")
+        for _ in 0..<20 { await Task.yield() }
+        precondition(liveCloud.stages.filter { $0 == "classify" }.count == 2 && liveVoice.decision?.matches.first?.id == mute.id,
+            "Identical partial transcripts must reuse the last successful provisional classification")
+        liveMic.speech(); liveVoice.finishListening()
+        await voiceEventually({ liveCloud.pendingStages == ["stt"] }, "Final audio must still transcribe after partial dedup")
+        liveCloud.text("second live command")
+        await voiceEventually({ liveCloud.pendingStages == ["classify"] }, "Final transcript must always classify even if its text repeats")
+        liveVoice.cancel(); liveCloud.error()
+        for _ in 0..<30 { await Task.yield() }
+        precondition(liveVoice.phase == .cancelled && liveVoice.decision == nil)
+
+        // Exercise the real endpoint branch, without wall-clock sleeps or input.
+        for endpoint in ["no-speech", "silence", "recording-limit"] {
+            let (voice, microphone, cloud, clock) = timedVoice()
+            await listening(voice)
+            if endpoint == "no-speech" {
+                clock.advance(5.01); voice.tick()
+                precondition(voice.phase == .failed && voice.message.contains("No speech") && cloud.stages.isEmpty)
+            } else {
+                microphone.speech(); clock.advance(endpoint == "silence" ? 0.86 : 12.01)
+                if endpoint == "recording-limit" { microphone.speech() }
+                voice.tick()
+                precondition(voice.phase == .matching && microphone.stops == 1)
+                await voiceEventually({ cloud.pendingStages == ["stt"] }, "Actual endpoint must dispatch final audio")
+                cloud.text(); await voiceEventually({ cloud.pendingStages == ["classify"] }, "Endpoint final must classify")
+                cloud.decision(noMatch); await voiceEventually({ voice.phase == .ready }, "Endpoint no-match must complete")
+                precondition(voice.selectedMatch == nil)
+            }
+            voice.cancel()
+        }
+
         let vaultServer = "https://fixture.invalid"
         let vaultUser = "fixture-user"
         let master = VaultCrypto.randomMaster()
@@ -223,11 +550,30 @@ private final class FakeVoiceCloud: VoiceCloudServing {
 
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { AppExplorerSettings() }
-        controller.frontmostPID = { 4242 }; controller.frontmostBundleID = { "com.apple.finder" }
+        var initialFrontApp = "com.apple.finder"
+        controller.frontmostPID = { 4242 }; controller.frontmostBundleID = { initialFrontApp }
         controller.contextIsValid = { true }
         var available = catalog
         controller.voiceCatalog = { available }
-        controller.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
+        controller.prepareVoice = { voice, records in
+            precondition(voice.isCatalogCurrent(records), "Controller must accept its actual current catalog snapshot")
+            let original = available
+            available[0].keywordSets = [["changed vocabulary"]]
+            precondition(!voice.isCatalogCurrent(records), "Controller must revalidate learned vocabulary, not only IDs")
+            available = original
+            available[0] = VoiceRegisteredAction(action: original[0].action, detail: "Changed description")
+            precondition(available[0].id == original[0].id && !voice.isCatalogCurrent(records),
+                "Description edits must invalidate the actual controller snapshot despite stable IDs")
+            available = original
+            available[0] = VoiceRegisteredAction(action: pause.action, detail: original[0].detail)
+            precondition(!voice.isCatalogCurrent(records), "Output changes must invalidate the controller snapshot")
+            available = original
+            initialFrontApp = "fixture.otherApp"
+            precondition(!voice.isCatalogCurrent(records), "Actual frontmost application changes must invalidate preparation")
+            initialFrontApp = "com.apple.finder"
+            precondition(voice.isCatalogCurrent(records))
+            voice.receive(decision, final: true)
+        }
         var executed: [BindingAction] = []
         controller.onKeyboardBindingAction = { executed.append($0) }
         func key(_ code: UInt16, repeatKey: Bool = false) -> NSEvent {
@@ -441,6 +787,6 @@ private final class FakeVoiceCloud: VoiceCloudServing {
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path).appendingPathComponent("voice-hud.png"))
         }
         preview.cancel(); window.close()
-        print("Voice API validation, credentials, bounded audio, cancellation, catalog, swipe/confirm runtime, and HUD render: PASS")
+        print("Voice validation, transport-drain admission, final preemption/deadlines, provisional coalescing/dedup, monotonic endpoints, stale-result/catalog guards, credentials, swipe/confirm runtime, and HUD render: PASS")
     }
 }

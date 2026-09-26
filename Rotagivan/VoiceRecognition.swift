@@ -64,9 +64,11 @@ import SwiftUI
 final class VoiceAudioBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var pcm = Data()
-    private var speechAt: Date?
+    private var speechAt: TimeInterval?
+    private let now: @Sendable () -> TimeInterval
     private var failed = false
     private var levels = [Double](repeating: 0, count: 48)
+    init(now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.now = now }
     func waveform() -> [Double] {
         lock.lock(); defer { lock.unlock() }; return levels
     }
@@ -76,10 +78,10 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         pcm.append(data.prefix(max(0, Self.maximumBytes - pcm.count)))
         let level = rms.isFinite ? max(0, min(1, rms)) : 0
         levels.append(min(1, sqrt(level) * 2.5)); levels.removeFirst()
-        if level > 0.008 { speechAt = Date() }
+        if level > 0.008 { speechAt = now() }
     }
     func fail() { lock.lock(); failed = true; lock.unlock() }
-    func snapshot() -> (Data, Date?, Bool) {
+    func snapshot() -> (Data, TimeInterval?, Bool) {
         lock.lock(); defer { lock.unlock() }
         return (pcm, speechAt, failed)
     }
@@ -147,6 +149,18 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     }
 }
 
+/// Shared across new controller sessions: UI cancellation never frees a
+/// transport slot before its admitted work has actually returned.
+@MainActor final class VoicePipelineAdmission {
+    static let shared = VoicePipelineAdmission()
+    private var owner: UUID?
+    var occupied: Bool { owner != nil }
+    func acquire(_ id: UUID) -> Bool {
+        guard owner == nil else { return false }; owner = id; return true
+    }
+    func release(_ id: UUID) { if owner == id { owner = nil } }
+}
+
 @MainActor final class VoiceSession: ObservableObject {
     enum Phase: Equatable { case preparing, listening, matching, ready, failed, cancelled }
     @Published private(set) var phase: Phase = .preparing
@@ -162,10 +176,22 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     private var timer: Timer?
     private var preparation: Task<Void, Never>?
     private var worker: Task<Void, Never>?
+    private var operation: Task<Void, Never>?
+    private var workerID: UUID?
     private var queued: (Data, Bool)?
     private var generation = UUID()
-    private var started = Date()
-    private var sentAt = Date.distantPast
+    private var started: TimeInterval = 0
+    private var sentAt = -TimeInterval.infinity
+    private var finalDeadline: TimeInterval?
+    private var finalPending = false
+    private var lastProvisionalTranscript: String?
+    var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    var automaticTicks = true
+    var finalMatchingBudget: TimeInterval = 15
+    var pipelineAdmission = VoicePipelineAdmission.shared
+    /// The controller verifies its captured catalog/app scope at response
+    /// boundaries, never in the waveform timer or during rendering.
+    var isCatalogCurrent: ([VoiceRegisteredAction]) -> Bool = { _ in true }
     private var cloud: VoiceCloudServing?
     private var catalog: [VoiceRegisteredAction] = []
     var makeCloud: () async throws -> VoiceCloudServing = {
@@ -188,10 +214,14 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     }
     func start(catalog: [VoiceRegisteredAction]) {
         cancel()
+        guard worker == nil, !pipelineAdmission.occupied else {
+            fail(VoiceError.message("Previous voice request is still stopping. Please retry when it finishes. Nothing was run.")); return
+        }
         generation = UUID()
         let token = generation
         self.catalog = catalog
         deliveredFinal = false
+        finalPending = false; finalDeadline = nil
         transcript = ""; decision = nil; selected = .up
         phase = .preparing; message = "Preparing voice credentials…"
         preparation = Task { [weak self] in
@@ -199,7 +229,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
             do {
                 let preparedCloud = try await self.makeCloud()
                 guard token == self.generation, !Task.isCancelled else {
-                    (preparedCloud as? OpenRouterVoiceCloud)?.close()
+                    preparedCloud.close()
                     return
                 }
                 self.cloud = preparedCloud
@@ -210,8 +240,9 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                 let mic = self.makeMicrophone()
                 try mic.start()
                 self.microphone = mic
-                self.started = Date(); self.sentAt = .distantPast
+                self.started = self.now(); self.sentAt = -.infinity
                 self.phase = .listening; self.message = "Listening… say an action · Space/Enter to finish"
+                guard self.automaticTicks else { return }
                 let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
                 }
@@ -220,66 +251,123 @@ final class VoiceAudioBuffer: @unchecked Sendable {
             } catch { if token == self.generation { self.fail(error) } }
         }
     }
-    private func tick() {
+    func tick() {
+        if phase == .matching {
+            checkMatchingDeadline()
+            return
+        }
         guard phase == .listening, let microphone else { return }
         waveform = microphone.buffer.waveform()
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         if failed { fail(VoiceError.message("Microphone audio conversion failed. Please try again.")); return }
-        let elapsed = Date().timeIntervalSince(started)
-        if elapsed >= 12 || (speechAt != nil && Date().timeIntervalSince(speechAt!) > 0.85 && elapsed > 0.8) {
+        let elapsed = now() - started
+        if elapsed >= 12 || (speechAt != nil && now() - speechAt! > 0.85 && elapsed > 0.8) {
             finishListening(); return
         }
         if speechAt == nil && elapsed > 5 { fail(VoiceError.message("No speech heard. Tap Listen again to retry.")); return }
-        if speechAt != nil && elapsed > 0.7 && Date().timeIntervalSince(sentAt) >= 1.2 {
-            sentAt = Date(); enqueue(VoiceAudioBuffer.wav(pcm), final: false)
+        if speechAt != nil && elapsed > 0.7 && now() - sentAt >= 1.2 {
+            sentAt = now(); enqueue(VoiceAudioBuffer.wav(pcm), final: false)
+        }
+    }
+    private func checkMatchingDeadline() {
+        if phase == .matching, let deadline = finalDeadline, now() >= deadline {
+            fail(VoiceError.message("Voice matching timed out. Tap Listen again to retry. Nothing was run."))
         }
     }
     func finishListening() {
         guard phase == .listening, let microphone else { return }
-        microphone.stop(); timer?.invalidate(); timer = nil
+        microphone.stop()
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         microphone.buffer.clear(); self.microphone = nil
         guard !failed, speechAt != nil, !pcm.isEmpty else { fail(VoiceError.message("No speech heard. Tap Listen again to retry.")); return }
         phase = .matching; message = "Matching your command…"
+        finalPending = true
+        finalDeadline = now() + max(0, finalMatchingBudget)
+        // Priority starts with final audio, not after the final STT response.
+        operation?.cancel(); cloud?.cancelRequests()
         enqueue(VoiceAudioBuffer.wav(pcm), final: true)
+        tick()
     }
     private func enqueue(_ wav: Data, final: Bool) {
         queued = (wav, final) // Coalesce snapshots; at most one network pipeline.
         guard worker == nil else { return }
+        let id = UUID()
+        let admission = pipelineAdmission
+        guard admission.acquire(id) else {
+            fail(VoiceError.message("Previous voice request is still stopping. Please retry when it finishes. Nothing was run.")); return
+        }
         let token = generation
+        workerID = id
         worker = Task { [weak self] in
-            guard let self else { return }
-            while let (audio, isFinal) = self.queued, let cloud = self.cloud {
+            guard let self else { admission.release(id); return }
+            var finalResult: VoiceDecision?
+            defer {
+                admission.release(id)
+                if self.workerID == id { self.worker = nil; self.workerID = nil; self.operation = nil }
+                // Final callbacks may open a brand-new voice session. Only
+                // publish after the actual operation has drained and released.
+                if let finalResult, token == self.generation { self.receive(finalResult, final: true) }
+            }
+            while token == self.generation, let (audio, isFinal) = self.queued, let cloud = self.cloud {
                 self.queued = nil
-                do {
+                var completedDecision: VoiceDecision?
+                var completedTranscript: String?
+                let operation = Task { @MainActor in
+                  do {
                     let text = try await cloud.transcribe(audio)
                     guard token == self.generation, !Task.isCancelled else { return }
-                    if !text.isEmpty { self.transcript = text }
-                    // A final upload supersedes an in-flight partial transcript.
-                    if !isFinal && self.queued?.1 == true { continue }
+                    guard !self.finalPending || isFinal else { return }
+                    self.checkMatchingDeadline()
+                    guard token == self.generation, !Task.isCancelled, !self.finalPending || isFinal else { return }
+                    guard self.isCatalogCurrent(self.catalog) else {
+                        self.fail(VoiceError.message("The available actions or active application changed. Please try again. Nothing was run.")); return
+                    }
+                    if !text.isEmpty, self.transcript != text { self.transcript = text }
                     guard !text.isEmpty else {
                         if isFinal { throw VoiceError.message("No speech recognized. Tap Listen again to retry.") }
-                        continue
+                        return
                     }
+                    if !isFinal, self.lastProvisionalTranscript == text { return }
                     let decision = try await cloud.classify(text, catalog: self.catalog)
                     guard token == self.generation, !Task.isCancelled else { return }
-                    if !isFinal && self.queued?.1 == true { continue }
-                    self.receive(decision, final: isFinal)
-                } catch {
+                    guard !self.finalPending || isFinal else { return }
+                    self.checkMatchingDeadline()
+                    guard token == self.generation, !Task.isCancelled, !self.finalPending || isFinal else { return }
+                    completedDecision = decision
+                    completedTranscript = text
+                  } catch {
                     guard token == self.generation, !Task.isCancelled else { return }
                     if isFinal { self.fail(error); return }
                     // A transient partial failure may recover on the final request.
+                  }
+                }
+                self.operation = operation
+                // Cancellation requests do not release admission: a transport
+                // which ignores cancellation must drain before another starts.
+                await operation.value
+                if self.workerID == id { self.operation = nil }
+                self.checkMatchingDeadline()
+                guard token == self.generation else { return }
+                if let decision = completedDecision {
+                    guard self.isCatalogCurrent(self.catalog) else {
+                        self.fail(VoiceError.message("The available actions or active application changed. Please try again. Nothing was run.")); return
+                    }
+                    if isFinal { finalResult = decision; return }
+                    if !self.finalPending {
+                        self.lastProvisionalTranscript = completedTranscript
+                        self.receive(decision, final: false)
+                    }
                 }
             }
-            if token == self.generation { self.worker = nil }
         }
     }
     func receive(_ decision: VoiceDecision, final: Bool) {
-        guard phase != .cancelled && phase != .failed else { return }
+        guard phase != .cancelled && phase != .failed, !deliveredFinal else { return }
+        guard final || (!finalPending && phase != .matching) else { return }
         self.decision = decision
         if final {
-            guard !deliveredFinal else { return }
             deliveredFinal = true
+            finalDeadline = nil; timer?.invalidate(); timer = nil
             phase = .ready
             selected = decision.noMatch ? .left : .up
             message = decision.noMatch ? "No matching action. Nothing will run." : "Swipe to select · Space or Enter to run"
@@ -290,10 +378,11 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         if [.up, .right, .down, .left].contains(direction) { selected = direction }
     }
     func fail(_ error: Error) {
+        generation = UUID(); preparation?.cancel(); preparation = nil
         microphone?.stop(); microphone?.buffer.clear(); microphone = nil
         timer?.invalidate(); timer = nil
-        worker?.cancel(); worker = nil; queued = nil
-        (cloud as? OpenRouterVoiceCloud)?.close(); cloud = nil
+        operation?.cancel(); queued = nil; finalDeadline = nil; finalPending = false; lastProvisionalTranscript = nil
+        cloud?.close(); cloud = nil
         waveform = Array(repeating: 0, count: 48)
         decision = nil; phase = .failed
         message = (error as? VoiceError)?.errorDescription ?? "Voice service unavailable. Check your connection and try again. Nothing was run."
@@ -301,10 +390,10 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     func cancel() {
         generation = UUID()
         preparation?.cancel(); preparation = nil
-        worker?.cancel(); worker = nil; queued = nil
+        operation?.cancel(); queued = nil; finalDeadline = nil; finalPending = false; lastProvisionalTranscript = nil
         microphone?.stop(); microphone?.buffer.clear(); microphone = nil
         timer?.invalidate(); timer = nil
-        (cloud as? OpenRouterVoiceCloud)?.close(); cloud = nil
+        cloud?.close(); cloud = nil
         waveform = Array(repeating: 0, count: 48)
         phase = .cancelled; decision = nil; transcript = ""; catalog = []
     }

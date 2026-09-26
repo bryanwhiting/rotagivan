@@ -168,7 +168,11 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     private var sentAt = Date.distantPast
     private var cloud: VoiceCloudServing?
     private var catalog: [VoiceRegisteredAction] = []
-    var makeCloud: () throws -> VoiceCloudServing = { OpenRouterVoiceCloud(key: try OpenRouterCredential.load()) }
+    var makeCloud: () async throws -> VoiceCloudServing = {
+        let key = try await OpenRouterCredential.loadAsync()
+        try Task.checkCancellation()
+        return OpenRouterVoiceCloud(key: key)
+    }
     var requestPermission: () async -> Bool = {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return true
@@ -189,11 +193,17 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         self.catalog = catalog
         deliveredFinal = false
         transcript = ""; decision = nil; selected = .up
-        phase = .preparing; message = "Preparing microphone…"
+        phase = .preparing; message = "Preparing voice credentials…"
         preparation = Task { [weak self] in
             guard let self else { return }
             do {
-                self.cloud = try self.makeCloud()
+                let preparedCloud = try await self.makeCloud()
+                guard token == self.generation, !Task.isCancelled else {
+                    (preparedCloud as? OpenRouterVoiceCloud)?.close()
+                    return
+                }
+                self.cloud = preparedCloud
+                self.message = "Preparing microphone…"
                 let allowed = await self.requestPermission()
                 guard token == self.generation, !Task.isCancelled else { return }
                 guard allowed else { throw VoiceError.message("Microphone access is off. Enable Rotagivan in System Settings → Privacy & Security → Microphone, then try again.") }

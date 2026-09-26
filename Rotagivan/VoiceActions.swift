@@ -182,6 +182,11 @@ enum OpenRouterCredential {
         if let key = try VaultKeychain.currentAPIKey() { return key }
         return try loadEnvironment()
     }
+    static func loadAsync() async throws -> String {
+        do { return try await CredentialWorker.shared.run { try load() } }
+        catch let error as CredentialWorkerError { throw VoiceError.message(error.localizedDescription) }
+        catch let error as VaultFailure { throw VoiceError.message(error.localizedDescription) }
+    }
     static func loadEnvironment() throws -> String {
         if let value = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], valid(value) { return value }
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".env")

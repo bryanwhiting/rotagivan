@@ -2,6 +2,16 @@ import AppKit
 import SwiftUI
 import Foundation
 
+@MainActor private final class VaultReadGate {
+    var waiting = false
+    var continuation: CheckedContinuation<VaultLocal?, Never>?
+    func read() async -> VaultLocal? {
+        waiting = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+    func finish(_ value: VaultLocal?) { continuation?.resume(returning: value); continuation = nil }
+}
+
 @MainActor private final class VaultServerFixture {
     var record: VaultRecord?
     var devices: [VaultDevice] = []
@@ -60,11 +70,13 @@ import CryptoKit
             return result
         }
         let work = client(read: { workStorage }, write: { workStorage = $0 })
+        await work.awaitLocalRestore()
         precondition(server.puts == 0, "Sign in/start must not upload")
         await work.save(apiKey: "fixture-api-key-first")
         precondition(work.error == nil && work.unlocked && server.puts == 1 && workStorage?.masterKey != nil)
         let first = server.record!
         let home = client(read: { homeStorage }, write: { homeStorage = $0 })
+        await home.awaitLocalRestore()
         await home.load()
         precondition(!home.unlocked && home.hasRemote, "Login alone cannot decrypt")
         await home.requestAccess()
@@ -82,8 +94,10 @@ import CryptoKit
         let decrypted = try VaultCrypto.open(homeStorage!.cached!, master: homeStorage!.masterKey!, userID: account.userID)
         precondition(decrypted.openRouterAPIKey == "fixture-api-key-first")
         work.setAccount(account)
+        await work.awaitLocalRestore()
         work.showRecoveryCode()
         let recovery = client(read: { recoveryStorage }, write: { recoveryStorage = $0 })
+        await recovery.awaitLocalRestore()
         await recovery.recover("RV1-" + String(repeating: "0", count: 64))
         precondition(!recovery.unlocked && recoveryStorage == nil)
         await recovery.recover(work.recoveryCode!)
@@ -112,6 +126,7 @@ import CryptoKit
         let interruptedClient = CredentialVault(server: "https://fixture.test", transport: { try await emptyServer.call($0) },
             read: { _, _ in interrupted }, write: { value, _, _ in interrupted = value })
         interruptedClient.setAccount(account)
+        await interruptedClient.awaitLocalRestore()
         emptyServer.losePutReply = true
         await interruptedClient.save(apiKey: "fixture-api-key-first")
         precondition(interrupted?.masterKey != nil && interruptedClient.error != nil)
@@ -120,9 +135,59 @@ import CryptoKit
         let unavailable = CredentialVault(server: "https://fixture.test", transport: { try await emptyServer.call($0) },
             read: { _, _ in nil }, write: { _, _, _ in throw VaultFailure.message("Keychain unavailable") })
         unavailable.setAccount(account)
+        await unavailable.awaitLocalRestore()
         let putsBefore = emptyServer.puts
         await unavailable.requestAccess()
         precondition(unavailable.error != nil && emptyServer.devices.isEmpty && emptyServer.puts == putsBefore)
+
+        var restored: VaultLocal?
+        let failedRestore = CredentialVault(server: "https://fixture.test", transport: { try await server.call($0) },
+            read: { _, _ in throw VaultFailure.message("Unreadable cached keys") },
+            write: { value, _, _ in restored = value })
+        failedRestore.setAccount(account)
+        await failedRestore.awaitLocalRestore()
+        precondition(!failedRestore.localReady && !failedRestore.restoringLocal && failedRestore.error != nil)
+        await failedRestore.save(apiKey: "must-not-save")
+        precondition(restored == nil && !failedRestore.localReady)
+        await failedRestore.recover("RV1-" + String(repeating: "0", count: 64))
+        precondition(restored == nil && !failedRestore.localReady, "Wrong recovery must not replace local keys")
+        await failedRestore.recover(work.recoveryCode!)
+        precondition(failedRestore.localReady && failedRestore.unlocked && restored?.masterKey == workStorage?.masterKey)
+
+        var attempts = 0
+        let retry = CredentialVault(server: "https://fixture.test", transport: { _ in fatalError("Restore must not use network") },
+            read: { _, _ in attempts += 1; if attempts == 1 { throw CredentialWorkerError.busy }; return nil },
+            write: { _, _, _ in fatalError("Restore must not write") })
+        retry.setAccount(account)
+        await retry.awaitLocalRestore()
+        precondition(!retry.localReady && retry.error != nil)
+        retry.retryLocalRestore(); await retry.awaitLocalRestore()
+        precondition(retry.localReady && attempts == 2)
+
+        let lateGate = VaultReadGate()
+        let late = CredentialVault(server: "https://fixture.test", transport: { _ in fatalError("Hydration must not use network") },
+            read: { _, _ in await lateGate.read() }, write: { _, _, _ in fatalError("Hydration must not write") })
+        late.setAccount(account)
+        while !lateGate.waiting { await Task.yield() }
+        var heartbeat = 0
+        for _ in 0..<20 { heartbeat += 1; await Task.yield() }
+        precondition(heartbeat == 20 && late.restoringLocal && !late.localReady)
+        let oldRestore = Task { await late.awaitLocalRestore() }
+        await Task.yield()
+        late.setAccount(nil)
+        lateGate.finish(workStorage)
+        await oldRestore.value
+        precondition(late.account == nil && late.localReady && !late.unlocked && late.error == nil,
+                     "Old account hydration cannot publish cached keys")
+        let shutdownGate = VaultReadGate()
+        let quitting = CredentialVault(server: "https://fixture.test", transport: { _ in fatalError("Hydration must not use network") },
+            read: { _, _ in await shutdownGate.read() }, write: { _, _, _ in fatalError("Hydration must not write") })
+        quitting.setAccount(account)
+        while !shutdownGate.waiting { await Task.yield() }
+        let shutdownRestore = Task { await quitting.awaitLocalRestore() }
+        await Task.yield(); quitting.shutdown(); shutdownGate.finish(workStorage)
+        await shutdownRestore.value
+        precondition(!quitting.localReady && !quitting.restoringLocal && !quitting.unlocked && quitting.account == nil)
 
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
@@ -138,8 +203,7 @@ import CryptoKit
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("vault-settings.png"))
         }
         window.close()
-        work.shutdown(); home.shutdown(); recovery.shutdown(); interruptedClient.shutdown(); unavailable.shutdown()
+        work.shutdown(); home.shutdown(); recovery.shutdown(); interruptedClient.shutdown(); unavailable.shutdown(); failedRestore.shutdown(); retry.shutdown(); late.shutdown()
         print("Credential vault PASS: two-device asynchronous approval, recovery, no plaintext transport, stale saves, rollback, account switching, lost reply, Keychain failure, UI render")
     }
 }
-

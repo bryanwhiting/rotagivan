@@ -5,7 +5,7 @@ cd "$script_dir/.."
 test_dir=$(mktemp -d /private/tmp/rotagivan-tests.XXXXXX)
 swift build --package-path YAML -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
-common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift)
+common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift Rotagivan/CredentialWorker.swift)
 for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollResponseTests ConfigurationProfileTests PointerProfileTests TapCalibrationSettingsTests HUDMapTests ExplorerTileLayerTests ExplorerTransferTests WindowGroupTests ReservedGroupTests UnifiedBindingScopeTests; do
   xcrun swiftc -j 4 "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"
@@ -149,10 +149,12 @@ xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
 "$test_dir/HUDTemplateTests"
 xcrun swiftc -j 4 Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
 "$test_dir/VaultCryptoTests"
+for test in CredentialVaultTests VaultRestoreUISmoke; do
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift \
-  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/Tests/CredentialVaultTests.swift \
-  -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/CredentialVaultTests"
-"$test_dir/CredentialVaultTests" "$test_dir"
+  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift "Rotagivan/Tests/$test.swift" \
+  -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/$test"
+"$test_dir/$test" "$test_dir"
+done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceTests"
 "$test_dir/VoiceTests" "$test_dir"
@@ -181,12 +183,14 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
   Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/SyncStorageTests.swift \
   -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncStorageTests"
 "$test_dir/SyncStorageTests"
+for test in ManualSyncTests CredentialLifecycleTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \
-  Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift Rotagivan/Tests/ManualSyncTests.swift \
+  Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -framework Security \
-  -o "$test_dir/ManualSyncTests"
-"$test_dir/ManualSyncTests" "$test_dir"
+  -o "$test_dir/$test"
+"$test_dir/$test" "$test_dir"
+done
 # Compile settings tests from the same source list as the app, excluding its entry point.
 settings_sources=()
 while IFS= read -r source; do

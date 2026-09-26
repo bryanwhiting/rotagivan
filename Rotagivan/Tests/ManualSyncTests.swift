@@ -77,7 +77,11 @@ import SwiftUI
         let cloud = CloudStub(yaml: try edited.yaml())
         func makeSync() -> SettingsSync {
             SettingsSync(store: store, hid: hid, files: files, defaults: defaults, server: "https://sync.test",
-                credentials: credentials, transport: { try await cloud.send($0) },
+                credentials: credentials,
+                vault: CredentialVault(server: "https://sync.test", transport: { _ in
+                    fatalError("Manual sync must never access the real vault or network")
+                }, read: { _, _ in nil }, write: { _, _, _ in }),
+                transport: { try await cloud.send($0) },
                 snapshot: { working }, apply: { working = $0; applications += 1 }, computerName: { "Studio Mac" })
         }
         func check(_ value: Bool, _ message: String) { precondition(value, message) }
@@ -85,6 +89,8 @@ import SwiftUI
         let originalDisk = try await files.rawDigest()
         let sync = makeSync()
         sync.start(); sync.start()
+        await sync.awaitLoginRestore()
+        await sync.vault.awaitLocalRestore()
         check(cloud.calls.isEmpty && applications == 0, "Startup must not load YAML or touch the cloud")
         check(try await files.rawDigest() == originalDisk, "Startup must not export app settings")
         check(sync.lastSave == nil, "Unknown cloud timestamps must not claim a save")
@@ -147,6 +153,8 @@ import SwiftUI
         let restart = makeSync()
         cloud.calls = []
         restart.start()
+        await restart.awaitLoginRestore()
+        await restart.vault.awaitLocalRestore()
         check(restart.lastSave == savedTime && cloud.calls.isEmpty, "Restart restores the cached timestamp without checking cloud")
         await restart.prepareToQuit()
 

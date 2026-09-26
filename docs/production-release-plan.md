@@ -88,7 +88,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Choose and publish an explicit supported macOS version range.
 - [ ] Complete first-run onboarding for permissions, voice credentials, privacy, and sync.
 - [ ] Test clean installs, upgrades, migration, multiple Macs, and recovery from failures.
-- [ ] Fix the observed quit stall so updates can close the running app without a separate termination step.
+- [x] Fix the observed quit stall so updates can close the running app without a separate termination step.
   - A three-second sample of installed 1.1.176 (178) during the next update found the main thread blocked in `SettingsSync.start → SyncCredentials.keychain → SyncKeychain.read → SecItemCopyMatching → SecurityServer decrypt`. Investigate nonblocking credential initialization and cancellation; this sample does not implicate input-device teardown.
 - [ ] Package a signed, notarized Mac download with a repeatable release process.
 - [ ] Establish updates, version checks, release notes, and rollback/recovery.
@@ -137,7 +137,20 @@ Adds a shared application-command editor in Actions: create, edit, disable, and 
 - Exact character-set reuse in shared URL/app-ID validation reduced the optimized fixture benchmark from 226.7 ms to 24.7 ms per catalog at 500 commands (five runs, 32 application fixtures and learned vocabulary). Validation equivalence covers 270 bundle IDs and 274 URLs. This measures catalog construction, not end-to-end provider latency or rendered frame time.
 - The complete suite passed again against frozen final sources, including native Actions/Voice/settings UI, input routing, configuration, storage, and manual sync. Test artifacts: `/private/tmp/rotagivan-tests.RuoyZU`.
 - **1.1.177 (179)** was built, installed with `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built and installed SHA-256 match (`9fbb9bd6e3a020c156c6129eec383c59e7f5c902ef2155ddac083ac8cf7e79ae`), and the persistent certificate-pinned signature verifies. The old process required scoped termination after its Keychain-blocked startup was sampled; no Accessibility or signing-trust reset occurred.
-- **Runtime limitation:** a new three-second sample of the reopened 1.1.177 (179) process found the same synchronous Keychain startup block. Installation and automated verification are complete, but interactive usability is not established. Nonblocking credential startup is the next release fix; no Keychain prompt or trust setting was changed to bypass it.
+- **Runtime limitation observed in this batch:** a three-second sample of the reopened 1.1.177 (179) process found the same synchronous Keychain startup block. Installation and automated verification completed, but interactive usability was not established. The fourth batch below resolves the main-thread block; no Keychain prompt or trust setting was changed to bypass it.
+
+### Fourth batch: nonblocking credentials
+
+The startup/quit investigation found synchronous Keychain access on the main thread. Saved-login restoration, vault hydration/persistence, and voice-key preparation now use one shared off-main credential worker. It admits one Security operation at a time and rejects additional requests instead of accumulating blocked calls. Cancelling a caller does not pretend to cancel an already-running Security operation or release its occupied slot.
+
+- Pending credentials have explicit loading states. Save/Load cannot silently switch to local-only behavior while the saved account is unknown; failed reads offer explicit retry without automatic transfers or retry loops.
+- Account/operation generations discard stale results after account changes, cancellation, or shutdown. Quit does not wait for a blocked Keychain read. Voice cannot request microphone permission or begin recording from a cancelled credential preparation.
+- Vault recovery remains available after a terminal cached-read failure, but not during a pending read. A valid recovery code and verified remote record are required before writing replacement local key material.
+- Keychain services, item queries, accessibility/protection flags, encryption formats, and signing trust are unchanged. No real credential values, microphone input, cloud accounts, or live Keychain reads are used by the new regression fixtures.
+- Focused worker, sync, vault, voice, and native loading/retry checks passed, followed by the complete final-source regression suite. Artifacts: `/private/tmp/rotagivan-tests.xSKL5c`. Native fixtures exercise actual Retry controls and distinguish unknown account state from missing keys; captures were visually reviewed. Late credential-write success and failure after quit are also covered.
+- **1.1.178 (180)** was built, installed with `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built/installed executable SHA-256 matches (`61d6ae9fd0cb3864c88e5324482fefded3ee2f3bb1688ddecd1f4639d7c4e852`), with the existing certificate-pinned signature verified independently.
+- Installed startup and reopened-process samples show normal AppKit main-thread event-loop activity, with the pending Keychain read confined to `local.rotagivan.credentials`. Normal quit completed immediately without forced termination, and reopening succeeded. Only the old, already-blocked 1.1.177 process needed scoped termination during installation. Accessibility, Keychain trust, and settings were not reset.
+- Keychain authorization itself may still be pending; this does not claim that credentials were successfully unlocked or that live cloud/voice requests were exercised. The verified fix is that pending credential access no longer freezes the app or prevents normal quit.
 
 ### Remaining implementation boundaries
 

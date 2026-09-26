@@ -2,12 +2,12 @@ import CryptoKit
 import Foundation
 import Security
 
-enum VaultFailure: Error, LocalizedError {
+enum VaultFailure: Error, LocalizedError, Sendable {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
-struct VaultPayload: Codable, Equatable { var openRouterAPIKey: String }
-struct VaultRecord: Codable {
+struct VaultPayload: Codable, Equatable, Sendable { var openRouterAPIKey: String }
+struct VaultRecord: Codable, Sendable {
     var vaultID: String
     var publicKey: String
     var ciphertext: String
@@ -15,12 +15,12 @@ struct VaultRecord: Codable {
     var revision: Int
     var updatedAt: Double
 }
-struct VaultGrant: Codable {
+struct VaultGrant: Codable, Sendable {
     var ephemeralKey: String
     var ciphertext: String
     var signature: String
 }
-struct VaultDevice: Codable, Identifiable {
+struct VaultDevice: Codable, Identifiable, Sendable {
     var id: String
     var publicKey: String
     var name: String
@@ -28,8 +28,8 @@ struct VaultDevice: Codable, Identifiable {
     var grant: String?
     var verificationCode: String { VaultCrypto.code(id) }
 }
-struct VaultRemote: Codable { var vault: VaultRecord?; var devices: [VaultDevice] }
-struct VaultLocal: Codable {
+struct VaultRemote: Codable, Sendable { var vault: VaultRecord?; var devices: [VaultDevice] }
+struct VaultLocal: Codable, Sendable {
     var devicePrivateKey: Data
     var masterKey: Data?
     var vaultID: String?
@@ -156,9 +156,11 @@ enum VaultCrypto {
 enum VaultKeychain {
     private static let lock = NSLock()
     private static var active: (String, String)?
+    private static var activeGeneration: UInt64 = 0
     static func setActive(server: String, userID: String?) {
         lock.lock(); defer { lock.unlock() }
         active = userID.map { (server, $0) }
+        activeGeneration &+= 1
     }
     static func item(server: String, userID: String) -> String { server + "/" + userID }
     private static func query(_ account: String) -> [String: Any] {
@@ -183,11 +185,18 @@ enum VaultKeychain {
         if status == errSecItemNotFound { status = SecItemAdd(query(account).merging(attributes) { _, new in new } as CFDictionary, nil) }
         guard status == errSecSuccess else { throw VaultFailure.message("Keychain could not save the vault (\(status)). Nothing was uploaded.") }
     }
-    static func currentAPIKey() throws -> String? {
-        lock.lock(); let scope = active; lock.unlock()
-        guard let (server, userID) = scope, let local = try read(server: server, userID: userID),
-              let master = local.masterKey, let cached = local.cached else { return nil }
-        return try VaultCrypto.open(cached, master: master, userID: userID).openRouterAPIKey
+    static func currentAPIKey(readLocal: @Sendable (String, String) throws -> VaultLocal? = { try read(server: $0, userID: $1) }) throws -> String? {
+        lock.lock(); let scope = active; let generation = activeGeneration; lock.unlock()
+        guard let (server, userID) = scope else { return nil }
+        let local = try readLocal(server, userID)
+        let key: String?
+        if let local, let master = local.masterKey, let cached = local.cached {
+            key = try VaultCrypto.open(cached, master: master, userID: userID).openRouterAPIKey
+        } else { key = nil }
+        lock.lock(); defer { lock.unlock() }
+        guard activeGeneration == generation, active?.0 == server, active?.1 == userID else {
+            throw VaultFailure.message("The active account changed while preparing voice credentials. Please try again.")
+        }
+        return key
     }
 }
-

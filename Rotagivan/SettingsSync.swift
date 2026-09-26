@@ -49,13 +49,13 @@ private struct SyncAPIError: LocalizedError {
 
 /// Injectable credentials/transport keep sync tests away from real accounts.
 struct SyncCredentials {
-    var read: (String) throws -> SyncAccount?
-    var save: (SyncAccount, String) throws -> Void
-    var remove: (String) throws -> Void
+    var read: (String) async throws -> SyncAccount?
+    var save: (SyncAccount, String) async throws -> Void
+    var remove: (String) async throws -> Void
     static var keychain: Self {
-        Self(read: { try SyncKeychain.read(server: $0) },
-             save: { try SyncKeychain.save($0, server: $1) },
-             remove: { try SyncKeychain.remove(server: $0) })
+        Self(read: { server in try await CredentialWorker.shared.run { try SyncKeychain.read(server: server) } },
+             save: { account, server in try await CredentialWorker.shared.run { try SyncKeychain.save(account, server: server) } },
+             remove: { server in try await CredentialWorker.shared.run { try SyncKeychain.remove(server: server) } })
     }
 }
 
@@ -63,7 +63,10 @@ struct SyncCredentials {
     @Published private(set) var account: SyncAccount? {
         didSet { vault.setAccount(account.map { VaultAccount(token: $0.token, userID: $0.userID) }) }
     }
-    lazy var vault = CredentialVault(server: server)
+    private let suppliedVault: CredentialVault?
+    lazy var vault = suppliedVault ?? CredentialVault(server: server)
+    @Published private(set) var restoringLogin = false
+    @Published private(set) var credentialsReady = false
     @Published private(set) var lastSave: Date?
     @Published private(set) var error: String?
     @Published private(set) var busy = false
@@ -81,15 +84,19 @@ struct SyncCredentials {
     private let applyOverride: ((AppConfiguration) -> Void)?
     private var started = false
     private var shuttingDown = false
+    private var generation = UUID()
+    private var restoreTask: Task<Void, Never>?
 
     init(store: SettingsStore, hid: NavigatorHIDManager, files: SyncFiles = SyncFiles(),
          defaults: UserDefaults = .standard, server: String? = nil,
          credentials: SyncCredentials = .keychain,
+         vault: CredentialVault? = nil,
          transport: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
          snapshot: (() -> AppConfiguration)? = nil, apply: ((AppConfiguration) -> Void)? = nil,
          computerName: @escaping () -> String = { Host.current().localizedName ?? ProcessInfo.processInfo.hostName }) {
         self.store = store; self.hid = hid; self.files = files
         self.defaults = defaults; self.credentials = credentials
+        suppliedVault = vault
         self.server = server ?? Bundle.main.object(forInfoDictionaryKey: "RotagivanSyncURL") as? String ?? ""
         let session = URLSession(configuration: .ephemeral, delegate: SyncRedirectBlocker(), delegateQueue: nil)
         self.session = session
@@ -102,9 +109,43 @@ struct SyncCredentials {
     /// Startup restores only the login and cached timestamp. No settings file
     /// imports, exports, observers, timers, polling, or network checks.
     func start() {
-        guard !started else { return }; started = true
-        do { account = try credentials.read(server); restoreLastSave() }
-        catch { self.error = error.localizedDescription }
+        guard !started, !shuttingDown else { return }; started = true
+        restoreLogin()
+    }
+    func retryLoginRestore() {
+        guard started, !shuttingDown, !restoringLogin, !credentialsReady else { return }
+        restoreLogin()
+    }
+    func awaitLoginRestore() async {
+        await restoreTask?.value
+    }
+    private func restoreLogin() {
+        generation = UUID()
+        let token = generation
+        restoringLogin = true; credentialsReady = false; error = nil
+        let read = credentials.read, server = server
+        restoreTask = Task { [weak self] in
+            do {
+                let restored = try await read(server)
+                guard let self, self.isCurrent(token) else { return }
+                self.account = restored; self.restoreLastSave()
+                self.credentialsReady = true; self.restoringLogin = false
+            } catch {
+                guard let self, self.isCurrent(token) else { return }
+                self.restoringLogin = false; self.error = error.localizedDescription
+            }
+        }
+    }
+    private func isCurrent(_ token: UUID) -> Bool {
+        !shuttingDown && generation == token && !Task.isCancelled
+    }
+    private func beginOperation() -> UUID? {
+        guard credentialsReady, !busy, !shuttingDown, !Task.isCancelled else { return nil }
+        generation = UUID(); busy = true; error = nil
+        return generation
+    }
+    private func finishOperation(_ token: UUID) {
+        if !shuttingDown && generation == token { busy = false }
     }
 
     private func saveKey(for account: SyncAccount?) -> String {
@@ -123,43 +164,42 @@ struct SyncCredentials {
     /// An explicit Save captures exactly this moment. Later edits stay local
     /// until the next button press; an error never schedules a retry.
     func save() async {
-        guard !busy, !shuttingDown else { return }
-        busy = true; error = nil
-        defer { busy = false }
+        guard let token = beginOperation() else { return }
+        defer { finishOperation(token) }
         var savedLocally = false
         let signed = account
         do {
             let captured = snapshot()
             _ = try await files.save(captured, expectedDigest: nil, force: true)
+            guard isCurrent(token) else { return }
             savedLocally = true
             rememberSave(Date(), for: nil)
-            guard !shuttingDown else { return }
+            guard isCurrent(token) else { return }
             if let signed {
                 let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
-                guard !shuttingDown else { return }
+                guard isCurrent(token) else { return }
                 // Save deliberately replaces the remote version, but keeps a
                 // recoverable copy and uses CAS to reject a concurrent writer.
                 if let yaml = remote.yaml { try await files.backup(AppConfiguration.parse(yaml)) }
-                guard !shuttingDown else { return }
+                guard isCurrent(token) else { return }
                 let result: CloudSettings = try await request("settings", method: "PUT",
                     payload: ["yaml": CloudSettings.uploadYAML(try captured.yaml(), computer: computerName()),
                               "baseRevision": remote.revision], token: signed.token)
-                guard !shuttingDown else { return }
+                guard isCurrent(token) else { return }
                 rememberSave(result.updatedAt.map { Date(timeIntervalSince1970: $0) } ?? Date(), for: signed)
             }
         } catch {
-            handle(error, localSaveOnly: savedLocally && signed != nil)
+            await handle(error, token: token, signed: signed, localSaveOnly: savedLocally && signed != nil)
         }
     }
 
     /// Fetch only after the user presses Load; preview never applies or saves.
     func prepareCloudLoad() async -> CloudLoadPreview? {
-        guard !busy, !shuttingDown, let signed = account else { return nil }
-        busy = true; error = nil
-        defer { busy = false }
+        guard let signed = account, let token = beginOperation() else { return nil }
+        defer { finishOperation(token) }
         do {
             let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
-            guard !shuttingDown else { return nil }
+            guard isCurrent(token) else { return nil }
             guard let yaml = remote.yaml else {
                 throw ConfigurationError("No saved cloud settings. Press Save on the Mac you want to copy first.")
             }
@@ -167,15 +207,15 @@ struct SyncCredentials {
             return CloudLoadPreview(accountID: signed.userID, revision: remote.revision,
                 savedAt: remote.updatedAt.map { Date(timeIntervalSince1970: $0) },
                 computer: remote.savedByComputer)
-        } catch { handle(error); return nil }
+        } catch { await handle(error, token: token, signed: signed); return nil }
     }
 
     /// Load never uploads, and never silently replaces edits made while the
     /// read/request or backup was in flight. The previous app state is backed up.
     func load(expectedCloudSave: CloudLoadPreview? = nil) async {
-        guard !busy, !shuttingDown else { return }
-        busy = true; error = nil
-        defer { busy = false }
+        guard let token = beginOperation() else { return }
+        let signed = account
+        defer { finishOperation(token) }
         do {
             if let expectedCloudSave, expectedCloudSave.accountID != account?.userID {
                 throw ConfigurationError("The sync account changed. Press Load again to review its saved settings.")
@@ -185,8 +225,9 @@ struct SyncCredentials {
             let fingerprint = try before.syncFingerprint()
             let config: AppConfiguration
             let savedAt: Date?
-            if let signed = account {
+            if let signed {
                 let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
+                guard isCurrent(token) else { return }
                 if let expectedCloudSave, expectedCloudSave.revision != remote.revision {
                     throw ConfigurationError("The cloud save changed after you opened the confirmation. Nothing was loaded. Press Load again to review the new save.")
                 }
@@ -195,18 +236,19 @@ struct SyncCredentials {
                 savedAt = remote.updatedAt.map { Date(timeIntervalSince1970: $0) }
             } else {
                 guard let (local, _) = try await files.read() else { throw ConfigurationError("No settings.yaml found. Press Save to create it.") }
+                guard isCurrent(token) else { return }
                 config = local
                 savedAt = try await files.modificationDate()
             }
-            guard !shuttingDown else { return }
+            guard isCurrent(token) else { return }
             try config.validate()
             try ensureUnchanged(fingerprint)
             if try fingerprint != config.syncFingerprint() { try await files.backup(before) }
-            guard !shuttingDown else { return }
+            guard isCurrent(token) else { return }
             try ensureUnchanged(fingerprint)
             apply(config)
             rememberSave(savedAt, for: account)
-        } catch { handle(error) }
+        } catch { await handle(error, token: token, signed: signed) }
     }
 
     private func ensureUnchanged(_ fingerprint: String) throws {
@@ -234,48 +276,62 @@ struct SyncCredentials {
     }
 
     func authenticate(email: String, password: String, create: Bool) async {
-        guard !busy, !shuttingDown else { return }
-        busy = true; error = nil; defer { busy = false }
+        guard let token = beginOperation() else { return }
+        defer { finishOperation(token) }
         do {
             let signed: SyncAccount = try await request(create ? "register" : "login", method: "POST",
                 payload: ["email": email, "password": password], token: nil)
-            guard !shuttingDown else { return }
-            try credentials.save(signed, server)
+            guard isCurrent(token) else { return }
+            try await credentials.save(signed, server)
+            guard isCurrent(token) else { return }
             account = signed
             restoreLastSave()
             // Signing in is not permission to transfer any settings.
-        } catch { handle(error) }
+        } catch { await handle(error, token: token, signed: nil) }
     }
     func signOut() async {
-        guard !busy, !shuttingDown, let signed = account else { return }
-        busy = true; defer { busy = false }
+        guard let signed = account, let token = beginOperation() else { return }
+        defer { finishOperation(token) }
         var revoked = true
         do { let _: [String: Bool] = try await request("logout", method: "POST", payload: [:], token: signed.token) }
         catch { revoked = false }
+        guard isCurrent(token), account == signed else { return }
         do {
-            try credentials.remove(server)
+            try await credentials.remove(server)
+            guard isCurrent(token), account == signed else { return }
             account = nil; restoreLastSave()
             error = revoked ? nil : "Signed out locally. The server could not confirm revocation; that session expires within 30 days."
-        } catch { self.error = error.localizedDescription }
+        } catch { if isCurrent(token) { self.error = error.localizedDescription } }
     }
     func changePassword(current: String, new: String) async {
-        guard !busy, !shuttingDown, let signed = account else { return }
-        busy = true; error = nil; defer { busy = false }
+        guard let signed = account, let token = beginOperation() else { return }
+        defer { finishOperation(token) }
         do {
             let replacement: SyncAccount = try await request("password", method: "POST",
                 payload: ["currentPassword": current, "newPassword": new], token: signed.token)
-            guard !shuttingDown else { return }
-            try credentials.save(replacement, server); account = replacement; restoreLastSave()
-        } catch { handle(error) }
+            guard isCurrent(token), account == signed else { return }
+            try await credentials.save(replacement, server)
+            guard isCurrent(token), account == signed else { return }
+            account = replacement; restoreLastSave()
+        } catch { await handle(error, token: token, signed: signed) }
     }
-    private func handle(_ failure: Error, localSaveOnly: Bool = false) {
+    private func handle(_ failure: Error, token: UUID, signed: SyncAccount?, localSaveOnly: Bool = false) async {
+        guard isCurrent(token) else { return }
         var message = failure.localizedDescription
         if let api = failure as? SyncAPIError {
             if api.status == 409 { message = "Another Mac saved during this request. Nothing was overwritten in the cloud. Press Save again to retry, or Load to use its copy." }
             if api.status == 401 {
-                try? credentials.remove(server)
+                guard let signed, account == signed else {
+                    self.error = message
+                    return
+                }
+                var cleanupFailure: String?
+                do { try await credentials.remove(server) }
+                catch { cleanupFailure = error.localizedDescription }
+                guard isCurrent(token), account == signed else { return }
                 account = nil; restoreLastSave()
                 message = "Your session expired. Sign in again, then press Save or Load."
+                if let cleanupFailure { message += " The saved login could not be removed: " + cleanupFailure }
             }
         }
         error = (localSaveOnly ? "Saved to settings.yaml, but not to the cloud. " : "") + message
@@ -283,6 +339,9 @@ struct SyncCredentials {
 
     func prepareToQuit() async {
         shuttingDown = true
+        generation = UUID()
+        restoreTask?.cancel(); restoreTask = nil
+        restoringLogin = false; credentialsReady = false; busy = false
         vault.shutdown()
         session.invalidateAndCancel()
         // No final save, upload, or import on quit.

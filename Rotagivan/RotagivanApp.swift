@@ -37,6 +37,16 @@ struct RotagivanApp: App {
             if ProcessInfo.processInfo.arguments.contains("--initialize-voice-vault") {
                 UserDefaults.standard.set("pending", forKey: "vault.bootstrapStatus")
                 Task { @MainActor in
+                    await sync.awaitLoginRestore()
+                    guard sync.credentialsReady, sync.account != nil else {
+                        UserDefaults.standard.set("failed: saved login is unavailable", forKey: "vault.bootstrapStatus")
+                        return
+                    }
+                    await sync.vault.awaitLocalRestore()
+                    guard sync.vault.localReady else {
+                        UserDefaults.standard.set("failed: local vault is unavailable", forKey: "vault.bootstrapStatus")
+                        return
+                    }
                     await sync.vault.save(importEnvironment: true)
                     let receipt = sync.vault.error.map { "failed: " + $0 } ?? (sync.vault.hasKey ? "uploaded-encrypted" : "not-uploaded")
                     UserDefaults.standard.set(receipt, forKey: "vault.bootstrapStatus")

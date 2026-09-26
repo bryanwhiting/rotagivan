@@ -42,6 +42,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/AppOverridesView.swift" \
   "$script_dir/AppConfiguration.swift" \
   "$script_dir/ConfigurationSettingsView.swift" \
+  "$script_dir/CredentialWorker.swift" \
   "$script_dir/VaultCrypto.swift" \
   "$script_dir/CredentialVault.swift" \
   "$script_dir/CredentialVaultView.swift" \

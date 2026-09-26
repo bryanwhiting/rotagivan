@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 
-struct SyncAccount: Codable, Equatable {
+struct SyncAccount: Codable, Equatable, Sendable {
     var token: String
     var userID: String
     var email: String

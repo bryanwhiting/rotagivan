@@ -11,6 +11,8 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     @Published private(set) var status = "Sign in to use encrypted API keys."
     @Published private(set) var error: String?
     @Published private(set) var busy = false
+    @Published private(set) var restoringLocal = false
+    @Published private(set) var localReady = true
     @Published private(set) var hasKey = false
     @Published private(set) var unlocked = false
     @Published private(set) var ownCode: String?
@@ -18,19 +20,26 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     @Published private(set) var hasRemote = false
     @Published private(set) var savedAt: Date?
     @Published var recoveryCode: String?
-    private(set) var account: VaultAccount?
+    @Published private(set) var account: VaultAccount?
     private let server: String
     private var local: VaultLocal?
     private var remote: VaultRecord?
     private var generation = UUID()
+    private var restoreTask: Task<Void, Never>?
+    private var operationID: UUID?
+    private var stopped = false
     private var taskSession: URLSession
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
-    private let readLocal: (String, String) throws -> VaultLocal?
-    private let writeLocal: (VaultLocal, String, String) throws -> Void
+    private let readLocal: (String, String) async throws -> VaultLocal?
+    private let writeLocal: (VaultLocal, String, String) async throws -> Void
 
     init(server: String, transport: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
-         read: @escaping (String, String) throws -> VaultLocal? = { try VaultKeychain.read(server: $0, userID: $1) },
-         write: @escaping (VaultLocal, String, String) throws -> Void = { try VaultKeychain.save($0, server: $1, userID: $2) }) {
+         read: @escaping (String, String) async throws -> VaultLocal? = { server, userID in
+             try await CredentialWorker.shared.run { try VaultKeychain.read(server: server, userID: userID) }
+         },
+         write: @escaping (VaultLocal, String, String) async throws -> Void = { value, server, userID in
+             try await CredentialWorker.shared.run { try VaultKeychain.save(value, server: server, userID: userID) }
+         }) {
         self.server = server
         readLocal = read; writeLocal = write
         let config = URLSessionConfiguration.ephemeral
@@ -41,34 +50,63 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         self.transport = transport ?? { try await session.data(for: $0) }
     }
     func setAccount(_ account: VaultAccount?) {
+        guard !stopped else { return }
+        restoreTask?.cancel()
         generation = UUID()
+        operationID = nil; busy = false; restoringLocal = false; localReady = account == nil
         self.account = account; local = nil; remote = nil; recoveryCode = nil
         hasKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
         VaultKeychain.setActive(server: server, userID: account?.userID)
         status = account == nil ? "Sign in to use encrypted API keys." : "Load the vault, or import your key to create it."
-        if let account {
+        if account != nil { beginLocalRestore() }
+    }
+    private func beginLocalRestore() {
+        guard !stopped, let account else { return }
+        let token = generation
+        restoringLocal = true; localReady = false; error = nil
+        status = "Restoring local encrypted keys…"
+        restoreTask = Task { [weak self] in
+            guard let self else { return }
             do {
-                local = try readLocal(server, account.userID)
-                if let local, let record = local.cached, let master = local.masterKey {
+                let value = try await self.readLocal(self.server, account.userID)
+                try self.checked(token, account)
+                if let value, let record = value.cached, let master = value.masterKey {
                     _ = try VaultCrypto.open(record, master: master, userID: account.userID)
-                    remote = record; hasRemote = true; hasKey = true; unlocked = true
-                    savedAt = Date(timeIntervalSince1970: record.updatedAt)
-                    status = "Encrypted remotely · Decrypted locally"
+                    self.remote = record; self.hasRemote = true; self.hasKey = true; self.unlocked = true
+                    self.savedAt = Date(timeIntervalSince1970: record.updatedAt)
+                    self.status = "Encrypted remotely · Decrypted locally"
+                } else {
+                    self.status = "Load the vault, or import your key to create it."
                 }
-            } catch { self.error = "Local vault could not be unlocked. Load it or use your recovery code." }
+                self.local = value; self.localReady = true; self.restoringLocal = false
+            } catch {
+                guard self.generation == token, !self.stopped, self.account == account else { return }
+                self.restoringLocal = false; self.localReady = false
+                self.status = "Local encrypted keys are unavailable."
+                self.error = (error as? CredentialWorkerError)?.localizedDescription ?? "Local vault could not be restored. Retry before using the vault."
+            }
         }
     }
+    func retryLocalRestore() {
+        guard !stopped, !busy, !restoringLocal, !localReady, account != nil else { return }
+        beginLocalRestore()
+    }
+    func awaitLocalRestore() async { await restoreTask?.value }
     func shutdown() {
+        stopped = true; restoreTask?.cancel(); restoreTask = nil
         generation = UUID(); taskSession.invalidateAndCancel()
+        operationID = nil; busy = false; restoringLocal = false; localReady = false
+        account = nil; hasKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
         recoveryCode = nil; local = nil; remote = nil
         VaultKeychain.setActive(server: server, userID: nil)
     }
     private func checked(_ token: UUID, _ account: VaultAccount) throws {
-        guard generation == token, self.account == account else { throw VaultFailure.message("Account changed. Nothing was loaded.") }
+        guard !stopped, !Task.isCancelled, generation == token, self.account == account else { throw VaultFailure.message("Account changed. Nothing was loaded.") }
     }
-    private func persist(_ value: VaultLocal, account: VaultAccount, token: UUID) throws {
+    private func persist(_ value: VaultLocal, account: VaultAccount, token: UUID) async throws {
         try checked(token, account)
-        try writeLocal(value, server, account.userID)
+        try await writeLocal(value, server, account.userID)
+        try checked(token, account)
         local = value
     }
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
@@ -96,13 +134,16 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
-    private func run(_ operation: (VaultAccount, UUID) async throws -> Void) async {
-        guard !busy, let account else { error = "Sign into your Rotagivan account first."; return }
+    private func run(allowRecovery: Bool = false, _ operation: (VaultAccount, UUID) async throws -> Void) async {
+        guard !stopped, !busy else { return }
+        guard !restoringLocal, localReady || allowRecovery else { error = "Restore local encrypted keys before using the vault."; return }
+        guard let account else { error = "Sign into your Rotagivan account first."; return }
         busy = true; error = nil
         let token = generation
-        defer { busy = false }
+        let id = UUID(); operationID = id
+        defer { if token == generation, operationID == id { busy = false; operationID = nil } }
         do { try await operation(account, token) }
-        catch { if token == generation { self.error = (error as? VaultFailure)?.errorDescription ?? "Could not verify or unlock the encrypted vault. Nothing was loaded." } }
+        catch { if token == generation, operationID == id { self.error = (error as? VaultFailure)?.errorDescription ?? (error as? CredentialWorkerError)?.localizedDescription ?? "Could not verify or unlock the encrypted vault. Nothing was loaded." } }
     }
     private func fetch(account: VaultAccount, token: UUID) async throws -> VaultRemote {
         let snapshot: VaultRemote = try await request("", account: account, token: token)
@@ -125,12 +166,13 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         }
         return snapshot
     }
-    private func accept(_ record: VaultRecord, master: Data, account: VaultAccount, token: UUID) throws {
+    private func accept(_ record: VaultRecord, master: Data, account: VaultAccount, token: UUID) async throws {
+        try checked(token, account)
         _ = try VaultCrypto.open(record, master: master, userID: account.userID)
         var value = local ?? .fresh()
         value.masterKey = master; value.vaultID = record.vaultID; value.vaultPublicKey = record.publicKey
         value.highestRevision = max(value.highestRevision, record.revision); value.cached = record
-        try persist(value, account: account, token: token)
+        try await persist(value, account: account, token: token)
         remote = record; hasRemote = true; hasKey = true; unlocked = true; ownCode = nil
         savedAt = Date(timeIntervalSince1970: record.updatedAt)
         status = "Encrypted remotely · Decrypted locally"
@@ -139,12 +181,12 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         await run { account, token in
             let snapshot = try await self.fetch(account: account, token: token)
             guard let record = snapshot.vault else { self.status = "No encrypted vault yet. Import an API key on your first Mac."; return }
-            if let master = self.local?.masterKey { try self.accept(record, master: master, account: account, token: token); return }
+            if let master = self.local?.masterKey { try await self.accept(record, master: master, account: account, token: token); return }
             if let value = self.local, let device = snapshot.devices.first(where: { $0.id == (try? value.deviceID) }),
                let encoded = device.grant {
                 let grant = try JSONDecoder().decode(VaultGrant.self, from: Data(encoded.utf8))
                 let master = try VaultCrypto.ungrant(grant, record: record, userID: account.userID, local: value, device: device)
-                try self.accept(record, master: master, account: account, token: token)
+                try await self.accept(record, master: master, account: account, token: token)
             } else {
                 self.status = "Encrypted remotely · This Mac needs approval"
                 if let value = self.local { self.ownCode = VaultCrypto.code(try value.deviceID) }
@@ -169,14 +211,14 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             value.masterKey = master; value.vaultID = vaultID; value.vaultPublicKey = try VaultCrypto.signing(master, userID: account.userID, vaultID: vaultID).publicKey.rawRepresentation.base64EncodedString()
             // Save private material before the first network write. A lost reply
             // can be recovered with Load instead of generating a different key.
-            try self.persist(value, account: account, token: token)
+            try await self.persist(value, account: account, token: token)
             let baseRevision = snapshot.vault?.revision ?? 0
             let record = try VaultCrypto.seal(VaultPayload(openRouterAPIKey: key), master: master, userID: account.userID, vaultID: vaultID, revision: baseRevision + 1)
             let saved: VaultRecord = try await self.request("", method: "PUT", body: [
                 "vaultID": record.vaultID, "publicKey": record.publicKey, "ciphertext": record.ciphertext,
                 "signature": record.signature, "baseRevision": baseRevision], account: account, token: token)
             guard saved.vaultID == record.vaultID, saved.ciphertext == record.ciphertext, saved.revision == record.revision else { throw VaultFailure.message("Vault save could not be confirmed. Press Load to check.") }
-            try self.accept(saved, master: master, account: account, token: token)
+            try await self.accept(saved, master: master, account: account, token: token)
         }
     }
     func requestAccess() async {
@@ -185,7 +227,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             guard let record = snapshot.vault else { throw VaultFailure.message("Create the vault on your first Mac before requesting access.") }
             var value = self.local ?? .fresh()
             value.vaultID = record.vaultID; value.vaultPublicKey = record.publicKey
-            try self.persist(value, account: account, token: token)
+            try await self.persist(value, account: account, token: token)
             let publicKey = try value.devicePublicKey.base64EncodedString()
             let device: VaultDevice = try await self.request("/devices", method: "POST",
                 body: ["publicKey": publicKey, "name": String((Host.current().localizedName ?? "Mac").prefix(128))],
@@ -213,16 +255,17 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         }
     }
     func recover(_ code: String) async {
-        await run { account, token in
+        await run(allowRecovery: true) { account, token in
             let snapshot = try await self.fetch(account: account, token: token)
             guard let record = snapshot.vault else { throw VaultFailure.message("No remote vault to recover.") }
             let master = try VaultCrypto.recover(code)
-            try self.accept(record, master: master, account: account, token: token)
+            try await self.accept(record, master: master, account: account, token: token)
+            self.localReady = true
         }
     }
     func showRecoveryCode() {
+        guard localReady, !restoringLocal, !busy, !stopped else { return }
         guard let master = local?.masterKey else { error = "Unlock this Mac first."; return }
         recoveryCode = VaultCrypto.recoveryCode(master)
     }
 }
-

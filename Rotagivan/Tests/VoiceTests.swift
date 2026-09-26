@@ -28,6 +28,16 @@ private final class FakeVoiceCloud: VoiceCloudServing {
     }
 }
 
+@MainActor private final class CloudPreparationGate {
+    var pending: [CheckedContinuation<VoiceCloudServing, Never>] = []
+    func prepare() async -> VoiceCloudServing {
+        await withCheckedContinuation { pending.append($0) }
+    }
+    func resolve(_ cloud: VoiceCloudServing, at index: Int = 0) {
+        pending.remove(at: index).resume(returning: cloud)
+    }
+}
+
 @main struct VoiceTests {
     @MainActor static func main() async throws {
         let slack = VoiceRegisteredAction(action: .openApp(bundleID: "com.tinyspeck.slackmacgap", name: "Slack"),
@@ -138,6 +148,78 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         await Task.yield(); cancelled.cancel()
         try await Task.sleep(nanoseconds: 60_000_000)
         precondition(unusedMic.starts == 0, "Cancellation during permission must not open microphone")
+
+        let credentialGate = CloudPreparationGate()
+        let credentialSession = VoiceSession()
+        let credentialMic = FakeMicrophone()
+        let lateCloud = FakeVoiceCloud(decision)
+        var permissionRequests = 0
+        credentialSession.makeCloud = { await credentialGate.prepare() }
+        credentialSession.makeMicrophone = { credentialMic }
+        credentialSession.requestPermission = { permissionRequests += 1; return true }
+        credentialSession.start(catalog: catalog)
+        await Task.yield()
+        precondition(credentialGate.pending.count == 1 && credentialSession.phase == .preparing)
+        precondition(credentialSession.message.contains("credentials") && permissionRequests == 0 && credentialMic.starts == 0)
+        credentialSession.cancel()
+        credentialGate.resolve(lateCloud)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        precondition(credentialSession.phase == .cancelled && permissionRequests == 0 && credentialMic.starts == 0,
+            "Cancelled credential preparation cannot request permission or start recording")
+        credentialSession.start(catalog: catalog)
+        await Task.yield()
+        credentialSession.start(catalog: catalog)
+        await Task.yield()
+        precondition(credentialGate.pending.count == 2)
+        let currentCloud = FakeVoiceCloud(decision)
+        credentialGate.resolve(currentCloud, at: 1)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        precondition(credentialSession.phase == .listening && permissionRequests == 1 && credentialMic.starts == 1)
+        credentialGate.resolve(lateCloud)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        precondition(permissionRequests == 1 && credentialMic.starts == 1,
+            "A restarted session must ignore its previous late credential result")
+        credentialSession.finishListening()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        precondition(currentCloud.requests == 1 && lateCloud.requests == 0 && credentialSession.phase == .ready,
+            "Late credential results must not replace the current session's cloud client")
+        credentialSession.cancel()
+        let busySession = VoiceSession()
+        busySession.makeCloud = { throw VoiceError.message(CredentialWorkerError.busy.localizedDescription) }
+        busySession.makeMicrophone = { credentialMic }
+        busySession.requestPermission = { permissionRequests += 1; return true }
+        busySession.start(catalog: catalog)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        precondition(busySession.phase == .failed && busySession.message.contains("Keychain operation") && permissionRequests == 1,
+            "Busy credential work must show an actionable failure before permission or microphone access")
+        busySession.cancel()
+
+        let vaultServer = "https://fixture.invalid"
+        let vaultUser = "fixture-user"
+        let master = VaultCrypto.randomMaster()
+        let record = try VaultCrypto.seal(VaultPayload(openRouterAPIKey: "fixture-key"), master: master,
+            userID: vaultUser, vaultID: UUID().uuidString, revision: 1)
+        var local = VaultLocal.fresh(); local.masterKey = master; local.cached = record
+        let fixtureLocal = local
+        VaultKeychain.setActive(server: vaultServer, userID: vaultUser)
+        let fixtureKey = try VaultKeychain.currentAPIKey(readLocal: { _, _ in fixtureLocal })
+        precondition(fixtureKey == "fixture-key")
+        do {
+            _ = try VaultKeychain.currentAPIKey(readLocal: { _, _ in
+                VaultKeychain.setActive(server: vaultServer, userID: nil)
+                VaultKeychain.setActive(server: vaultServer, userID: vaultUser)
+                return fixtureLocal
+            })
+            fatalError("Accepted credential result across same-account sign-out/sign-in")
+        } catch { precondition(error.localizedDescription.contains("active account changed")) }
+        do {
+            _ = try VaultKeychain.currentAPIKey(readLocal: { _, _ in
+                VaultKeychain.setActive(server: vaultServer, userID: "different-user")
+                return nil
+            })
+            fatalError("Accepted missing-vault result after account change")
+        } catch { precondition(error.localizedDescription.contains("active account changed")) }
+        VaultKeychain.setActive(server: vaultServer, userID: nil)
 
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { AppExplorerSettings() }

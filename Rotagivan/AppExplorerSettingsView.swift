@@ -217,6 +217,7 @@ struct AppExplorerSettingsView: View {
     private let workspaceMap: AppExplorerSettings?
     private let workspaceLayerID: UUID?
     private let onWorkspaceLayer: ((UUID?) -> Void)?
+    private let onWorkspaceAddLayer: ((HUDLayerPosition) -> Void)?
     private var editingWindowManager: Bool { workspace && selectedBuiltIn == .windowManager }
     private var settings: AppExplorerSettings { baseSettings.projected(layerID: selectedLayerID) }
     private var favorites: [AppExplorerFavorite] { settings.favorites(at: groupPath) ?? [] }
@@ -289,12 +290,22 @@ struct AppExplorerSettingsView: View {
         return baseSettings.holdLayers?.first { resolved[$0.id] == position }
     }
 
+    private func addHUD(at position: HUDLayerPosition) {
+        var next = baseSettings
+        guard let id = next.assignEmptyHUD(at: position) else {
+            groupError = "This position is no longer available. Your existing HUDs have been kept."
+            return
+        }
+        if saveBase(next) { selectedLayerID = id; groupPath = []; previewEditing = nil }
+    }
+
     private var visualHUDPreview: some View {
         ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
             dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
             layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle,
             rootSettings: workspaceMap ?? baseSettings, selectedLayerID: workspaceMap == nil ? selectedLayerID : workspaceLayerID,
             onSelectLayer: onWorkspaceLayer ?? { id in selectedLayerID = id; groupPath = [] },
+            onAddLayer: onWorkspaceAddLayer ?? { position in addHUD(at: position) },
             selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },
             onDrag: { source, target in
                 if previewDrag == nil { previewDrag = ExplorerSlotDrag(source: source, path: groupPath, settings: settings) }
@@ -348,6 +359,7 @@ struct AppExplorerSettingsView: View {
         AppExplorerSettingsView(store: store, workspace: true, workspaceCanvasOnly: true,
             workspaceMap: baseSettings, workspaceLayerID: selectedLayerID,
             onWorkspaceLayer: { id in selectedLayerID = id; groupPath = [] },
+            onWorkspaceAddLayer: { position in addHUD(at: position) },
             configurationOverride: Binding(get: { baseSettings.windowEditor() }, set: { updated in
                 var next = baseSettings
                 guard next.saveWindowEditor(updated), next.hasValidFavorites else {
@@ -488,6 +500,7 @@ struct AppExplorerSettingsView: View {
          workspaceCanvasOnly: Bool = false,
          workspaceMap: AppExplorerSettings? = nil, workspaceLayerID: UUID? = nil,
          onWorkspaceLayer: ((UUID?) -> Void)? = nil,
+         onWorkspaceAddLayer: ((HUDLayerPosition) -> Void)? = nil,
          configurationOverride: Binding<AppExplorerSettings>? = nil, scopeTitle: String? = nil, windowManagerOnly: Bool = false, windowApplet: Bool = false,
          transferRoot: (() -> AppExplorerSettings)? = nil, transferSave: ((AppExplorerSettings) -> Bool)? = nil,
          transferPrefix: [ExplorerTilePathStep] = [], windowOwnerPath: [ExplorerTilePathStep]? = nil,
@@ -501,6 +514,7 @@ struct AppExplorerSettingsView: View {
         self.workspaceMap = workspaceMap
         self.workspaceLayerID = workspaceLayerID
         self.onWorkspaceLayer = onWorkspaceLayer
+        self.onWorkspaceAddLayer = onWorkspaceAddLayer
         self.configurationOverride = configurationOverride
         self.scopeTitle = scopeTitle
         self.windowManagerOnly = windowManagerOnly
@@ -1712,6 +1726,7 @@ struct ExplorerHUDSettingsPreview: View {
     var rootSettings: AppExplorerSettings? = nil
     var selectedLayerID: UUID? = nil
     var onSelectLayer: ((UUID?) -> Void)? = nil
+    var onAddLayer: ((HUDLayerPosition) -> Void)? = nil
     @Binding var selection: ExplorerSlot
     var onBack: () -> Void
     var onDrag: (ExplorerSlot, ExplorerSlot?) -> Void
@@ -1733,8 +1748,15 @@ struct ExplorerHUDSettingsPreview: View {
                 editingTile.wrappedValue = nil
                 select(node.layerID)
             } },
+            previewEmptyPositions: onAddLayer == nil ? [] : HUDLayerPosition.allCases.filter {
+                !(rootSettings?.resolvedHUDPositions.values.contains($0) ?? true)
+            },
+            previewOrigin: rootSettings?.hudMap(includingUnavailable: true).first { $0.layerID == selectedLayerID }?.point ?? .zero,
+            previewViewportSize: viewport.size,
+            onPreviewAddLayer: onAddLayer,
             onPreviewDrag: { source, target in editingTile.wrappedValue = nil; model.selected = target; onDrag(source, target) },
             onPreviewDrop: { source, target in onDrop(source, target); model.selected = selection })
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("hud-layout-preview")
             .overlayPreferenceValue(ExplorerTileAnchors.self) { anchors in
                 GeometryReader { proxy in

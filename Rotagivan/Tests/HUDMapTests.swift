@@ -71,6 +71,21 @@ import Foundation
             "Skip an empty cell but never substitute a diagonal HUD")
         precondition(HUDMapPoint.nearestIndex(in: gapOffsets, toward: .below) == nil)
         var builtIns = AppExplorerSettings()
+        var emptyMap = AppExplorerSettings(holdLayers: [ExplorerHoldLayer.empty(name: "Legacy right")])
+        let legacyID = emptyMap.holdLayers![0].id
+        for position in HUDLayerPosition.allCases where position != .right {
+            let newID = emptyMap.assignEmptyHUD(at: position)!
+            precondition(emptyMap.resolvedHUDPositions[newID] == position)
+            precondition(emptyMap.resolvedHUDPositions[legacyID] == .right,
+                "Adding a blank HUD must not move implicit legacy HUDs")
+            precondition(emptyMap.projected(layerID: newID).favorites.isEmpty)
+            let before = emptyMap
+            precondition(emptyMap.assignEmptyHUD(at: position) == nil && emptyMap == before,
+                "A stale empty-position click must never overwrite a HUD")
+        }
+        precondition(emptyMap.hudMap().count == 9 && emptyMap.hasValidFavorites)
+        let emptyRoundTrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(emptyMap))
+        precondition(emptyRoundTrip == emptyMap, "Blank HUDs and positions survive saving")
         for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
             let id = builtIns.assignBuiltIn(kind, at: position)!
             precondition(builtIns.holdLayers?.first { $0.id == id }?.builtIn == kind)

@@ -1848,6 +1848,10 @@ struct AppExplorerView: View {
     // Keep live HUD presentation and all legacy inline previews unchanged.
     var settingsWorkspace = false
     var onPreviewLayer: ((String) -> Void)? = nil
+    var previewEmptyPositions: [HUDLayerPosition] = []
+    var previewOrigin: HUDMapPoint = .zero
+    var previewViewportSize: CGSize? = nil
+    var onPreviewAddLayer: ((HUDLayerPosition) -> Void)? = nil
     var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
@@ -2011,16 +2015,56 @@ struct AppExplorerView: View {
 
     @ViewBuilder private var carouselBackdrop: some View {
         ZStack {
+            if isPreview, let onPreviewAddLayer {
+                ForEach(previewEmptyPositions) { position in
+                    let offset = position.point - previewOrigin
+                    let layout = emptyHUDLayout(offset)
+                    Button { onPreviewAddLayer(position) } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: "plus").font(.system(size: 22, weight: .light))
+                            if layout.diameter >= 85 { Text("Add HUD").font(.system(size: 11, weight: .medium)) }
+                        }
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: layout.diameter, height: layout.diameter)
+                        .background(Circle().fill(Color.primary.opacity(0.035)))
+                        .overlay(Circle().strokeBorder(Color.secondary.opacity(0.5),
+                            style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add a HUD layer at \(position.title.lowercased())")
+                    .accessibilityLabel("Add HUD at \(position.title.lowercased())")
+                    .accessibilityIdentifier("hud-add-position-\(position.rawValue)")
+                    .offset(layout.offset)
+                }
+            }
             ForEach(model.carouselPreviews) { preview in
                 carouselGhost(preview)
             }
         }
-        .allowsHitTesting(isPreview && onPreviewLayer != nil)
-        .accessibilityHidden(!isPreview || onPreviewLayer == nil)
+        .allowsHitTesting(isPreview && (onPreviewLayer != nil || onPreviewAddLayer != nil))
+        .accessibilityHidden(!isPreview || (onPreviewLayer == nil && onPreviewAddLayer == nil))
     }
 
     private var cameraX: Double { animates ? Double(model.orbitOffset.x) * model.orbitProgress : 0 }
     private var cameraY: Double { animates ? Double(model.orbitOffset.y) * model.orbitProgress : 0 }
+
+    /// Nearby add controls stay inside the settings viewport. Cardinal gaps
+    /// can be narrow, so use a smaller plus circle rather than cover the HUD.
+    /// Distant cells retain their map projection instead of piling up at edges.
+    private func emptyHUDLayout(_ offset: HUDMapPoint) -> (diameter: CGFloat, offset: CGSize) {
+        let projection = HUDMapProjection(x: Double(offset.x), y: Double(offset.y))
+        var diameter = CGFloat(286 * projection.scale)
+        var x = CGFloat(projection.offsetX), y = CGFloat(projection.offsetY)
+        if let size = previewViewportSize, abs(offset.x) <= 1, abs(offset.y) <= 1 {
+            if offset.x == 0 { diameter = min(diameter, max(44, size.height / 2 - 155 - 16)) }
+            if offset.y == 0 { diameter = min(diameter, max(44, size.width / 2 - 209 - 16)) }
+            let limitX = max(0, size.width / 2 - diameter / 2 - 8)
+            let limitY = max(0, size.height / 2 - diameter / 2 - 8)
+            x = min(limitX, max(-limitX, x)); y = min(limitY, max(-limitY, y))
+        }
+        return (diameter, CGSize(width: x, height: y))
+    }
 
     private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
         Group {

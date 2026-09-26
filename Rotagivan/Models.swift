@@ -1100,6 +1100,22 @@ struct AppExplorerSettings: Codable, Equatable {
         }
         return result
     }
+    /// Create a blank HUD without displacing implicit legacy assignments.
+    @discardableResult mutating func assignEmptyHUD(at position: HUDLayerPosition) -> UUID? {
+        let positions = resolvedHUDPositions
+        guard !positions.values.contains(position), (holdLayers ?? []).count < 128 else { return nil }
+        var next = self
+        var layers = next.holdLayers ?? []
+        for index in layers.indices { layers[index].position = positions[layers[index].id] }
+        var layer = ExplorerHoldLayer.empty(name: position.title + " HUD")
+        layer.position = position
+        layers.append(layer)
+        next.holdLayers = layers
+        guard next.hasValidFavorites else { return nil }
+        self = next
+        return layer.id
+    }
+
     @discardableResult mutating func assignTemplate(_ template: HUDLayerTemplate, at position: HUDLayerPosition) -> UUID? {
         let positions = resolvedHUDPositions
         guard !positions.values.contains(position), (holdLayers ?? []).count < 128 else { return nil }

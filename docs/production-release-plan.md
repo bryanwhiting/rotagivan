@@ -85,6 +85,7 @@ Some pieces already exist. The checklist groups them into complete product exper
   - Keep every layer reachable at narrow widths; retain shared rendering, tile popovers, drag/drop, and save paths.
   - Show Window Manager in the same workspace instead of adding a second editor below it.
   - Verify the actual settings page at normal and narrow window sizes, not only the standalone preview.
+  - [x] Show clickable empty circles for vacant HUD positions. Clicking creates and selects a blank HUD in that position without moving existing layers; nearby circles fit the visible settings canvas, including the minimum window size.
 - [x] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
 - [x] Default inverted two-finger navigation on, applying inversion consistently to every direction—including diagonals.
 - [ ] Refine pointer response for smoother low-speed movement and a gentler acceleration ramp, without adding noticeable lag.
@@ -200,10 +201,17 @@ The per-computer application index now warms at startup independently of setting
 
 ### Remaining implementation boundaries
 
-- Temporary notes are being implemented as memory-only, 30-minute notes with shared Voice settings/HUD controls. The user explicitly permits OpenRouter transcription, but notes must never influence app/action choices or be sent to Jev. Dictation is a separate transcription-only flow with explicit review and save. Opening the note editor stops action voice capture and prevents it restarting while editing. Earlier intention/on-device draft checks are superseded; the new note-only implementation still needs final verification. Candidate version: 1.1.182 (184); installed version remains 1.1.181 (183).
+- Temporary notes are being implemented as memory-only, 30-minute notes with shared Voice settings/HUD controls. The user explicitly permits OpenRouter transcription, but notes must never influence app/action choices or be sent to Jev. Dictation is a separate transcription-only flow with explicit review and save. Opening the note editor stops action voice capture and prevents it restarting while editing. Earlier intention/on-device draft checks are superseded; the new note-only implementation still needs final verification. These unfinished local changes are excluded from the HUD-circle release, 1.1.183 (185).
 - Application commands support named physical shortcuts and explicitly app-targeted HTTP(S) URLs. Browser-profile selection, existing-tab reuse, and browser-history indexing remain unfinished. The chosen application currently decides which window/profile receives a URL.
 - The secrets vault is encrypted, but settings encryption remains unfinished: local YAML/backups, settings in UserDefaults, and remote settings storage require coordinated migration. Encrypting only an export would not complete this feature.
 
 Run `zsh Rotagivan/test.sh` to reproduce the suite. A passing local suite is not a claim of cross-Mac validation, provider latency guarantees, notarization, or public-release readiness. Those gates remain unchecked.
 
 This document tracks reviewed implementation and remaining release work; unchecked items are not claimed complete.
+
+### HUD empty-position follow-up — 1.1.183 (185)
+
+- Vacant settings-map positions show empty plus circles. Clicking creates a blank HUD at that exact position, saves it, and selects it for tile editing. Existing explicit and legacy positions are preserved; occupied positions cannot be overwritten by stale clicks.
+- Nearby add controls fit the visible viewport without resizing the selected HUD. Cardinal gaps use compact plus circles when space is tight. Live HUD rendering/navigation is unchanged.
+- Focused map, template, settings, layout-preview, and native workspace checks passed. Native mouse tests filled all eight positions at the minimum window size; screenshot review verified fully visible corner circles. Captures: `/private/tmp/rotagivan-hud-empty-circles/Rotagivan/build/hud-verification`.
+- Built, installed with `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Persistent certificate-pinned signing verified; built/installed executable SHA-256 matches `cda84f90492af7856389e9f1d8113e859f2740c73a4bb3c21747432ac7f68c74`. Compiled sources were unchanged during the build. Unfinished voice-note work was isolated from this release. This was focused HUD verification, not a fresh run of the entire regression suite.

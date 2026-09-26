@@ -165,6 +165,57 @@ private struct WorkspaceViewportProbe: ViewModifier {
         }
         settle()
         var baseline = store.settings.appExplorer!
+        // Vacant map cells are actual, clickable circles, not decorative hints.
+        var sparse = baseline
+        sparse.holdLayers = layers.filter { layer in
+            layer.position.map { [.left, .right, .top, .bottom].contains($0) } ?? false
+        }
+        store.settings.appExplorer = sparse; settle()
+        try capture("hud-workspace-empty-circles")
+        let corners: [HUDLayerPosition] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+        for position in corners {
+            let circle = frame(find("hud-add-position-" + position.rawValue))
+            let viewport = panel.convertToScreen(host.convert(viewportGeometry.rect!, to: nil))
+            precondition(viewport.contains(circle), "Empty corner circles must not be clipped by the canvas")
+        }
+        precondition(!all(host).contains { $0.accessibilityIdentifier?() == "hud-add-position-right" },
+            "Occupied positions must not show add circles")
+        try capture("hud-workspace-empty-circles")
+        let target = frame(find("hud-add-position-topLeft"))
+        send(.leftMouseDown, screen: NSPoint(x: target.midX, y: target.midY))
+        send(.leftMouseUp, screen: NSPoint(x: target.midX, y: target.midY)); settle()
+        guard let added = store.settings.appExplorer?.holdLayers?.first(where: { $0.position == .topLeft }) else {
+            preconditionFailure("Clicking the top-left circle must create a HUD at that position")
+        }
+        precondition(added.favorites.isEmpty && added.builtIn == nil)
+        let selectedButton = find("hud-layer-button-" + added.id.uuidString) as? NSObject
+        let selectedValue = selectedButton?.perform(NSSelectorFromString("accessibilityValue"))?.takeUnretainedValue() as? String
+        precondition(selectedValue == "Selected",
+            "New HUD must become the selected editable layer")
+        precondition(!all(host).contains { $0.accessibilityIdentifier?() == "hud-add-position-topLeft" })
+        precondition(sparse.holdLayers!.allSatisfy { existing in
+            store.settings.appExplorer!.holdLayers!.contains(existing)
+        }, "Adding a HUD must preserve every existing layer")
+        try capture("hud-workspace-added-corner")
+        press("hud-layer-button-main")
+        for position in corners.dropFirst() { press("hud-add-position-" + position.rawValue); press("hud-layer-button-main") }
+        precondition(!all(host).contains { ($0.accessibilityIdentifier?() ?? "").hasPrefix("hud-add-position-") },
+            "No add circles remain when all eight positions are occupied")
+        var vacant = baseline; vacant.holdLayers = []
+        store.settings.appExplorer = vacant
+        panel.setContentSize(NSSize(width: 860, height: 680)); settle()
+        try capture("hud-workspace-all-empty-min")
+        for position in HUDLayerPosition.allCases {
+            let circle = frame(find("hud-add-position-" + position.rawValue))
+            let viewport = panel.convertToScreen(host.convert(viewportGeometry.rect!, to: nil))
+            precondition(viewport.contains(circle), "Every adjacent add circle must fit the minimum viewport")
+            send(.leftMouseDown, screen: NSPoint(x: circle.midX, y: circle.midY))
+            send(.leftMouseUp, screen: NSPoint(x: circle.midX, y: circle.midY)); settle()
+            precondition(store.settings.appExplorer!.resolvedHUDPositions.values.contains(position),
+                "Every empty map position must support an actual mouse click")
+            press("hud-layer-button-main")
+        }
+        store.settings.appExplorer = baseline; settle()
         // Capture the supported minimum before assertions, including the extra
         // Window Manager toolbar, so a failure still leaves useful visual evidence.
         panel.setContentSize(NSSize(width: 860, height: 680)); settle()

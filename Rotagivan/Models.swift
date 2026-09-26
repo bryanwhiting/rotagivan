@@ -584,6 +584,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
+    case activateVoiceMode
     case toggleStageManager
     case toggleDock, previousApp, nextAppWindow, previousAppWindow, appExpose, hideApp, hideOtherApps
     case moveWindowPreviousDesktop, moveWindowNextDesktop
@@ -591,6 +592,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     case maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
     var title: String {
         switch self {
+        case .activateVoiceMode: return "Activate voice mode"
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
         case .appWindows: return "Show current app’s windows"
@@ -618,6 +620,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     }
     var symbol: String {
         switch self {
+        case .activateVoiceMode: return "mic.fill"
         case .windowManager: return "rectangle.split.2x2"
         case .mediaControls: return "speaker.wave.2.fill"
         case .appWindows: return "macwindow.on.rectangle"
@@ -645,6 +648,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     }
     var description: String {
         switch self {
+        case .activateVoiceMode: return "Open voice mode in the main HUD to speak an action."
         case .toggleStageManager: return "Turn Stage Manager on or off using your macOS shortcut. First enable Turn Stage Manager on/off in System Settings → Keyboard → Keyboard Shortcuts → Mission Control. No shortcut is assigned automatically."
         case .toggleDock: return "Toggle automatic hiding of the Dock with Option–Command–D."
         case .previousApp: return "Switch to the most recently used other app with Command–Tab. Repeating toggles between the last two apps."
@@ -1042,6 +1046,8 @@ struct AppExplorerSettings: Codable, Equatable {
     var windowManager: ExplorerWindowSettings? = nil
     var voiceAutoDecide: Bool? = nil
     var resolvedVoiceAutoDecide: Bool { voiceAutoDecide ?? false }
+    var voiceAutoStart: Bool? = nil
+    var resolvedVoiceAutoStart: Bool { voiceAutoStart ?? false }
     var swipeDirection: HUDSwipeDirection? = nil
     var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
     var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }

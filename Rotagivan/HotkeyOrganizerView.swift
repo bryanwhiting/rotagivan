@@ -57,6 +57,7 @@ struct HotkeyOrganizerView: View {
     @State private var actionSubgroupFilter = "All subgroups"
     @State private var vocabularyRow: ActionTableRow?
     @State private var overrideRow: ActionTableRow?
+    @State private var managingOverrides = false
     @State private var search = ""
     @State private var searchShortcut: RecordedShortcut?
     @State private var tapFilter: AppGestureTrigger?
@@ -105,6 +106,11 @@ struct HotkeyOrganizerView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Browse actions and their keybindings. Search or filter by group, then use a row’s menu to assign or edit.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button { managingOverrides = true } label: {
+                Label("Application overrides…", systemImage: "app.badge")
+            }
+                .help("Manage application-specific actions, including disabled overrides")
+                .accessibilityIdentifier("manage-application-overrides")
             Picker("View", selection: $tab) {
                 Text("Actions").tag("Dictionary")
                 Text("Conflicts").tag("Conflicts")
@@ -146,6 +152,12 @@ struct HotkeyOrganizerView: View {
             VStack(alignment: .leading) {
                 AppOverridesView(store: store, initialBundleID: row.appBundleID ?? "com.google.Chrome")
                 HStack { Spacer(); Button("Done") { overrideRow = nil }.keyboardShortcut(.defaultAction) }
+            }.padding(24).frame(width: 720, height: 580)
+        }
+        .sheet(isPresented: $managingOverrides) {
+            VStack(alignment: .leading) {
+                AppOverridesView(store: store)
+                HStack { Spacer(); Button("Done") { managingOverrides = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 720, height: 580)
         }
         .sheet(item: $editingBinding) { binding in

@@ -10,6 +10,8 @@ import SwiftUI
         let items = ActionPickerCatalog.make(dictionary: [macro], layers: [], destinations: [], applications: apps, allowPointer: true)
         precondition(Set(items.map(\.id)).count == items.count)
         precondition(items.allSatisfy { !$0.detail.isEmpty && $0.action.isValid })
+        precondition(items.filter { $0.action == .command(.activateVoiceMode) }.count == 1)
+        precondition(ActionPickerCatalog.search(items, query: "voice", category: .hud).first?.action == .command(.activateVoiceMode))
         precondition(ActionPickerCatalog.search(items, query: "research", category: .all).first?.action.macroID == macro.id)
         precondition(ActionPickerCatalog.search(items, query: "slack", category: .apps).first?.action.bundleID == "test.slack")
         precondition(ActionPickerCatalog.search(items, query: "volume", category: .media).count == 2)

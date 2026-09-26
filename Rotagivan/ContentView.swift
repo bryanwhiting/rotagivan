@@ -1,6 +1,70 @@
 import ServiceManagement
 import SwiftUI
 
+struct VoiceModeSettingsView: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject private var index = VoiceApplicationIndex.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+        GroupBox("Action matching") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Start listening when HUD opens", isOn: Binding(
+                    get: { store.settings.appExplorer?.resolvedVoiceAutoStart ?? false },
+                    set: { enabled in
+                        var settings = store.settings.appExplorer ?? AppExplorerSettings()
+                        settings.voiceAutoStart = enabled
+                        store.settings.appExplorer = settings
+                    }))
+                    .accessibilityIdentifier("voice-auto-start")
+                Text("Off by default. When enabled, opening the main HUD requests microphone access and starts listening automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Auto-decide", isOn: Binding(
+                    get: { store.settings.appExplorer?.resolvedVoiceAutoDecide ?? false },
+                    set: { enabled in
+                        var settings = store.settings.appExplorer ?? AppExplorerSettings()
+                        settings.voiceAutoDecide = enabled
+                        store.settings.appExplorer = settings
+                    }))
+                    .accessibilityIdentifier("voice-auto-decide")
+                Text("Off by default: choose among three matches in the voice HUD, then press Space or Enter. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Assign Activate voice mode and edit voice keywords in Actions.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        GroupBox("Application index") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Installed applications are indexed on this Mac for voice matching.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    if index.isRefreshing {
+                        ProgressView().controlSize(.small)
+                        Text("Indexing applications…")
+                    } else {
+                        Text("\(index.applications.count) applications")
+                    }
+                    Spacer()
+                    Button("Reindex now") { Task { await index.refresh(force: true) } }
+                        .disabled(index.isRefreshing)
+                }
+                if let date = index.lastRefreshedAt {
+                    Text("Last indexed \(date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let error = index.refreshError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        }
+        .font(.system(size: 12))
+        .accessibilityIdentifier("voice-mode-settings")
+        .task { await index.load() }
+    }
+}
+
 struct ProfileNameEditor: View {
     @State var name: String
     var onSave: (String) -> Bool
@@ -55,14 +119,14 @@ struct ContentView: View {
     private let layerColumnWidth: CGFloat = 468
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
-        ("Calibration", "dial.low"), ("Actions", "bolt.circle"), ("App overrides", "app.badge"),
+        ("Actions", "bolt.circle"), ("Voice mode", "waveform"),
         ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
     private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "HUD", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros", "Macros"].contains(initialSection) ? "Actions" :
+        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides"].contains(initialSection) ? "Actions" :
             ["App Explorer", "Window Manager", "Layers", "Layer actions", "Tap actions"].contains(initialSection) ? "HUD" : initialSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
@@ -179,6 +243,7 @@ struct ContentView: View {
                         .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityAddTraits(selection == title ? .isSelected : [])
+                    .accessibilityIdentifier("settings-section-\(title)")
             }
             Spacer()
             Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
@@ -190,7 +255,7 @@ struct ContentView: View {
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if selection != "HUD" && selection != "Calibration" && selection != "Pointer & scrolling" {
+                if selection != "HUD" && selection != "Pointer & scrolling" {
                     Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                     Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
                         .font(.callout).foregroundStyle(.secondary)
@@ -212,9 +277,14 @@ struct ContentView: View {
         case "General": general
         case "Devices": devices
         case "HUD": hudAndTapSettings
-        case "Actions": HotkeyOrganizerView(store: store)
-        case "Calibration": CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
-        case "App overrides": AppOverridesView(store: store)
+        case "Actions":
+            HotkeyOrganizerView(store: store)
+            DisclosureGroup("Tap calibration") {
+                CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
+                    .padding(.top, 12)
+            }
+            .accessibilityIdentifier("tap-calibration")
+        case "Voice mode": VoiceModeSettingsView(store: store)
         case "Pointer & scrolling": pointerSettings
         default: profiles
         }
@@ -537,7 +607,7 @@ struct ContentView: View {
                     }), resolveGestures: { store.settings.applyingActionBindings(to: $0) })
                 Text("Double and triple taps replace shorter tap actions. Triple taps use the double-tap delay between taps; enabling them delays double-tap actions while waiting for a third tap.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Tune tap timing, movement thresholds, and all tap + swipe families in Calibration.")
+                Text("Tune tap timing, movement thresholds, and all tap + swipe families in Actions → Tap calibration.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -581,18 +651,6 @@ struct ContentView: View {
             Divider()
             Section {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
-            }
-            Divider()
-            Section("Voice mode") {
-                Toggle("Auto-decide", isOn: Binding(
-                    get: { store.settings.appExplorer?.resolvedVoiceAutoDecide ?? false },
-                    set: { enabled in
-                        var settings = store.settings.appExplorer ?? AppExplorerSettings()
-                        settings.voiceAutoDecide = enabled
-                        store.settings.appExplorer = settings
-                    }))
-                Text("Off by default: choose among three matches in the voice HUD, then press Space or Enter. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
             ConfigurationSettingsView(store: store, hid: hid)

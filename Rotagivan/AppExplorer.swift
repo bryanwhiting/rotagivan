@@ -11,12 +11,14 @@ import OSLog
     func show(waitingForLift: Bool)
     func showWindowManager(waitingForLift: Bool)
     func showLayer(_ id: UUID, waitingForLift: Bool)
+    func activateVoiceMode()
     func process(_ report: TrackpadReport)
     func dismiss()
     func setAlternateHeld(_ held: Bool)
 }
 extension AppExplorerPresenting {
     func showLayer(_ id: UUID, waitingForLift: Bool) {}
+    func activateVoiceMode() {}
     var onPresentationChanged: (() -> Void)? { get { nil } set {} }
     var isEditing: Bool { false }
     func setAlternateHeld(_ held: Bool) {}
@@ -284,7 +286,7 @@ extension AppExplorerPresenting {
         }
     }
 
-    private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil) {
+    private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil, autoStartVoice: Bool = true) {
         guard !isVisible else { return }
         resetLocalGesture()
         cursorCentering.cancel()
@@ -361,6 +363,9 @@ extension AppExplorerPresenting {
         }
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
+        if autoStartVoice, !windowManager, layerID == nil, configuration().resolvedVoiceAutoStart {
+            beginVoiceMode()
+        }
     }
 
     func setAlternateHeld(_ held: Bool) {
@@ -407,6 +412,10 @@ extension AppExplorerPresenting {
 
     private func performBoundAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard action.isValid, contextIsValid?() != false else { return }
+        if action.kind == .command, action.command == .activateVoiceMode {
+            activateVoiceMode()
+            return
+        }
         if action.kind == .hudNavigation, let direction = action.hudNavigation {
             _ = navigateHUD(direction)
             return
@@ -1273,6 +1282,7 @@ extension AppExplorerPresenting {
 
     private func performWindowCommand(_ command: AppExplorerAction) {
         guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        if command == .activateVoiceMode { activateVoiceMode(); return }
         if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
         guard let target = tilingTarget else {
             model.message = "No controllable window. Enable Accessibility and open Explorer over a window."; return
@@ -1310,9 +1320,20 @@ extension AppExplorerPresenting {
     }
 
     private func currentVoiceCatalog() -> [VoiceRegisteredAction] {
-        if let voiceCatalog { return voiceCatalog() }
+        // Starting voice is an input action; offering it as a spoken output can
+        // repeatedly restart recording when automatic confirmation is enabled.
+        if let voiceCatalog { return voiceCatalog().filter { $0.action.command != .activateVoiceMode } }
         guard let store = editingStore else { return [] }
         return VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications, activeBundleID: sourceBundleID)
+            .filter { $0.action.command != .activateVoiceMode }
+    }
+
+    /// A reusable action always targets the main HUD and preserves its input owner.
+    func activateVoiceMode() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        guard model.voiceSession == nil else { return }
+        switchLayer(nil)
+        beginVoiceMode()
     }
 
     func beginVoiceMode() {
@@ -1483,7 +1504,7 @@ extension AppExplorerPresenting {
         let waitingForLift = contactIsDown
         dismiss()
         if wasWindow, let originalPID { _ = NSRunningApplication(processIdentifier: originalPID)?.activate(options: []) }
-        show(waitingForLift: waitingForLift)
+        show(waitingForLift: waitingForLift, windowManager: false, autoStartVoice: false)
         if wasWindow {
             sourcePID = originalPID; tilingTarget = originalTarget
             model.showingWindowManager = true; model.directWindowManager = direct

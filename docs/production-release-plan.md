@@ -1,6 +1,7 @@
 # Rotagivan production release plan
 
-Status: proposed feature plan for review  
+Status: implementation in progress; checked items have automated verification
+
 Date: September 26, 2026
 
 ## Product direction
@@ -12,24 +13,24 @@ Some pieces already exist. The checklist groups them into complete product exper
 ## 1. Unified actions and application commands
 
 - [ ] Make **Actions** the single place to manage actions, hotkeys, gestures, and application-specific behavior.
-- [ ] Organize application actions as **Applications → Slack**, **Applications → Chrome**, etc., with application icons.
-- [ ] Finish moving app overrides into Actions, then remove the separate **App overrides** sidebar item without losing existing assignments.
+- [x] Organize application actions as **Applications → Slack**, **Applications → Chrome**, etc., with application icons.
+- [x] Finish moving app overrides into Actions, then remove the separate **App overrides** sidebar item without losing existing assignments.
 - [ ] Provide named, documented default commands for supported apps.
 - [ ] Support user-created application commands:
   - Chrome: open a URL, history, bookmarks, or a numbered tab.
   - Slack: activity, threads, search, channels, and other shortcuts.
-- [ ] Keep reserved action descriptions separate from editable keyword sets and example phrases.
-- [ ] Make app-specific commands available to voice only in the appropriate app; recheck the app before execution.
-- [ ] Make **Activate voice mode** a normal action assignable to a tap, hotkey, or HUD tile.
+- [x] Keep reserved action descriptions separate from editable keyword sets and example phrases.
+- [x] Make app-specific commands available to voice only in the appropriate app; recheck the app before execution.
+- [x] Make **Activate voice mode** a normal action assignable to a tap, hotkey, or HUD tile.
 
 ## 2. Voice as a first-class HUD experience
 
 - [ ] Replace the voice modal/card with a proper HUD that looks and behaves like other HUD layers.
-- [ ] Show live audio activity, transcription, processing status, and ranked action matches with scores.
-- [ ] Use four directional tiles: best match, second match, third match, and cancel.
-- [ ] Keep manual confirmation as the default; retain an explicit **Auto-decide** option.
-- [ ] Add a setting to start listening automatically when the HUD opens.
-- [ ] Create a dedicated **Voice mode** sidebar page and move all voice settings out of General.
+- [x] Show live audio activity, transcription, processing status, and ranked action matches with scores.
+- [x] Use four directional tiles: best match, second match, third match, and cancel.
+- [x] Keep manual confirmation as the default; retain an explicit **Auto-decide** option.
+- [x] Add a setting to start listening automatically when the HUD opens.
+- [x] Create a dedicated **Voice mode** sidebar page and move all voice settings out of General.
 - [ ] Reduce latency through streaming transcription, connection reuse, and incremental matching where supported.
 - [ ] Verify whether Jev supports the desired streaming/WebSocket workflow; provide a responsive fallback if it doesn’t.
 - [ ] Make microphone permissions, cancellation, timeouts, connection failures, and “no match” states clear and safe.
@@ -41,7 +42,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Build a per-computer index of installed applications, bookmarks, and optionally browser history.
 - [ ] Refresh efficiently at startup and when relevant data changes; add **Reindex now**, status, and error reporting.
 - [ ] Keep machine-specific paths and browser data local; sync user preferences and action vocabulary separately.
-- [ ] Make newly installed applications discoverable without restarting Rotagivan.
+- [x] Make newly installed applications discoverable without restarting Rotagivan.
 - [ ] Add Chrome recent/open-tab search and a **Recent tabs** HUD.
 - [ ] When opening a bookmark or URL, focus an existing matching tab when possible instead of creating duplicates.
 - [ ] Define browser-profile and URL-matching behavior so the wrong account or tab isn’t selected.
@@ -66,12 +67,12 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Define these locations as encrypted storage; decrypt only locally when needed.
 - [ ] Keep encryption keys out of those files, using protected local key storage.
 - [ ] Preserve cross-Mac enrollment and recovery without requiring iCloud or both Macs to be online together.
-- [ ] Keep sync explicitly save/load driven, showing the saving computer and timestamp.
+- [x] Keep sync explicitly save/load driven, showing the saving computer and timestamp.
 - [ ] Migrate existing data safely, with recovery and clear failure messages.
 
 ## 6. Settings and input cleanup
 
-- [ ] Move **Calibration** under Actions and rename it **Tap calibration**.
+- [x] Move **Calibration** under Actions and rename it **Tap calibration**.
 - [ ] Remove pointer layers from Pointer & scrolling while preserving the effective pointer behavior.
 - [ ] Redesign HUD settings around the selected, centered HUD with direct layer and tile editing.
 - [ ] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
@@ -97,4 +98,16 @@ Some pieces already exist. The checklist groups them into complete product exper
 4. Add browser intelligence.
 5. Run an external beta and prepare public distribution.
 
-This document is a review checklist, not authorization to implement every item or a claim that release readiness has been verified.
+## Verification record
+
+The first production-plan batch is built and installed as **1.1.175 (177)**. The installed executable matches the certificate-pinned signed build, and the running process is under `/Applications/Rotagivan.app`. GPT-6 Sol agents implemented bounded tasks, followed by parent integration review and the repository regression suite.
+
+- `ActionTableTests`: application groups, reserved descriptions, keyword sets, app scoping, and JSON/YAML preservation.
+- `VoiceTests`, `ActionPickerTests`, `ActionBindingRuntimeTests`: reusable activation through keyboard, tap, and actual HUD tile selection; no duplicate recording; opt-in main-HUD auto-start; no auto-start on layer navigation or Window Manager; active-app revalidation; manual confirmation and cancellation.
+- `VoiceApplicationIndexTests`, `ExplorerApplicationCatalogTests`: off-main scanning, coalescing, 60-second freshness, explicit refresh, removals, error recovery, and immediate cached return during a blocked background scan. First indexing still waits for the initial snapshot; filesystem event watching and browser indexing remain open.
+- `ReleaseSettingsTests`: rendered native navigation and actual Auto-decide control activation; legacy routes; calibration and empty/disabled app override access. Tests use isolated settings and do not start microphone input or cloud sync.
+- Existing pointer, trackpad, gesture, macro, HUD, configuration, cryptography, and manual-sync regression stages passed. A pre-existing media-tile test fixture was corrected to intercept the intended media dispatcher and verify its keep-open behavior rather than sending real media keys.
+
+Run `zsh Rotagivan/test.sh` to reproduce the suite. A passing local suite is not a claim of cross-Mac validation, provider latency guarantees, notarization, or public-release readiness. Those gates remain unchecked.
+
+This document tracks reviewed implementation and remaining release work; unchecked items are not claimed complete.

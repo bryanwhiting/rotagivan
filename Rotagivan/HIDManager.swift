@@ -280,6 +280,11 @@ final class NavigatorHIDManager: ObservableObject {
         case .command:
             guard let command = action.command else { return }
             switch command {
+            case .activateVoiceMode:
+                let wasVisible = explorer?.isVisible == true
+                if !wasVisible { openAppExplorer() }
+                explorer?.activateVoiceMode()
+                if fromKeyboard && !wasVisible { releaseKeyboardHUDOwnership() }
             case .windowManager:
                 if explorer?.isVisible == true { explorer?.dismiss() }
                 openAppExplorer(windowManager: true)

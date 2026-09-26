@@ -31,9 +31,11 @@ import SwiftUI
         precondition(Set(all.map(\.id)).count == all.count)
         let roundtrip = try JSONDecoder().decode(StoredSettings.self, from: JSONEncoder().encode(settings))
         precondition(roundtrip.actionVocabulary == settings.actionVocabulary)
+        settings.appExplorer?.voiceAutoStart = true
         let document = AppConfiguration(settings: settings, shortcuts: ShortcutConfiguration())
         let reloaded = try AppConfiguration.parse(document.yaml())
         precondition(reloaded.settings.actionVocabulary == settings.actionVocabulary, "Cloud/YAML round trip preserves every keyword set")
+        precondition(reloaded.settings.appExplorer?.resolvedVoiceAutoStart == true, "Cloud/YAML round trip preserves voice auto-start")
         precondition(ActionVocabulary.parse("chat, open Slack\n\nmessages") == [["chat", "open Slack"], ["messages"]])
         let audit = HotkeyAudit(settings: settings, shortcuts: ShortcutConfiguration(), layerID: 1, device: .navigator)
         let rows = ActionTableRow.make(settings: settings, applications: [], audit: audit)

@@ -40,7 +40,7 @@ struct CalibrationSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Calibration")
+                Text("Tap calibration")
                     .font(.system(size: 24, weight: .semibold))
                 Text("Teach Rotagivan your tap rhythm, then tune recognition for every tap and tap-and-swipe family.")
                     .font(.callout)

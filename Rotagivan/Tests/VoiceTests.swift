@@ -216,6 +216,52 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         controller.show(waitingForLift: false); controller.beginVoiceMode()
         precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Auto-decide revalidates removed IDs")
         controller.dismiss(); available = catalog
+        // Activation is one ordinary action, regardless of binding or tile input.
+        let activation = BindingAction.command(.activateVoiceMode)
+        let activationKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
+        var activationSettings = AppExplorerSettings()
+        activationSettings.actionBindings = [ActionBinding(trigger: BindingTrigger(keyboard: activationKey), action: activation),
+            ActionBinding(trigger: BindingTrigger(gesture: .oneFingerTap), action: activation)]
+        activationSettings.favorites = [activation.favorite(at: .up)!]
+        activationSettings.favorites[0].activationShortcut = RecordedShortcut(keyCode: 9, modifiers: 0, keyLabel: "V")
+        controller.configuration = { activationSettings }
+        var starts = 0
+        controller.prepareVoice = { _, records in
+            starts += 1
+            precondition(!records.contains { $0.action == activation }, "Voice activation cannot recursively match itself")
+        }
+        controller.show(waitingForLift: false)
+        let activationEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c",
+            isARepeat: false, keyCode: 8)!
+        precondition(controller.processLayerKey(activationEvent))
+        precondition(starts == 1 && controller.isVisible && controller.displayedVoiceSession != nil)
+        controller.activateVoiceMode()
+        precondition(starts == 1, "Repeated activation cannot open a second microphone")
+        controller.dismiss()
+        controller.show(waitingForLift: false)
+        controller.process(report(true)); controller.process(report(true, y: 400)); controller.process(report(false))
+        precondition(starts == 2 && controller.displayedVoiceSession != nil, "A tile starts voice without closing the HUD")
+        controller.dismiss()
+        controller.show(waitingForLift: false)
+        controller.process(report(true)); controller.process(report(false))
+        try await Task.sleep(nanoseconds: 400_000_000)
+        precondition(starts == 3 && controller.displayedVoiceSession != nil, "A tap binding starts voice")
+        controller.dismiss()
+        precondition(!AppExplorerSettings().resolvedVoiceAutoStart)
+        activationSettings.voiceAutoStart = true
+        let restoredAutoStart = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(activationSettings))
+        precondition(restoredAutoStart.resolvedVoiceAutoStart && !restoredAutoStart.resolvedVoiceAutoDecide)
+        controller.show(waitingForLift: false)
+        precondition(starts == 4 && controller.displayedVoiceSession != nil, "Main HUD opening auto-starts only when opted in")
+        controller.show(waitingForLift: false)
+        precondition(starts == 4, "Re-presenting a visible HUD does not restart recording")
+        controller.endVoiceMode(); controller.switchLayer(nil)
+        precondition(starts == 4 && controller.displayedVoiceSession == nil, "Layer navigation does not auto-start voice")
+        controller.dismiss()
+        controller.showWindowManager(waitingForLift: false)
+        precondition(starts == 4 && controller.displayedVoiceSession == nil, "Window Manager does not auto-start voice")
+        controller.dismiss()
         let levels = VoiceAudioBuffer()
         for _ in 0..<100 { levels.append(Data(), rms: 0.1) }
         precondition(levels.waveform().count == 48 && levels.waveform().allSatisfy { $0 > 0 && $0 <= 1 })

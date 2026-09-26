@@ -13,6 +13,10 @@ struct ExplorerApplication: Identifiable, Hashable, Sendable {
 }
 
 enum ExplorerApplicationCatalog {
+    struct ScanResult: Sendable {
+        let applications: [ExplorerApplication]
+        let errors: [String]
+    }
     static var roots: [URL] {
         [URL(fileURLWithPath: "/Applications", isDirectory: true),
          FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
@@ -31,12 +35,31 @@ enum ExplorerApplicationCatalog {
     }
 
     static func scan(roots: [URL] = Self.roots) -> [ExplorerApplication] {
+        scanWithStatus(roots: roots).applications
+    }
+
+    static func scanWithStatus(roots: [URL] = Self.roots) -> ScanResult {
         let manager = FileManager.default
         var seen = Set<String>()
         var result: [ExplorerApplication] = []
+        var errors: [String] = []
         for root in roots {
+            // A user Applications directory is optional. Other read failures are surfaced.
+            do { _ = try root.resourceValues(forKeys: [.isDirectoryKey]) }
+            catch {
+                if (error as NSError).code != NSFileReadNoSuchFileError {
+                    errors.append("Could not read \(root.path): \(error.localizedDescription)")
+                }
+                continue
+            }
             guard let walker = manager.enumerator(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true }) else { continue }
+                options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, error in
+                    if errors.count < 5 { errors.append("Could not read \(url.path): \(error.localizedDescription)") }
+                    return true
+                }) else {
+                errors.append("Could not enumerate \(root.path).")
+                continue
+            }
             for case let url as URL in walker {
                 if url.pathExtension.lowercased() == "app" {
                     walker.skipDescendants() // Never expose an app's embedded helper apps.
@@ -48,7 +71,8 @@ enum ExplorerApplicationCatalog {
                 }
             }
         }
-        return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return ScanResult(applications: result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                          errors: errors)
     }
 
     static func search(_ query: String, in applications: [ExplorerApplication]) -> [ExplorerApplication] {

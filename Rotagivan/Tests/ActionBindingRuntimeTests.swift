@@ -14,6 +14,8 @@ private final class BindingPoster: GestureEventPosting {
 }
 
 @MainActor private final class BindingExplorerStub: AppExplorerPresenting {
+    var voiceActivations = 0
+    func activateVoiceMode() { voiceActivations += 1 }
     var isVisible = false { didSet { onPresentationChanged?() } }
     var onDismiss: (() -> Void)?
     var contextIsValid: (() -> Bool)?
@@ -174,6 +176,7 @@ private final class BindingPoster: GestureEventPosting {
         // references from both sector selection and tile activation keys.
         hud.actionBindings = []
         let tileMedia = BindingAction.media(.next)
+        controller.performMedia = { performed.append(.media($0)) }
         hud.favorites = [tileMedia.favorite(at: .up)!]
         controller.show(waitingForLift: false)
         controller.process(report(true))
@@ -181,6 +184,8 @@ private final class BindingPoster: GestureEventPosting {
         controller.process(report(false))
         RunLoop.main.run(until: Date().addingTimeInterval(0.08))
         precondition(performed.last == tileMedia, "Selecting a HUD tile runs an assigned media action")
+        precondition(controller.isVisible, "Media tiles keep the HUD open for further playback controls")
+        controller.dismiss()
         var pointerTile = BindingAction.tap(.rightClick).favorite(at: .left)!
         pointerTile.activationShortcut = RecordedShortcut(keyCode: 64, modifiers: 0, keyLabel: "F17")
         hud.favorites = [pointerTile]
@@ -553,7 +558,7 @@ private final class BindingPoster: GestureEventPosting {
             explorerStub.dismiss()
         }
         for action in [BindingAction.command(.windowManager),
-                       .command(.mediaControls), .tap(.appExplorer), .tap(.windowManager)] {
+                       .command(.mediaControls), .command(.activateVoiceMode), .tap(.appExplorer), .tap(.windowManager)] {
             hid.executeBindingAction(action, fromKeyboard: true)
             precondition(explorerStub.isVisible && hid.explorerInputSource == nil,
                 "Every keyboard-opened HUD action must release a stale trackpad owner")
@@ -569,12 +574,13 @@ private final class BindingPoster: GestureEventPosting {
             explorerStub.dismiss()
         }
         for action in [BindingAction.command(.windowManager),
-                       .command(.mediaControls), .tap(.appExplorer), .tap(.windowManager)] {
+                       .command(.mediaControls), .command(.activateVoiceMode), .tap(.appExplorer), .tap(.windowManager)] {
             hid.executeBindingAction(action)
             precondition(explorerStub.isVisible && hid.explorerInputSource == .navigator,
                 "Gesture-opened HUD actions retain their invoking trackpad owner")
             explorerStub.dismiss()
         }
+        precondition(explorerStub.voiceActivations == 2, "Keyboard and gesture actions share voice activation dispatch")
         let hotKeys = HotKeyManager()
         var routed: [Bool] = []
         var globalCount = 0

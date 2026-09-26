@@ -36,7 +36,7 @@ enum VoiceActionRegistry {
         }
         for entry in settings.resolvedHotkeyDictionary { add(.macro(entry), detail: "Run macro \(entry.name): \(entry.summary)") }
         CommonMacShortcut.all.forEach { add($0.action) }
-        (AppExplorerAction.macOSCommands + AppExplorerAction.windowCommands + [.windowManager, .mediaControls]).forEach { add(.command($0)) }
+        (AppExplorerAction.macOSCommands + AppExplorerAction.windowCommands + [.windowManager, .mediaControls, .activateVoiceMode]).forEach { add(.command($0)) }
         ExplorerMediaAction.allCases.forEach { add(.media($0)) }
         HUDNavigationAction.allCases.forEach { add(.hudNavigation($0)) }
         TapAction.allCases.filter { $0 != .none && $0 != .shortcut }.forEach { add(.tap($0)) }

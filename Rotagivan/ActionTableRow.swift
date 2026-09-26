@@ -23,7 +23,7 @@ struct ActionTableRow: Identifiable {
         case .hudLayer, .hudNavigation: return "HUDs"
         case .tap: return "Pointer & keys"
         case .command:
-            if action.command == .mediaControls || action.command == .windowManager { return "HUDs" }
+            if action.command == .mediaControls || action.command == .windowManager || action.command == .activateVoiceMode { return "HUDs" }
             return action.command.map { AppExplorerAction.windowCommands.contains($0) } == true ? "Windows" : "Mac controls"
         }
     }

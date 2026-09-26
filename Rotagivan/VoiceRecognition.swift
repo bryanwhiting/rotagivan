@@ -5,18 +5,57 @@ import SwiftUI
 @MainActor final class VoiceApplicationIndex: ObservableObject {
     static let shared = VoiceApplicationIndex()
     @Published private(set) var applications: [ExplorerApplication] = []
-    private var loading: Task<[ExplorerApplication], Never>?
-    private var loaded = false
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var lastRefreshedAt: Date?
+    @Published private(set) var refreshError: String?
+    private var loading: Task<Void, Never>?
+    private var lastAttemptAt: Date?
+    private let refreshInterval: TimeInterval
+    private let scan: @Sendable () -> ExplorerApplicationCatalog.ScanResult
+
+    init(refreshInterval: TimeInterval = 60,
+         scan: @escaping @Sendable () -> ExplorerApplicationCatalog.ScanResult = { ExplorerApplicationCatalog.scanWithStatus() }) {
+        self.refreshInterval = refreshInterval
+        self.scan = scan
+    }
+
     func load() async {
-        if loaded { return }
-        let work: Task<[ExplorerApplication], Never>
-        if let loading { work = loading }
-        else {
-            work = Task.detached(priority: .utility) { ExplorerApplicationCatalog.scan() }
-            loading = work
+        // Listening can use the last complete snapshot while expired data refreshes.
+        // First use still awaits a catalog, and explicit reindex always awaits completion.
+        if lastRefreshedAt != nil {
+            if loading == nil, lastAttemptAt.map({ Date().timeIntervalSince($0) >= refreshInterval }) ?? true {
+                Task { await refresh() }
+            }
+            return
         }
-        applications = await work.value
-        loaded = true
+        await refresh()
+    }
+
+    /// Only this machine's application roots are scanned; nothing is persisted or synced.
+    /// Concurrent callers (including manual reindex) await the same background scan.
+    func refresh(force: Bool = false) async {
+        if let loading {
+            await loading.value
+            return
+        }
+        if !force, let lastAttemptAt, Date().timeIntervalSince(lastAttemptAt) < refreshInterval { return }
+        isRefreshing = true
+        refreshError = nil
+        let scan = scan
+        let work = Task { @MainActor in
+            let result = await Task.detached(priority: .utility) { scan() }.value
+            lastAttemptAt = Date()
+            if result.errors.isEmpty {
+                applications = result.applications
+                lastRefreshedAt = lastAttemptAt
+            } else {
+                // Preserve the last complete catalog if a directory temporarily becomes unreadable.
+                refreshError = result.errors.joined(separator: "\n")
+            }
+            isRefreshing = false
+        }
+        loading = work
+        await work.value
         loading = nil
     }
 }

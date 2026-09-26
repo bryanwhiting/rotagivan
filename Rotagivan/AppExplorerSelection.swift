@@ -14,6 +14,7 @@ struct AppExplorerSelection {
     var slotCount = 8
     var deepSlots: Set<ExplorerSlot> = []
     var fanOrigin: ExplorerSlot?
+    var invertDirection: Bool
     private var contactID: UInt8?
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
@@ -26,12 +27,14 @@ struct AppExplorerSelection {
 
     static let deepHoldDuration = 0.48
 
-    init(waitingForLift: Bool, slotCount: Int = 8, deepSlots: Set<ExplorerSlot> = []) {
+    init(waitingForLift: Bool, slotCount: Int = 8, deepSlots: Set<ExplorerSlot> = [], invertDirection: Bool = false) {
         self.waitingForLift = waitingForLift; self.slotCount = slotCount; self.deepSlots = deepSlots
+        self.invertDirection = invertDirection
     }
 
-    init(continuing continuation: Continuation, slotCount: Int, fanOrigin: ExplorerSlot) {
+    init(continuing continuation: Continuation, slotCount: Int, fanOrigin: ExplorerSlot, invertDirection: Bool = false) {
         waitingForLift = false
+        self.invertDirection = invertDirection
         self.slotCount = slotCount
         self.fanOrigin = fanOrigin
         contactID = continuation.contactID
@@ -70,9 +73,12 @@ struct AppExplorerSelection {
         let dx = point.x - origin.x, dy = point.y - origin.y
         maximumTravel = max(maximumTravel, hypot(dx, dy))
         let distance = hypot(dx, dy)
+        // Keep continuity and jump detection in physical coordinates. Only the
+        // vector used to classify a picker sector follows this preference.
+        let sign = invertDirection ? -1.0 : 1.0
         let direction = distance >= Self.minimumDistance
-            ? (fanOrigin.map { DeepSwipeFan.classify(dx: dx, dy: dy, count: slotCount, origin: $0) }
-                ?? ExplorerSlot.classify(dx: dx, dy: dy, count: slotCount))
+            ? (fanOrigin.map { DeepSwipeFan.classify(dx: dx * sign, dy: dy * sign, count: slotCount, origin: $0) }
+                ?? ExplorerSlot.classify(dx: dx * sign, dy: dy * sign, count: slotCount))
             : nil
         if fanOrigin == nil, let selected, selected == direction, deepSlots.contains(selected),
            now.timeIntervalSince(selectedAt) >= Self.deepHoldDuration {

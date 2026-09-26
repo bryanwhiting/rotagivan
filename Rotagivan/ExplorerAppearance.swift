@@ -188,6 +188,35 @@ struct ExplorerAirSectorChrome: View {
     }
 }
 
+/// Voice and application wheels share sector surfaces and availability contrast.
+struct ExplorerSectorChrome: View {
+    let theme: ExplorerTheme
+    let shape: ExplorerStarburstSector
+    let selected: Bool
+    let available: Bool
+    var opaque = false
+    var body: some View {
+        if theme.isFloating {
+            ExplorerAirSectorChrome(shape: shape, selected: selected, available: available, opaque: opaque)
+        } else {
+            ZStack {
+                shape.fill(LinearGradient(colors: [theme.accent.opacity(selected ? 0.38 : 0.08),
+                    theme.accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
+                shape.stroke(theme.accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12),
+                    lineWidth: selected ? 1.5 : 0.75)
+            }.allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+}
+
+/// Amplitude/transcript updates do not invalidate static wheel layout or glass.
+struct ExplorerStableWheel<State: Equatable, Content: View>: View, Equatable {
+    let state: State
+    let content: Content
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.state == rhs.state }
+    var body: some View { content }
+}
+
 struct ExplorerCornerMarks: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()

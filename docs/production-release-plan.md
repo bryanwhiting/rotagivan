@@ -25,7 +25,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 
 ## 2. Voice as a first-class HUD experience
 
-- [ ] Replace the voice modal/card with a proper HUD that looks and behaves like other HUD layers.
+- [x] Replace the voice modal/card with a proper HUD that looks and behaves like other HUD layers.
 - [x] Show live audio activity, transcription, processing status, and ranked action matches with scores.
 - [x] Use four directional tiles: best match, second match, third match, and cancel.
 - [x] Keep manual confirmation as the default; retain an explicit **Auto-decide** option.
@@ -73,10 +73,10 @@ Some pieces already exist. The checklist groups them into complete product exper
 ## 6. Settings and input cleanup
 
 - [x] Move **Calibration** under Actions and rename it **Tap calibration**.
-- [ ] Remove pointer layers from Pointer & scrolling while preserving the effective pointer behavior.
+- [x] Remove pointer layers from Pointer & scrolling while preserving the effective pointer behavior.
 - [ ] Redesign HUD settings around the selected, centered HUD with direct layer and tile editing.
-- [ ] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
-- [ ] Default inverted two-finger navigation on, applying inversion consistently to every direction—including diagonals.
+- [x] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
+- [x] Default inverted two-finger navigation on, applying inversion consistently to every direction—including diagonals.
 - [ ] Refine pointer response for smoother low-speed movement and a gentler acceleration ramp, without adding noticeable lag.
 
 ## 7. Production release and distribution
@@ -84,6 +84,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Choose and publish an explicit supported macOS version range.
 - [ ] Complete first-run onboarding for permissions, voice credentials, privacy, and sync.
 - [ ] Test clean installs, upgrades, migration, multiple Macs, and recovery from failures.
+- [ ] Fix the observed quit stall so updates can close the running app without a separate termination step.
 - [ ] Package a signed, notarized Mac download with a repeatable release process.
 - [ ] Establish updates, version checks, release notes, and rollback/recovery.
 - [ ] Build a landing page with a demo, requirements, download, privacy policy, and support contact.
@@ -107,6 +108,23 @@ The first production-plan batch is built and installed as **1.1.175 (177)**. The
 - `VoiceApplicationIndexTests`, `ExplorerApplicationCatalogTests`: off-main scanning, coalescing, 60-second freshness, explicit refresh, removals, error recovery, and immediate cached return during a blocked background scan. First indexing still waits for the initial snapshot; filesystem event watching and browser indexing remain open.
 - `ReleaseSettingsTests`: rendered native navigation and actual Auto-decide control activation; legacy routes; calibration and empty/disabled app override access. Tests use isolated settings and do not start microphone input or cloud sync.
 - Existing pointer, trackpad, gesture, macro, HUD, configuration, cryptography, and manual-sync regression stages passed. A pre-existing media-tile test fixture was corrected to intercept the intended media dispatcher and verify its keep-open behavior rather than sending real media keys.
+
+### Second batch: voice HUD and input-settings cleanup
+
+Version **1.1.176 (178)** adds a four-sector voice HUD using the same sector geometry, chrome, focus treatment, and themes as the main HUD. Transcript, waveform, and status have fixed positions; an equatable wheel separates static rendering from waveform-only updates. It introduces no new animation or input timer. Manual confirmation remains the default.
+
+Built, installed with `./launch.sh --keep-accessibility`, and reopened under `/Applications/Rotagivan.app`. Installed and built executable SHA-256 match (`5ab985c9b626ba4e58591848c1cf61ead046ac066ac5d9f9481c3ec29a028c0e`); the existing certificate-pinned signature verifies. The old process stalled on normal quit and required scoped termination; that release issue remains open. Accessibility permissions and signing trust were not reset.
+
+- `VoiceHUDUISmoke`: 48 native renders across three themes, light/dark appearance, and eight voice states; long text, native tile selection without execution, stable center, confirmation, cancellation, retry, and forced opaque presentation. Representative screenshots were visually reviewed. Synthetic microphone and cloud fixtures only.
+- `AppExplorerTests`, `HUDMapTests`, `ConfigurationTests`: independent picker/navigation preferences; all directions, capacities 2–16, deep-fan continuity, legacy defaults, and JSON/YAML round-trips. Two-finger navigation defaults to inverted; the separate picker preference defaults to regular to preserve existing selection behavior. Explicit custom gesture-to-action assignments keep their literal meaning.
+- `ActionBindingRuntimeTests`: controller-level inverted selection, repeated media selections after input resets, and all four voice directions across lift resets without execution.
+- `ReleaseSettingsTests`: pointer-layer controls are absent from current and legacy routes while device motion controls, saved profiles, effective pointer settings, and shortcuts remain intact.
+- All regression stages passed. An early run was interrupted when visual fixes changed a source during compilation; all affected UI/controller/configuration/sync stages were rerun against frozen sources and passed. Final UI artifacts: `/private/tmp/rotagivan-ui-tests.X9Glh3`.
+
+### Remaining implementation boundaries
+
+- Application subgroups exist, but a complete named application-command authoring workflow and Chrome defaults remain unfinished. Browser-targeted URL actions must not silently use a different default browser.
+- The secrets vault is encrypted, but settings encryption remains unfinished: local YAML/backups, settings in UserDefaults, and remote settings storage require coordinated migration. Encrypting only an export would not complete this feature.
 
 Run `zsh Rotagivan/test.sh` to reproduce the suite. A passing local suite is not a claim of cross-Mac validation, provider latency guarantees, notarization, or public-release readiness. Those gates remain unchecked.
 

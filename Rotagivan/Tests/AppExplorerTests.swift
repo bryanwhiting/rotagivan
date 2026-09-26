@@ -57,7 +57,41 @@ import Foundation
     static func report(_ x: Double? = nil, _ y: Double = 500, id: UInt8 = 0, confident: Bool = true, button: Bool = false) -> TrackpadReport {
         TrackpadReport(contacts: x.map { [FingerContact(id: id, x: $0, y: y, touching: true, confident: confident)] } ?? [], buttonDown: button, scanTime: 0)
     }
+    static func testPickerDirection() {
+        let time = Date(timeIntervalSince1970: 100)
+        for count in 2...16 {
+            for slot in ExplorerSlot.slots(count) {
+                for inverted in [false, true] {
+                    let sign = inverted ? -1.0 : 1.0
+                    let radians = slot.angle * .pi / 180
+                    var picker = AppExplorerSelection(waitingForLift: false, slotCount: count, invertDirection: inverted)
+                    precondition(picker.process(report(500), at: time) == .waiting)
+                    let move = report(500 + cos(radians) * 100 * sign, 500 + sin(radians) * 100 * sign)
+                    precondition(picker.process(move, at: time.addingTimeInterval(0.1)) == .highlight(slot))
+                    precondition(picker.process(report(), at: time.addingTimeInterval(0.2)) == .select(slot))
+                    var deep = AppExplorerSelection(waitingForLift: false, slotCount: count, deepSlots: [slot], invertDirection: inverted)
+                    _ = deep.process(report(500), at: time)
+                    _ = deep.process(move, at: time.addingTimeInterval(0.1))
+                    guard case .deepen(let parent, let continuation) = deep.process(move, at: time.addingTimeInterval(0.7)) else {
+                        preconditionFailure("Deep hold must preserve inverted selection")
+                    }
+                    precondition(parent == slot && continuation.origin == CGPoint(x: 500, y: 500))
+                    precondition(continuation.point == CGPoint(x: move.contacts[0].x, y: move.contacts[0].y))
+                    for child in ExplorerSlot.slots(count) {
+                        let angle = DeepSwipeFan.angle(for: child, count: count, origin: slot) * .pi / 180
+                        var fan = AppExplorerSelection(continuing: continuation, slotCount: count, fanOrigin: slot, invertDirection: inverted)
+                        let childMove = report(500 + cos(angle) * 100 * sign, 500 + sin(angle) * 100 * sign)
+                        precondition(fan.process(childMove, at: time.addingTimeInterval(0.8)) == .highlight(child))
+                        precondition(fan.process(report(), at: time.addingTimeInterval(0.9)) == .select(child))
+                    }
+                }
+            }
+        }
+        print("Picker inversion passed capacities 2–16, all sectors, lift selection, and physical deep-fan continuity.")
+    }
+
     static func main() throws {
+        testPickerDirection()
         let chord = RecordedShortcut(keyCode: 64, modifiers: (1 << 19) | (1 << 20), keyLabel: "F17")
         let keyFavorite = AppExplorerFavorite(direction: .up, name: "Voice input", shortcut: chord)
         precondition(keyFavorite.isValidDestination)

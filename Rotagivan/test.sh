@@ -145,6 +145,9 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rota
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceTests"
 "$test_dir/VoiceTests" "$test_dir"
+xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceHUDUISmoke.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceHUDUISmoke"
+"$test_dir/VoiceHUDUISmoke" "$test_dir"
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceApplicationIndexTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceApplicationIndexTests"
 "$test_dir/VoiceApplicationIndexTests"

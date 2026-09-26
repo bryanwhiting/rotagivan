@@ -300,97 +300,167 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     }
 }
 
+/// A fixed four-sector layer: changing speech and status never moves the wheel.
 struct VoiceHUDView: View {
     @ObservedObject var session: VoiceSession
+    let theme: ExplorerTheme
     var onExit: () -> Void
     var onRetry: () -> Void
     var onConfirm: () -> Void
-    private let cyan = Color(red: 0.2, green: 0.88, blue: 0.95)
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Label(session.phase == .listening ? "Listening" : "Voice actions", systemImage: session.phase == .listening ? "mic.fill" : "waveform")
-                    .foregroundStyle(cyan).font(.headline)
-                Spacer()
-                Button(action: onExit) { Image(systemName: "xmark") }.help("Exit voice mode")
-            }
-            Text(session.transcript.isEmpty ? "Say “Slack” or “open Slack”" : session.transcript)
-                .font(.system(size: 21, weight: .medium)).multilineTextAlignment(.center)
-                .lineLimit(3).frame(height: 78)
-                .accessibilityLabel("Transcription: " + session.transcript)
-            waveformView
-            radialView
-            Text(session.message).font(.callout).multilineTextAlignment(.center).frame(minHeight: 38)
-            if let decision = session.decision {
-                Text("Jev confidence \(Int((decision.confidence * 100).rounded()))% · \(decision.shortlisted ? "Scores among finalists" : "Action match scores")")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Button(session.selected == .left ? "Ignore command" : "Run selected action") { onConfirm() }
-                .disabled(session.selected != .left && session.selectedMatch == nil)
-            Text("Audio → OpenRouter / xAI · Text + action descriptions → Jev\nAudio and transcript are not saved by Rotagivan.")
-                .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+    var forceReduceTransparency = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var opaque: Bool { forceReduceTransparency || reduceTransparency }
+    private var centerTitle: String {
+        switch session.phase {
+        case .listening: return "Finish"
+        case .ready: return session.selected == .left ? "Ignore" : "Run"
+        case .failed, .cancelled: return "Retry"
+        case .preparing, .matching: return "Wait"
         }
-        .padding(24).frame(width: 530)
-        .background(RoundedRectangle(cornerRadius: 26).fill(Color(red: 0.035, green: 0.08, blue: 0.10).opacity(0.98)))
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(cyan.opacity(0.45), lineWidth: 1))
-        .environment(\.colorScheme, .dark).tint(cyan)
     }
-    @ViewBuilder private var waveformView: some View {
-            if session.phase == .listening || session.phase == .preparing {
-                HStack(spacing: 3) {
-                    ForEach(0..<48, id: \.self) { index in
-                        Capsule().fill(cyan.opacity(0.85))
-                            .frame(width: 4, height: max(3, session.waveform[index] * 56))
-                    }
-                }.frame(height: 60)
-                    .accessibilityLabel("Microphone audio level")
+    private var canConfirm: Bool {
+        session.phase == .ready && (session.selected == .left || session.selectedMatch != nil)
+    }
+    private var centerEnabled: Bool {
+        session.phase == .listening || session.phase == .failed || session.phase == .cancelled || canConfirm
+    }
+    private struct WheelState: Equatable {
+        var phase: VoiceSession.Phase
+        var selected: ExplorerSlot
+        var theme: ExplorerTheme
+        var opaque: Bool
+        var matches: [String]
+        var noMatch: Bool
+    }
+    private var wheelState: WheelState {
+        WheelState(phase: session.phase, selected: session.selected, theme: theme, opaque: opaque,
+            matches: session.decision?.matches.map { "\($0.id)|\($0.record.title)|\($0.probability)" } ?? [],
+            noMatch: session.decision?.noMatch ?? true)
+    }
+    var body: some View {
+        ZStack {
+            ExplorerStableWheel(state: wheelState, content: wheel).equatable().offset(y: -10)
+            VStack(spacing: 0) {
+                header.frame(height: 72).background { floatingReadoutSurface }
+                Spacer(minLength: 0)
+                footer.frame(width: 418, height: 86).background { floatingReadoutSurface }
+            }.padding(26)
+        }
+        .frame(width: 470, height: 520)
+        .background(ExplorerHUDBackdrop(theme: theme, forceReduceTransparency: forceReduceTransparency))
+        .tint(theme.accent)
+        .environment(\.colorScheme, theme.isHUD ? .dark : colorScheme)
+    }
+    @ViewBuilder private var floatingReadoutSurface: some View {
+        if theme.isFloating {
+            RoundedRectangle(cornerRadius: 10).fill(theme.surface.opacity(0.96))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(theme.accent.opacity(0.2), lineWidth: 0.7))
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+    private var header: some View {
+        VStack(spacing: 5) {
+            HStack {
+                Label(session.phase == .listening ? "Listening" : "Voice mode",
+                    systemImage: session.phase == .listening ? "mic.fill" : "waveform")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.accent)
+                Spacer()
+                Button(action: onExit) { Image(systemName: "xmark").font(.system(size: 11)) }
+                    .buttonStyle(.plain).frame(width: 24, height: 24)
+                    .accessibilityLabel("Cancel voice mode").accessibilityIdentifier("voice.cancel")
             }
+            Text(session.transcript.isEmpty ? "Say an action, such as “open Slack”" : session.transcript)
+                .font(.system(size: 12, weight: .medium)).multilineTextAlignment(.center)
+                .lineLimit(2).frame(height: 30)
+                .accessibilityLabel("Transcription: " + (session.transcript.isEmpty ? "No speech recognized yet" : session.transcript))
+            HStack(spacing: 3) {
+                ForEach(0..<48, id: \.self) { index in
+                    Capsule().fill(theme.accent.opacity(session.phase == .listening ? 0.85 : 0.18))
+                        .frame(width: 3, height: session.phase == .listening
+                            ? max(2, min(14, (session.waveform.indices.contains(index) ? session.waveform[index] : 0) * 14)) : 2)
+                }
+            }.frame(height: 14).accessibilityElement(children: .ignore)
+                .accessibilityLabel(session.phase == .listening ? "Microphone audio activity" : "Microphone idle")
+        }
     }
-    private var radialView: some View {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.025))
-                    .overlay(Circle().stroke(cyan.opacity(0.3), lineWidth: 1))
-                option(.up, index: 0)
-                option(.right, index: 1)
-                option(.down, index: 2)
-                option(.left, index: nil)
-                Button {
-                    if session.phase == .listening { session.finishListening() }
-                    else if session.phase == .ready { onConfirm() }
-                    else if session.phase == .failed { onRetry() }
-                } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: session.phase == .listening ? "stop.fill" : session.phase == .ready ? "return" : "mic.fill")
-                        Text(session.phase == .listening ? "Finish" : session.phase == .ready ? "Run" : session.phase == .failed ? "Retry" : "Wait")
-                            .font(.system(size: 10, weight: .medium))
-                    }.frame(width: 82, height: 82)
-                        .background(Circle().fill(Color.black.opacity(0.35)))
-                        .overlay(Circle().stroke(cyan.opacity(0.65), lineWidth: 1))
-                }.buttonStyle(.plain).foregroundStyle(cyan)
-                    .disabled(session.phase == .matching || session.phase == .preparing)
-            }.frame(width: 350, height: 350)
+    private var footer: some View {
+        VStack(spacing: 2) {
+            Text(session.phase == .cancelled ? "Voice cancelled. Nothing was run." : session.message)
+                .font(.system(size: 11)).multilineTextAlignment(.center).lineLimit(4)
+                .frame(height: 48).accessibilityIdentifier("voice.status")
+            Text(session.decision.map {
+                "Confidence \(Int(($0.confidence * 100).rounded()))% · \($0.shortlisted ? "Finalist scores" : "Action match scores")"
+            } ?? "Select a match, then confirm · Esc to cancel")
+                .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 12)
+            Text("Audio → OpenRouter / xAI · Text + actions → Jev\nAudio and transcript are not saved by Rotagivan.")
+                .font(.system(size: 8)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .frame(height: 22)
+        }
     }
-    private func option(_ direction: ExplorerSlot, index: Int?) -> some View {
-        let match = index.flatMap { i in session.decision.flatMap { i < $0.matches.count ? $0.matches[i] : nil } }
-        let active = session.selected == direction
-        let sector = ExplorerStarburstSector(direction: direction, innerRadius: 48, outerRadius: 170, halfAngle: 43, roundedRim: true)
-        let angle = ExplorerStarburstLayout.angle(direction) * .pi / 180
-        return Button { session.select(direction) } label: {
+    private var wheel: some View {
+        let center = CGPoint(x: 209, y: 155)
+        return ZStack {
+            if theme.isFloating {
+                ExplorerAirGlass(opaque: opaque).frame(width: 304, height: 304).position(center)
+            }
+            ForEach([ExplorerSlot.up, .right, .down, .left], id: \.self) { option($0) }
+            Button {
+                switch session.phase {
+                case .listening: session.finishListening()
+                case .ready: if canConfirm { onConfirm() }
+                case .failed, .cancelled: onRetry()
+                case .preparing, .matching: break
+                }
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: session.phase == .listening ? "stop.fill" :
+                        session.phase == .ready ? (session.selected == .left ? "xmark" : "return") : "mic.fill")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(centerTitle).font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(theme.accent).frame(width: 54, height: 54)
+                .background(Circle().fill(theme.isHUD ? theme.surface.opacity(theme.isFloating && !opaque ? 0.88 : 1) : Color(nsColor: .windowBackgroundColor)))
+                .overlay(Circle().strokeBorder(theme.accent.opacity(0.65), lineWidth: 1))
+                .contentShape(Circle())
+            }.buttonStyle(.plain).disabled(!centerEnabled).position(center)
+                .accessibilityLabel(centerTitle == "Run" ? "Run selected action" : centerTitle == "Ignore" ? "Ignore command" : centerTitle == "Finish" ? "Finish listening" : centerTitle == "Retry" ? "Listen again" : "Processing voice command")
+                .accessibilityIdentifier("voice.confirm")
+        }.frame(width: 418, height: 310)
+    }
+    private func option(_ direction: ExplorerSlot) -> some View {
+        let index = [ExplorerSlot.up, .right, .down].firstIndex(of: direction)
+        let match = index.flatMap { i in session.decision.flatMap { i < $0.matches.count && !$0.noMatch ? $0.matches[i] : nil } }
+        let available = direction == .left || (session.phase == .ready && match != nil)
+        let selected = session.selected == direction && available
+        let shape = ExplorerStarburstSector(direction: direction,
+            innerRadius: ExplorerStarburstLayout.innerRadius(depth: 0), outerRadius: 143,
+            tip: theme.isFloating ? 2 : 11, halfAngle: 43, roundedRim: theme.isFloating)
+        let point = ExplorerStarburstLayout.point(direction, radius: 108, center: CGPoint(x: 209, y: 155))
+        let title = direction == .left ? "Cancel / Ignore" : (match?.record.title ?? "No match")
+        return Button {
+            // Cancelling an in-flight recording is always available; ready results
+            // select Ignore and still require confirmation.
+            if direction == .left && session.phase != .ready { onExit() }
+            else { session.select(direction) }
+        } label: {
             ZStack {
-                sector.fill(active ? cyan.opacity(0.2) : Color.white.opacity(0.04))
-                sector.stroke(active ? cyan : cyan.opacity(0.25), lineWidth: active ? 2 : 1)
-                VStack(spacing: 5) {
-                    Text(direction == .left ? "Exit / Ignore" : (match?.record.title ?? "—"))
-                        .font(.system(size: 12, weight: .semibold)).lineLimit(3)
-                    if let match {
-                        Text("\(Int((match.probability * 100).rounded()))% match").font(.caption).foregroundStyle(cyan)
-                    } else if direction == .left {
-                        Text("Nothing will run").font(.system(size: 9)).foregroundStyle(.secondary)
-                    }
-                }.multilineTextAlignment(.center).frame(width: 102, height: 78)
-                    .offset(x: cos(angle) * 111, y: sin(angle) * 111)
-            }.frame(width: 350, height: 350).contentShape(sector)
-        }.buttonStyle(.plain).accessibilityLabel(direction == .left ? "Exit or ignore" : "\(match?.record.title ?? "No match"), \(Int(((match?.probability ?? 0) * 100).rounded())) percent match")
-
+                ExplorerSectorChrome(theme: theme, shape: shape, selected: selected, available: available, opaque: opaque)
+                VStack(spacing: 3) {
+                    Image(systemName: direction == .left ? "xmark" : "bolt.fill")
+                        .font(.system(size: 16, weight: .light)).foregroundStyle(theme.accent)
+                    Text(title).font(.system(size: 10, weight: .medium))
+                        .lineLimit(3).multilineTextAlignment(.center)
+                    Text(match.map { "\(Int(($0.probability * 100).rounded()))% match" }
+                        ?? (direction == .left ? "Nothing will run" : ["Best match", "Second match", "Third match"][index ?? 0]))
+                        .font(.system(size: 8)).foregroundStyle(theme.accent)
+                }.frame(width: 84, height: 72).position(point)
+                    .foregroundStyle(theme.isHUD ? Color.white.opacity(available ? 0.9 : 0.45) : Color.primary)
+            }.frame(width: 418, height: 310).contentShape(shape)
+        }.buttonStyle(.plain).disabled(!available)
+            .modifier(ExplorerSectorFocus(theme: theme, shape: shape))
+            .accessibilityLabel("\(direction.title): \(title)" + (match.map { ", \(Int(($0.probability * 100).rounded())) percent match" } ?? ""))
+            .accessibilityIdentifier("voice.tile.\(direction.rawValue)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

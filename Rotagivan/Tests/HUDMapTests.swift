@@ -3,15 +3,28 @@ import Foundation
 @main struct HUDMapTests {
     static func main() throws {
         precondition(AppExplorerSettings().resolvedSwipeDirection == .inverted)
+        precondition(!AppExplorerSettings().resolvedInvertPickerDirection)
         let legacy = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(#"{"defaultMode":"favorites","favorites":[]}"#.utf8))
         precondition(legacy.swipeDirection == nil && legacy.resolvedSwipeDirection == .inverted,
             "Existing profiles with no preference default to inverted")
         for mode in HUDSwipeDirection.allCases {
-            let preference = AppExplorerSettings(swipeDirection: mode)
+            for invertedPicker in [false, true] {
+            let preference = AppExplorerSettings(swipeDirection: mode, invertPickerDirection: invertedPicker)
             let saved = try JSONEncoder().encode(preference)
             let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: saved)
             precondition(restored.resolvedSwipeDirection == mode && restored == preference)
+            precondition(restored.resolvedInvertPickerDirection == invertedPicker)
+            let directions: [(Double, Double, HUDNavigationAction)] = [
+                (-100, 0, .previous), (100, 0, .next), (0, -100, .above), (0, 100, .below),
+                (-100, -100, .topLeft), (100, -100, .topRight), (-100, 100, .bottomLeft), (100, 100, .bottomRight)]
+            for (dx, dy, expected) in directions {
+                let sign = mode == .inverted ? -1.0 : 1.0
+                precondition(preference.resolvedSwipeDirection.navigation(dx: dx * sign, dy: dy * sign) == expected,
+                    "Picker preference cannot change cardinal or diagonal HUD navigation")
+            }
+            }
         }
+        precondition(legacy.invertPickerDirection == nil && !legacy.resolvedInvertPickerDirection)
         precondition(HUDSwipeDirection.inverted.navigation(for: .twoFingerDown) == .above)
         precondition(HUDSwipeDirection.regular.navigation(for: .twoFingerDown) == .below)
         precondition(HUDSwipeDirection.inverted.navigation(for: .oneFingerTap) == nil)

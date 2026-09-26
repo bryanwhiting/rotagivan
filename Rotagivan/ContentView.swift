@@ -126,8 +126,14 @@ struct ContentView: View {
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
          initialSection: String = "HUD", initialDevice: GestureDevice = .navigator) {
         self.store = store; self.hid = hid; self.sync = sync
-        _selection = State(initialValue: ["Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides"].contains(initialSection) ? "Actions" :
-            ["App Explorer", "Window Manager", "Layers", "Layer actions", "Tap actions"].contains(initialSection) ? "HUD" : initialSection)
+        let resolvedSection: String
+        switch initialSection {
+        case "Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides": resolvedSection = "Actions"
+        case "Profiles", "Pointer layers": resolvedSection = "Pointer & scrolling"
+        case "Devices", "HUD", "Actions", "Voice mode", "Pointer & scrolling", "General": resolvedSection = initialSection
+        default: resolvedSection = "HUD"
+        }
+        _selection = State(initialValue: resolvedSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         _actionDevice = State(initialValue: initialDevice)
         _pointerDevice = State(initialValue: initialDevice)
@@ -286,7 +292,7 @@ struct ContentView: View {
             .accessibilityIdentifier("tap-calibration")
         case "Voice mode": VoiceModeSettingsView(store: store)
         case "Pointer & scrolling": pointerSettings
-        default: profiles
+        default: hudAndTapSettings
         }
     }
 
@@ -515,8 +521,6 @@ struct ContentView: View {
             } else {
                 macOSPointerSettings.accessibilityIdentifier("pointer-pane-macos")
             }
-            Divider()
-            profiles
         }.font(.system(size: 12))
     }
 

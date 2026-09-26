@@ -130,6 +130,54 @@ private final class BindingPoster: GestureEventPosting {
         precondition(opened.map(\.absoluteString) == ["https://example.com/docs"],
             "Unbound swipe still selects the visible HUD tile")
 
+        // Exercise the controller's preference wiring and its repeated input
+        // resets, with every externally visible action intercepted.
+        let directionController = AppExplorerController(defaults: defaults)
+        var directionHUD = AppExplorerSettings(favorites: [
+            AppExplorerFavorite(direction: .up, name: "Inverted docs", url: "https://example.com/inverted")],
+            animationsEnabled: false, invertPickerDirection: true)
+        directionController.configuration = { directionHUD }
+        directionController.frontmostPID = { 4242 }
+        directionController.frontmostBundleID = { "com.apple.finder" }
+        directionController.contextIsValid = { true }
+        var invertedURLs: [URL] = []
+        directionController.openWebURL = { invertedURLs.append($0); return true }
+        directionController.show(waitingForLift: false)
+        directionController.process(report(true))
+        directionController.process(report(true, y: 600))
+        directionController.process(report(false))
+        precondition(invertedURLs.map(\.absoluteString) == ["https://example.com/inverted"],
+            "Controller configuration reverses normal HUD selection")
+        directionHUD.favorites = [BindingAction.media(.next).favorite(at: .up)!]
+        var repeatedMedia: [ExplorerMediaAction] = []
+        directionController.performMedia = { repeatedMedia.append($0) }
+        directionController.show(waitingForLift: false)
+        for _ in 0..<3 {
+            directionController.process(report(true))
+            directionController.process(report(true, y: 600))
+            directionController.process(report(false))
+        }
+        precondition(repeatedMedia == [.next, .next, .next] && directionController.isVisible,
+            "Media keep-open resets retain picker inversion after every selection")
+        directionController.dismiss()
+        directionController.prepareVoice = { _, _ in } // No input, permissions, or cloud work.
+        directionController.show(waitingForLift: false)
+        directionController.activateVoiceMode()
+        guard let directionVoice = directionController.displayedVoiceSession else {
+            preconditionFailure("Mock voice HUD must open")
+        }
+        let voiceStrokes: [(Double, Double, ExplorerSlot)] = [
+            (400, 500, .right), (500, 400, .down), (600, 500, .left), (500, 600, .up)]
+        for (x, y, expected) in voiceStrokes {
+            directionController.process(report(true))
+            directionController.process(report(true, x: x, y: y))
+            precondition(directionVoice.selected == expected, "Voice picker shares the inversion preference")
+            directionController.process(report(false))
+            precondition(directionVoice.selected == expected && directionController.displayedVoiceSession === directionVoice,
+                "Voice lift resets keep inversion and never execute a selection")
+        }
+        directionController.dismiss()
+
         let nested = ExplorerHoldLayer(name: "Nested", holdShortcut: nil,
             favorites: [AppExplorerFavorite(direction: .up, name: "Nested docs", url: "https://example.com/nested")])
         hud.favorites = [AppExplorerFavorite(direction: .left, name: "Group", children: [], holdLayers: [nested])]

@@ -1050,6 +1050,8 @@ struct AppExplorerSettings: Codable, Equatable {
     var resolvedVoiceAutoStart: Bool { voiceAutoStart ?? false }
     var swipeDirection: HUDSwipeDirection? = nil
     var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
+    var invertPickerDirection: Bool? = nil
+    var resolvedInvertPickerDirection: Bool { invertPickerDirection ?? false }
     var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }

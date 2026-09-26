@@ -292,8 +292,8 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         try await Task.sleep(nanoseconds: 30_000_000)
         preview.finishListening()
         try await Task.sleep(nanoseconds: 50_000_000)
-        let host = NSHostingView(rootView: VoiceHUDView(session: preview, onExit: {}, onRetry: {}, onConfirm: {}))
-        host.frame = NSRect(x: 0, y: 0, width: 550, height: 680)
+        let host = NSHostingView(rootView: VoiceHUDView(session: preview, theme: .starburstAir, onExit: {}, onRetry: {}, onConfirm: {}))
+        host.frame = NSRect(x: 0, y: 0, width: 470, height: 520)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host

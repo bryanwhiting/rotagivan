@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main struct ReleaseSettingsTests {
-    @MainActor static func main() {
+    @MainActor static func main() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         // SwiftUI creates its semantic AX nodes only when accessibility is requested.
@@ -25,9 +25,12 @@ import SwiftUI
             let element = object as AnyObject
             return [element] + (element.accessibilityChildren?() ?? []).flatMap(elements)
         }
-        func find(_ identifier: String, in host: NSView) -> AnyObject? {
+        func semanticElements(in host: NSView) -> [AnyObject] {
             func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-            let accessible = views(host).flatMap(elements)
+            return views(host).flatMap(elements)
+        }
+        func find(_ identifier: String, in host: NSView) -> AnyObject? {
+            let accessible = semanticElements(in: host)
             if ProcessInfo.processInfo.environment["DEBUG_RELEASE_AX"] == "1" {
                 for element in accessible {
                     let line = "AX \(element.accessibilityRole?()?.rawValue ?? "nil") | \(element.accessibilityIdentifier?() ?? "nil") | \(element.accessibilityLabel?() ?? "nil")\n"
@@ -90,7 +93,35 @@ import SwiftUI
             precondition(find("manage-application-overrides", in: host) != nil,
                 "Disabled overrides must remain manageable")
         }
+        let savedProfile = store.addProfile()
+        store.setActiveProfile(savedProfile)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let settingsBefore = try encoder.encode(store.settings)
+        let activeBefore = store.activeProfileID
+        let motionBefore = store.activeProfile
+        let shortcutsBefore = ShortcutSettings.shared.additional
+        let actionShortcutsBefore = ShortcutSettings.shared.profileActions
+        for section in ["Pointer & scrolling", "Pointer layers", "Profiles", "Unknown legacy section"] {
+            render(section) { host in
+                let labels = semanticElements(in: host).compactMap { $0.accessibilityLabel?() }
+                precondition(!labels.contains("Pointer layers"),
+                    "Pointer settings and legacy routes must not expose the pointer-layer editor")
+                if section != "Unknown legacy section" {
+                    precondition(!labels.contains("Add layer"), "Pointer settings must not expose pointer layer creation")
+                    precondition(find("pointer-device-picker", in: host) != nil && find("pointer-pane-navigator", in: host) != nil,
+                        "Pointer settings must retain device-specific motion controls")
+                }
+            }
+            let settingsAfter = try encoder.encode(store.settings)
+            precondition(settingsAfter == settingsBefore,
+                "Removing the pointer-layer editor must preserve saved profiles and settings")
+            precondition(store.activeProfileID == activeBefore && store.activeProfile == motionBefore,
+                "Rendering current and legacy settings routes must preserve effective pointer behavior")
+            precondition(ShortcutSettings.shared.additional == shortcutsBefore && ShortcutSettings.shared.profileActions == actionShortcutsBefore,
+                "Saved profile activation and action shortcuts must remain intact")
+        }
         precondition(hid.calibrationSession == nil)
-        print("Release settings native UI passed: Voice controls update settings, General excludes Voice controls, Actions and legacy routes expose calibration and empty/disabled application overrides. No microphone, live input, or sync started.")
+        print("Release settings native UI passed: Voice controls, calibration and overrides routes, pointer-layer editor removal, legacy navigation, and preserved pointer settings/profiles/shortcuts. No microphone, live input, or sync started.")
     }
 }

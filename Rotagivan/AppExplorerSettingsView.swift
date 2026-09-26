@@ -247,6 +247,11 @@ struct AppExplorerSettingsView: View {
             var next = baseSettings; next.swipeDirection = direction; saveBase(next)
         })
     }
+    private var invertPickerBinding: Binding<Bool> {
+        Binding(get: { baseSettings.resolvedInvertPickerDirection }, set: { enabled in
+            var next = baseSettings; next.invertPickerDirection = enabled; saveBase(next)
+        })
+    }
     private var centerCursorBinding: Binding<Bool> {
         Binding(get: { baseSettings.resolvedCenterCursorOnAppSwitch }, set: { enabled in
             var next = baseSettings; next.centerCursorOnAppSwitch = enabled; saveBase(next)
@@ -410,12 +415,14 @@ struct AppExplorerSettingsView: View {
                         ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
                     }.frame(width: 230)
                     Menu {
-                        Picker("Two-finger HUD swipes", selection: swipeDirectionBinding) {
+                        Toggle("Invert picker direction", isOn: invertPickerBinding)
+                            .help("Reverse one-finger tile selection, including voice, window, and deep choices.")
+                        Picker("Two-finger HUD navigation", selection: swipeDirectionBinding) {
                             ForEach(HUDSwipeDirection.allCases, id: \.self) { direction in
                                 Text(direction.title).tag(direction)
                             }
                         }
-                        .help("Inverted: drag down to reach the HUD above. Regular: swipe down to reach the HUD below.")
+                        .help("Default navigation in every direction: inverted drags down to the HUD above; regular swipes down to the HUD below. Explicit gesture assignments keep their assigned actions.")
                         Divider()
                         Toggle("Animate HUD feedback", isOn: animationBinding)
                         Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)

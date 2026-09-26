@@ -753,11 +753,11 @@ extension AppExplorerPresenting {
             switch input.process(report) {
             case .highlight(let direction): if let direction { voice.select(direction) }
             case .select(let direction):
-                voice.select(direction); input = AppExplorerSelection(waitingForLift: false, slotCount: 4)
+                voice.select(direction); input = makeSelection(waitingForLift: false)
             case .back:
                 if voice.phase == .listening { voice.finishListening() }
-                input = AppExplorerSelection(waitingForLift: false, slotCount: 4)
-            case .cancel: input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: 4)
+                input = makeSelection(waitingForLift: false)
+            case .cancel: input = makeSelection(waitingForLift: contactIsDown)
             default: break
             }
             return
@@ -782,9 +782,17 @@ extension AppExplorerPresenting {
         }
     }
 
-    private func makeSelection(waitingForLift: Bool) -> AppExplorerSelection {
-        AppExplorerSelection(waitingForLift: waitingForLift, slotCount: model.slotCount,
-            deepSlots: Set(model.entries.filter(\.hasDeepChoices).map(\.direction)))
+    private func makeSelection(waitingForLift: Bool,
+                               continuing: AppExplorerSelection.Continuation? = nil) -> AppExplorerSelection {
+        let inverted = configuration().resolvedInvertPickerDirection
+        if let continuing, let fan = model.deepFan {
+            return AppExplorerSelection(continuing: continuing, slotCount: fan.slotCount,
+                fanOrigin: fan.origin, invertDirection: inverted)
+        }
+        return AppExplorerSelection(waitingForLift: waitingForLift,
+            slotCount: model.voiceSession == nil ? model.slotCount : 4,
+            deepSlots: model.voiceSession == nil ? Set(model.entries.filter(\.hasDeepChoices).map(\.direction)) : [],
+            invertDirection: inverted)
     }
 
     private func openDeepFan(_ direction: ExplorerSlot, continuing: AppExplorerSelection.Continuation) {
@@ -795,7 +803,7 @@ extension AppExplorerPresenting {
         let count = parent.slotCount ?? max(2, min(16, children.count))
         model.deepFan = ExplorerDeepFan(origin: direction, entries: children.map { makeEntry($0, depth: path.count) }, slotCount: count)
         model.selected = nil
-        input = AppExplorerSelection(continuing: continuing, slotCount: count, fanOrigin: direction)
+        input = makeSelection(waitingForLift: false, continuing: continuing)
         deadline = Date().addingTimeInterval(15)
     }
 
@@ -1170,7 +1178,7 @@ extension AppExplorerPresenting {
         if let media = entry?.mediaAction {
             performMedia(media)
             model.selected = nil
-            input = AppExplorerSelection(waitingForLift: contactIsDown)
+            input = makeSelection(waitingForLift: contactIsDown)
             deadline = Date().addingTimeInterval(15)
             return
         }
@@ -1348,7 +1356,7 @@ extension AppExplorerPresenting {
             self.confirmVoiceAction()
         }
         model.voiceSession = voice
-        input = AppExplorerSelection(waitingForLift: contactIsDown, slotCount: 4)
+        input = makeSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(120)
         if let prepareVoice { prepareVoice(voice, currentVoiceCatalog()); return }
         voicePreparation = Task { [weak self, weak voice] in
@@ -1854,7 +1862,9 @@ struct AppExplorerView: View {
     var body: some View {
         Group {
             if let voice = model.voiceSession {
-                VoiceHUDView(session: voice, onExit: onVoiceExit, onRetry: onVoiceRetry, onConfirm: onVoiceConfirm)
+                VoiceHUDView(session: voice, theme: model.theme, onExit: onVoiceExit,
+                    onRetry: onVoiceRetry, onConfirm: onVoiceConfirm,
+                    forceReduceTransparency: forceReduceTransparency)
                     .frame(width: 950, height: 850)
             } else { normalHUD }
         }
@@ -2150,18 +2160,15 @@ struct AppExplorerView: View {
         let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
         return Button { onSelect(direction) } label: {
             ZStack {
+                ExplorerSectorChrome(theme: model.theme, shape: shape, selected: selected,
+                    available: available, opaque: opaqueChrome)
                 if model.theme.isFloating {
-                    ExplorerAirSectorChrome(shape: shape, selected: selected, available: available, opaque: opaqueChrome)
                     Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
                         .stroke(accent.opacity(selected ? 1 : available ? 0.5 : 0.15), style: StrokeStyle(lineWidth: selected ? 2 : 0.75, lineCap: .round))
                         .frame(width: 294, height: 294)
                         .rotationEffect(.degrees(direction.angle - 180 / Double(model.slotCount) + 4))
                         .position(center)
                         .allowsHitTesting(false)
-                } else {
-                    shape.fill(LinearGradient(colors: [accent.opacity(selected ? 0.38 : 0.08),
-                        accent.opacity(selected ? 0.18 : 0.025)], startPoint: .top, endPoint: .bottom))
-                    shape.stroke(accent.opacity(selected ? 0.95 : available ? 0.35 : 0.12), lineWidth: selected ? 1.5 : 0.75)
                 }
                 if entry?.isActiveApp == true {
                     shape.stroke(Color.orange, lineWidth: 2)

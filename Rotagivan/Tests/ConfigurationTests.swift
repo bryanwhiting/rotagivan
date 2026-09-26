@@ -38,6 +38,15 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        for mode in HUDSwipeDirection.allCases {
+            for inverted in [false, true] {
+                var directionConfig = factory
+                directionConfig.settings.appExplorer = AppExplorerSettings(swipeDirection: mode, invertPickerDirection: inverted)
+                let restoredDirection = try AppConfiguration.parse(directionConfig.yaml())
+                precondition(restoredDirection.settings.appExplorer == directionConfig.settings.appExplorer,
+                    "Independent picker and navigation preferences survive YAML save/load")
+            }
+        }
         var builtInConfig = factory
         var builtInMap = AppExplorerSettings()
         for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {

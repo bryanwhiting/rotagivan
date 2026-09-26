@@ -38,6 +38,33 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        precondition(factory.settings.resolvedApplicationCommands.isEmpty, "Legacy settings need no application command migration")
+        var customCommands = factory
+        var browserURL = BindingAction.openURL("https://example.com/project")
+        browserURL.targetBrowserBundleID = "com.google.Chrome"
+        let customCommand = ApplicationCommand(bundleID: "com.google.Chrome", appName: "Google Chrome",
+            name: "Project", detail: "Open the project in Chrome.", action: browserURL)
+        customCommands.settings.applicationCommands = [customCommand]
+        customCommands.settings.actionVocabulary = [ActionVocabulary(actionID: customCommand.voiceActionID, keywordSets: [["my project"]])]
+        customCommands.settings.appExplorer = AppExplorerSettings(favorites: [browserURL.favorite(at: .up)!])
+        let commandYAML = try customCommands.yaml()
+        let commandRoundtrip = try AppConfiguration.parse(commandYAML)
+        precondition(commandRoundtrip.settings.applicationCommands == customCommands.settings.applicationCommands)
+        precondition(commandRoundtrip.settings.actionVocabulary == customCommands.settings.actionVocabulary)
+        precondition(BindingAction.from(favorite: commandRoundtrip.settings.appExplorer!.favorites[0]) == browserURL)
+        var invalidCommands = customCommands
+        invalidCommands.settings.applicationCommands = [customCommand, customCommand]
+        rejected(try ConfigurationYAML.encode(invalidCommands), "duplicate application command IDs")
+        invalidCommands.settings.applicationCommands = Array(repeating: customCommand, count: 501)
+        rejected(try ConfigurationYAML.encode(invalidCommands), "too many application commands")
+        invalidCommands.settings.applicationCommands = [customCommand]
+        invalidCommands.settings.applicationCommands?[0].action.targetBrowserBundleID = "com.apple.Safari"
+        rejected(try ConfigurationYAML.encode(invalidCommands), "application URL targeting another app")
+        invalidCommands.settings.applicationCommands?[0].action.targetBrowserBundleID = nil
+        rejected(try ConfigurationYAML.encode(invalidCommands), "application URL without target")
+        invalidCommands.settings.applicationCommands = [customCommand]
+        invalidCommands.settings.applicationCommands?[0].name = " "
+        rejected(try ConfigurationYAML.encode(invalidCommands), "blank application command name")
         for mode in HUDSwipeDirection.allCases {
             for inverted in [false, true] {
                 var directionConfig = factory

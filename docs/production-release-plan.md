@@ -15,8 +15,8 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Make **Actions** the single place to manage actions, hotkeys, gestures, and application-specific behavior.
 - [x] Organize application actions as **Applications → Slack**, **Applications → Chrome**, etc., with application icons.
 - [x] Finish moving app overrides into Actions, then remove the separate **App overrides** sidebar item without losing existing assignments.
-- [ ] Provide named, documented default commands for supported apps.
-- [ ] Support user-created application commands:
+- [x] Provide named, documented default commands for supported apps (Chrome and Slack).
+- [x] Support user-created application commands:
   - Chrome: open a URL, history, bookmarks, or a numbered tab.
   - Slack: activity, threads, search, channels, and other shortcuts.
 - [x] Keep reserved action descriptions separate from editable keyword sets and example phrases.
@@ -75,6 +75,10 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [x] Move **Calibration** under Actions and rename it **Tap calibration**.
 - [x] Remove pointer layers from Pointer & scrolling while preserving the effective pointer behavior.
 - [ ] Redesign HUD settings around the selected, centered HUD with direct layer and tile editing.
+  - Replace the fixed 850-point preview inside the scrolling settings column with a workspace centered in the visible viewport.
+  - Keep every layer reachable at narrow widths; retain shared rendering, tile popovers, drag/drop, and save paths.
+  - Show Window Manager in the same workspace instead of adding a second editor below it.
+  - Verify the actual settings page at normal and narrow window sizes, not only the standalone preview.
 - [x] Separate **Invert picker direction** from **Invert two-finger HUD navigation**.
 - [x] Default inverted two-finger navigation on, applying inversion consistently to every direction—including diagonals.
 - [ ] Refine pointer response for smoother low-speed movement and a gentler acceleration ramp, without adding noticeable lag.
@@ -85,6 +89,7 @@ Some pieces already exist. The checklist groups them into complete product exper
 - [ ] Complete first-run onboarding for permissions, voice credentials, privacy, and sync.
 - [ ] Test clean installs, upgrades, migration, multiple Macs, and recovery from failures.
 - [ ] Fix the observed quit stall so updates can close the running app without a separate termination step.
+  - A three-second sample of installed 1.1.176 (178) during the next update found the main thread blocked in `SettingsSync.start → SyncCredentials.keychain → SyncKeychain.read → SecItemCopyMatching → SecurityServer decrypt`. Investigate nonblocking credential initialization and cancellation; this sample does not implicate input-device teardown.
 - [ ] Package a signed, notarized Mac download with a repeatable release process.
 - [ ] Establish updates, version checks, release notes, and rollback/recovery.
 - [ ] Build a landing page with a demo, requirements, download, privacy policy, and support contact.
@@ -121,9 +126,22 @@ Built, installed with `./launch.sh --keep-accessibility`, and reopened under `/A
 - `ReleaseSettingsTests`: pointer-layer controls are absent from current and legacy routes while device motion controls, saved profiles, effective pointer settings, and shortcuts remain intact.
 - All regression stages passed. An early run was interrupted when visual fixes changed a source during compilation; all affected UI/controller/configuration/sync stages were rerun against frozen sources and passed. Final UI artifacts: `/private/tmp/rotagivan-ui-tests.X9Glh3`.
 
+### Third batch: application commands
+
+Adds a shared application-command editor in Actions: create, edit, disable, and delete named shortcuts or app-targeted HTTP(S) URLs. Stable command IDs preserve learned keyword sets when names or outputs change. Defaults can be duplicated into editable custom commands. The existing shortcut recorder, application icons, cached application index, and action executor are reused.
+
+- Chrome provides 17 named defaults, alongside the existing Slack defaults. Key mappings were checked against the official [Chrome](https://support.google.com/chrome/answer/157179?hl=en) and [Slack](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts) documentation. These are physical English-layout output shortcuts, not global hotkey registrations.
+- Native UI fixtures cover the actual Actions-menu entry, create/edit/disable, cancellation, confirmed deletion, shortcut recording, missing apps, invalid URLs, and capacity limits. Tests use isolated settings; nothing is executed when saving.
+- Voice confirmation revalidates the selected command's current output, app scope, and enabled state. Edited, removed, disabled, or wrong-app matches cannot execute a stale selection.
+- Explicit URL targets use a shared dispatcher and never silently fall back to the default browser. Fixtures cover keyboard, gesture, and HUD routes, missing/wrong targets, and launch failures without launching real applications. Generic URLs retain their existing default-browser behavior.
+- Exact character-set reuse in shared URL/app-ID validation reduced the optimized fixture benchmark from 226.7 ms to 24.7 ms per catalog at 500 commands (five runs, 32 application fixtures and learned vocabulary). Validation equivalence covers 270 bundle IDs and 274 URLs. This measures catalog construction, not end-to-end provider latency or rendered frame time.
+- The complete suite passed again against frozen final sources, including native Actions/Voice/settings UI, input routing, configuration, storage, and manual sync. Test artifacts: `/private/tmp/rotagivan-tests.RuoyZU`.
+- **1.1.177 (179)** was built, installed with `./launch.sh --keep-accessibility`, and reopened from `/Applications/Rotagivan.app`. Built and installed SHA-256 match (`9fbb9bd6e3a020c156c6129eec383c59e7f5c902ef2155ddac083ac8cf7e79ae`), and the persistent certificate-pinned signature verifies. The old process required scoped termination after its Keychain-blocked startup was sampled; no Accessibility or signing-trust reset occurred.
+- **Runtime limitation:** a new three-second sample of the reopened 1.1.177 (179) process found the same synchronous Keychain startup block. Installation and automated verification are complete, but interactive usability is not established. Nonblocking credential startup is the next release fix; no Keychain prompt or trust setting was changed to bypass it.
+
 ### Remaining implementation boundaries
 
-- Application subgroups exist, but a complete named application-command authoring workflow and Chrome defaults remain unfinished. Browser-targeted URL actions must not silently use a different default browser.
+- Application commands support named physical shortcuts and explicitly app-targeted HTTP(S) URLs. Browser-profile selection, existing-tab reuse, and browser-history indexing remain unfinished. The chosen application currently decides which window/profile receives a URL.
 - The secrets vault is encrypted, but settings encryption remains unfinished: local YAML/backups, settings in UserDefaults, and remote settings storage require coordinated migration. Encrypting only an export would not complete this feature.
 
 Run `zsh Rotagivan/test.sh` to reproduce the suite. A passing local suite is not a claim of cross-Mac validation, provider latency guarantees, notarization, or public-release readiness. Those gates remain unchecked.

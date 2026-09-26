@@ -11,6 +11,8 @@ struct ActionTableRow: Identifiable {
     let appBundleID: String?
     let keywords: String
     let isAppScoped: Bool
+    var customCommandID: UUID? = nil
+    var isDefaultAppCommand = false
 
     static func group(for action: BindingAction) -> String {
         switch action.kind {
@@ -44,14 +46,23 @@ struct ActionTableRow: Identifiable {
             let name = record.actionName ?? macro?.name ?? record.action.name ?? record.title
             var keybindings = Array(Set(keys)).sorted().joined(separator: "\n")
             if record.appBundleID != nil {
-                keybindings = record.overrideTrigger.map { $0.title + (record.enabled ? "" : " (disabled)") }
-                    ?? ((record.action.shortcut?.readableCombination ?? "") + " · App default")
+                if record.customCommandID != nil {
+                    keybindings = record.action.kind == .openURL
+                        ? (record.action.url ?? "") + " · Opens in " + (record.appName ?? "chosen app")
+                        : (record.action.shortcut?.readableCombination ?? "") + " · Custom command"
+                    if !record.enabled { keybindings += " (disabled)" }
+                } else {
+                    keybindings = record.overrideTrigger.map { $0.title + (record.enabled ? "" : " (disabled)") }
+                        ?? ((record.action.shortcut?.readableCombination ?? "") + " · App default")
+                }
             }
             let bundleID = record.appBundleID ?? record.action.bundleID
             let subgroup = record.appName ?? (record.action.kind == .openApp ? name : "")
             rows.append(Self(action: record.action, id: record.id, group: bundleID == nil ? group(for: record.action) : "Applications",
                 name: name, detail: record.detail, keybindings: keybindings, subgroup: subgroup, appBundleID: bundleID,
-                keywords: record.keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "\n"), isAppScoped: record.appBundleID != nil))
+                keywords: record.keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "\n"), isAppScoped: record.appBundleID != nil,
+                customCommandID: record.customCommandID,
+                isDefaultAppCommand: record.appBundleID != nil && record.overrideTrigger == nil && record.customCommandID == nil))
         }
         return rows.sorted {
             if $0.group != $1.group { return $0.group < $1.group }

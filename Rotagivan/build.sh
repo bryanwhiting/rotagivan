@@ -37,6 +37,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/HotkeyOrganizer.swift" \
   "$script_dir/ActionTableRow.swift" \
   "$script_dir/HotkeyOrganizerView.swift" \
+  "$script_dir/ApplicationCommandEditor.swift" \
   "$script_dir/AppOverrides.swift" \
   "$script_dir/AppOverridesView.swift" \
   "$script_dir/AppConfiguration.swift" \
@@ -62,6 +63,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/AppExplorerSelection.swift" \
   "$script_dir/ExplorerApplicationCatalog.swift" \
   "$script_dir/BrowserBookmarks.swift" \
+  "$script_dir/BrowserURLDispatcher.swift" \
   "$script_dir/ExplorerDestinationPicker.swift" \
   "$script_dir/WebsiteFavicon.swift" \
   "$script_dir/WindowTiling.swift" \

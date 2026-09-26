@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct ActionApplicationIcon: View {
+struct ActionApplicationIcon: View {
     let bundleID: String
     @State private var icon: NSImage?
     var body: some View {
@@ -27,7 +27,8 @@ struct ActionVocabularyEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Voice dictionary · \(row.name)").font(.title2.weight(.semibold))
-            Label("Reserved description", systemImage: "lock").font(.headline)
+            Label(row.customCommandID == nil ? "Reserved description" : "Command description",
+                systemImage: row.customCommandID == nil ? "lock" : "text.alignleft").font(.headline)
             Text(row.detail).foregroundStyle(.secondary).textSelection(.enabled)
             Text("Keyword sets").font(.headline)
             Text("One set per line; separate related phrases with commas. For example: team chat, open Slack. Up to 20 sets, 12 phrases per set, 120 characters per phrase. These hints improve matching; they do not retrain the model.")
@@ -58,6 +59,8 @@ struct HotkeyOrganizerView: View {
     @State private var vocabularyRow: ActionTableRow?
     @State private var overrideRow: ActionTableRow?
     @State private var managingOverrides = false
+    @State private var editingApplicationCommand: ApplicationCommand?
+    @State private var deletingApplicationCommand: ApplicationCommand?
     @State private var search = ""
     @State private var searchShortcut: RecordedShortcut?
     @State private var tapFilter: AppGestureTrigger?
@@ -148,6 +151,23 @@ struct HotkeyOrganizerView: View {
                 store.settings.actionVocabulary = entries.isEmpty ? nil : entries
             }
         }
+        .sheet(item: $editingApplicationCommand) { command in
+            ApplicationCommandEditor(command: command, applications: voiceApps.applications,
+                existing: store.settings.resolvedApplicationCommands, onSave: { updated in
+                    var settings = store.settings
+                    ApplicationCommandEdits.save(updated, settings: &settings)
+                    store.settings = settings
+                    editingApplicationCommand = nil
+                }, onCancel: { editingApplicationCommand = nil })
+        }
+        .sheet(item: $deletingApplicationCommand) { command in
+            ApplicationCommandRemovalConfirmation(command: command, onDelete: {
+                var settings = store.settings
+                ApplicationCommandEdits.remove(command, settings: &settings)
+                store.settings = settings
+                deletingApplicationCommand = nil
+            }, onCancel: { deletingApplicationCommand = nil })
+        }
         .sheet(item: $overrideRow) { row in
             VStack(alignment: .leading) {
                 AppOverridesView(store: store, initialBundleID: row.appBundleID ?? "com.google.Chrome")
@@ -211,6 +231,7 @@ struct HotkeyOrganizerView: View {
         } message: { Text("Its global hotkey will stop working. Tap, swipe and HUD references to this action will also become inactive until reassigned.") }
         .onReceive(store.$activeConfigurationID.dropFirst()) { _ in
             editing = nil; editingBinding = nil; migratingNamedHotkeyID = nil; deleting = nil; layer = 0; clearSearch()
+            editingApplicationCommand = nil; deletingApplicationCommand = nil
         }
     }
 
@@ -251,6 +272,16 @@ struct HotkeyOrganizerView: View {
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: .openApp(bundleID: app.bundleID, name: app.name))
     }
 
+    private func beginApplicationCommand(copying row: ActionTableRow? = nil) {
+        let rows = ActionTableRow.make(settings: store.settings, applications: voiceApps.applications, audit: audit)
+        let source = row ?? rows.first { !$0.subgroup.isEmpty && $0.subgroup == actionSubgroupFilter && $0.appBundleID != nil }
+        let bundleID = source?.appBundleID ?? ""
+        let appName = source?.subgroup ?? ""
+        editingApplicationCommand = ApplicationCommand(bundleID: bundleID, appName: appName,
+            name: row.map { $0.name + " copy" } ?? "", detail: row?.detail ?? "",
+            action: row?.action ?? BindingAction(kind: .keystroke))
+    }
+
     private func assign(_ action: BindingAction) {
         migratingNamedHotkeyID = nil
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
@@ -281,6 +312,9 @@ struct HotkeyOrganizerView: View {
                     Button("Add keyboard action or macro") { beginNewAction() }
                         .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
                     Button("Add application hotkey…") { chooseApplicationHotkey() }
+                    Button("Add application command…") { beginApplicationCommand() }
+                        .disabled(store.settings.resolvedApplicationCommands.count >= 500)
+                        .accessibilityIdentifier("application-command-add")
                     Button("Add assignment…") { assign(.hudLayer(nil)) }
                 } label: { Label("Add action", systemImage: "plus") }
             }
@@ -307,7 +341,7 @@ struct HotkeyOrganizerView: View {
                             .lineLimit(2).help(row.keywords.isEmpty ? "Teach voice alternative phrases for this action" : row.keywords)
                     }.buttonStyle(.link)
                 }.width(min: 115, ideal: 170)
-                TableColumn("Keybindings") { row in
+                TableColumn("Output / keybindings") { row in
                     HStack(spacing: 6) {
                         Text(row.keybindings.isEmpty ? "—" : row.keybindings)
                             .foregroundStyle(row.keybindings.isEmpty ? .tertiary : .secondary)
@@ -315,6 +349,16 @@ struct HotkeyOrganizerView: View {
                         Spacer(minLength: 0)
                         Menu {
                             Button("Edit voice keywords…") { vocabularyRow = row }
+                            if let id = row.customCommandID,
+                               let command = store.settings.resolvedApplicationCommands.first(where: { $0.id == id }) {
+                                Button("Edit application command…") { editingApplicationCommand = command }
+                                    .accessibilityIdentifier("application-command-edit-\(id.uuidString)")
+                                Button("Delete application command…", role: .destructive) { deletingApplicationCommand = command }
+                                    .accessibilityIdentifier("application-command-delete-\(id.uuidString)")
+                            } else if row.isDefaultAppCommand {
+                                Button("Duplicate as custom command…") { beginApplicationCommand(copying: row) }
+                                    .disabled(store.settings.resolvedApplicationCommands.count >= 500)
+                            }
                             if let bundleID = row.appBundleID {
                                 Button("Application overrides…") {
                                     var apps = store.settings.resolvedAppOverrides
@@ -346,7 +390,7 @@ struct HotkeyOrganizerView: View {
             .frame(height: 520)
             .accessibilityIdentifier("actions-table")
             if visible.isEmpty { Text("No actions match this search.").foregroundStyle(.secondary) }
-            Text("App defaults are keys sent inside that app, not global registrations. App overrides and voice shortcuts apply only in their app. Reserved descriptions are read-only; add keyword sets to teach voice your phrases.")
+            Text("Application commands and defaults run only in their app. Launch hotkeys are separate global assignments. Default descriptions are read-only; custom commands have editable names, descriptions and outputs. Add keyword sets to teach voice your phrases.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task { await voiceApps.load() }

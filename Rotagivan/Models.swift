@@ -233,6 +233,7 @@ struct BindingAction: Codable, Equatable {
     var bundleID: String? = nil
     var name: String? = nil
     var url: String? = nil
+    var targetBrowserBundleID: String? = nil
     var command: AppExplorerAction? = nil
     var media: ExplorerMediaAction? = nil
     var windowPlacement: ExplorerWindowPlacement? = nil
@@ -262,7 +263,7 @@ struct BindingAction: Codable, Equatable {
         case .hudLayer: return "Open \(name ?? "the selected HUD layer") so you can choose one of its actions."
         case .hudNavigation: return "Move to \(hudNavigation?.title ?? "the selected HUD") in the fixed HUD map without closing it."
         case .openApp: return "Launch, open, or activate \(name ?? bundleID ?? "the selected app") application."
-        case .openURL: return "Open \(url ?? "the selected URL") in the default browser."
+        case .openURL: return "Open \(url ?? "the selected URL") in \(targetBrowserBundleID ?? "the default browser")."
         case .command: return command?.description ?? "Choose a Mac or window command."
         case .media:
             switch media {
@@ -310,6 +311,7 @@ struct BindingAction: Codable, Equatable {
               hudNavigation == nil || kind == .hudNavigation,
               bundleID == nil || kind == .openApp,
               url == nil || kind == .openURL,
+              targetBrowserBundleID == nil || (kind == .openURL && Self.isValidBundleID(targetBrowserBundleID!)),
               command == nil || kind == .command,
               media == nil || kind == .media,
               windowPlacement == nil || kind == .windowPlacement,
@@ -326,16 +328,18 @@ struct BindingAction: Codable, Equatable {
             return true
         case .hudNavigation: return hudNavigation != nil
         case .openApp:
-            return bundleID.map {
-                !$0.isEmpty && $0.count <= 255 && $0 != "local.rotagivan" && $0.contains(".") &&
-                $0.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-").contains($0) }
-            } ?? false
+            return bundleID.map(Self.isValidBundleID) ?? false
         case .openURL: return url.flatMap(AppExplorerFavorite.webURL) != nil
         case .command: return command != nil
         case .media: return media != nil
         case .windowPlacement: return windowPlacement != nil
         case .tap: return tap.map { $0 != .none && $0 != .shortcut } ?? false
         }
+    }
+    private static let bundleIDCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+    static func isValidBundleID(_ value: String) -> Bool {
+        !value.isEmpty && value.count <= 255 && value != "local.rotagivan" && value.contains(".") &&
+        value.unicodeScalars.allSatisfy { bundleIDCharacters.contains($0) }
     }
     static func keystroke(_ key: RecordedShortcut) -> Self {
         Self(kind: .keystroke, keyCode: key.keyCode, modifiers: key.modifiers, keyLabel: key.keyLabel)
@@ -374,10 +378,37 @@ struct BindingAction: Codable, Equatable {
         guard isValid else { return nil }
         switch kind {
         case .openApp: return AppExplorerFavorite(direction: slot, bundleID: bundleID, name: name ?? title)
-        case .openURL: return AppExplorerFavorite(direction: slot, name: name ?? title, url: url)
+        case .openURL:
+            if targetBrowserBundleID != nil { return AppExplorerFavorite(direction: slot, name: name ?? title, shortcut: .assigned(self)) }
+            return AppExplorerFavorite(direction: slot, name: name ?? title, url: url)
         case .command: return AppExplorerFavorite(direction: slot, name: title, action: command)
         case .windowPlacement: return AppExplorerFavorite(direction: slot, name: title, windowPlacement: windowPlacement)
         default: return AppExplorerFavorite(direction: slot, name: name ?? title, shortcut: .assigned(self))
+        }
+    }
+}
+
+struct ApplicationCommand: Codable, Equatable, Identifiable {
+    var id: UUID = UUID()
+    var bundleID: String
+    var appName: String
+    var name: String
+    var detail: String
+    var action: BindingAction
+    var enabled: Bool = true
+    static func voiceID(for id: UUID) -> String { "application_command_" + id.uuidString.lowercased() }
+    var voiceActionID: String { Self.voiceID(for: id) }
+    var isValid: Bool {
+        func text(_ value: String, maximum: Int) -> Bool {
+            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.count <= maximum &&
+            !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0 != "\n" && $0 != "\t" })
+        }
+        guard BindingAction.isValidBundleID(bundleID), text(appName, maximum: 128),
+              text(name, maximum: 128), text(detail, maximum: 2000), action.isValid else { return false }
+        switch action.kind {
+        case .keystroke: return action.shortcut?.isPhysicalShortcut == true
+        case .openURL: return action.targetBrowserBundleID == bundleID
+        default: return false
         }
     }
 }
@@ -1018,8 +1049,9 @@ struct AppExplorerFavorite: Codable, Equatable {
     }
 
     /// Web links only: imported settings must not invoke file or custom URL handlers.
+    private static let invalidWebURLCharacters = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
     static func webURL(_ value: String) -> URL? {
-        guard value.count <= 4096, !value.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }),
+        guard value.count <= 4096, !value.unicodeScalars.contains(where: { invalidWebURLCharacters.contains($0) }),
               let parts = URLComponents(string: value),
               let scheme = parts.scheme?.lowercased(), ["https", "http"].contains(scheme),
               let host = parts.host, !host.isEmpty,
@@ -2137,6 +2169,8 @@ struct StoredSettings: Codable {
     var devices: ProfileDevices? = nil
     var resolvedDevices: ProfileDevices { devices ?? ProfileDevices() }
     var actionVocabulary: [ActionVocabulary]? = nil
+    var applicationCommands: [ApplicationCommand]? = nil
+    var resolvedApplicationCommands: [ApplicationCommand] { applicationCommands ?? [] }
     var appOverrides: [AppGestureOverride]? = nil
     var resolvedAppOverrides: [AppGestureOverride] { appOverrides ?? AppGestureOverride.defaults }
     var enabled = true

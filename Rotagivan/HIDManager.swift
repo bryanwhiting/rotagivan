@@ -6,6 +6,7 @@ import ApplicationServices
 
 @MainActor
 final class NavigatorHIDManager: ObservableObject {
+    let browserURLDispatcher = BrowserURLDispatcher()
     private let logger = Logger(subsystem: "local.rotagivan", category: "HID")
     enum State: Equatable {
         case stopped
@@ -276,7 +277,7 @@ final class NavigatorHIDManager: ObservableObject {
             }
         case .openURL:
             guard let string = action.url, let url = AppExplorerFavorite.webURL(string) else { return }
-            _ = NSWorkspace.shared.open(url)
+            browserURLDispatcher.open(url, targetBrowserBundleID: action.targetBrowserBundleID)
         case .command:
             guard let command = action.command else { return }
             switch command {

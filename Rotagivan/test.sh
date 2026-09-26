@@ -115,6 +115,7 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
+  Rotagivan/BrowserURLDispatcher.swift \
   Rotagivan/WebsiteFavicon.swift \
   Rotagivan/WindowTiling.swift \
   Rotagivan/ExplorerAppearance.swift \
@@ -127,9 +128,19 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/HIDManager.swift)
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/Tests/ActionTableTests.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ActionTableTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionTableTests"
 "$test_dir/ActionTableTests" "$test_dir"
+xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ApplicationCommandUISmoke"
+"$test_dir/ApplicationCommandUISmoke" "$test_dir"
+for test in ApplicationCommandTests BrowserURLDispatcherTests; do
+  xcrun swiftc -j 4 "${ui_sources[@]}" "Rotagivan/Tests/$test.swift" \
+    -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
+  "$test_dir/$test"
+done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/ActionPickerTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionPickerTests"
 "$test_dir/ActionPickerTests" "$test_dir"

@@ -9,9 +9,11 @@ struct VoiceRegisteredAction: Identifiable {
     var actionName: String? = nil
     var keywordSets: [[String]] = []
     var overrideTrigger: AppGestureTrigger? = nil
+    var customCommandID: UUID? = nil
     var enabled = true
     var title: String { actionName ?? action.title }
     var id: String {
+        if let customCommandID { return ApplicationCommand.voiceID(for: customCommandID) }
         guard let appBundleID else { return Self.id(for: action) }
         let identity = appBundleID + ":" + (overrideTrigger?.rawValue ?? "default") + ":" + action.identity
         return "action_" + SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -58,12 +60,18 @@ enum VoiceActionRegistry {
             }
             // Input bindings are not output actions. In particular, never offer
             // an activation hotkey as a keystroke that voice could send back.
-            let inputFields: Set<String> = ["trigger", "activationShortcut", "holdShortcut", "shortcuts", "appOverrides", "actionVocabulary"]
+            let inputFields: Set<String> = ["trigger", "activationShortcut", "holdShortcut", "shortcuts", "appOverrides", "applicationCommands", "actionVocabulary"]
             for (key, child) in object where !inputFields.contains(key) { visit(child) }
         }
         if let data = try? JSONEncoder().encode(settings), let object = try? JSONSerialization.jsonObject(with: data) { visit(object) }
         applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name)) }
-        var scoped = slackDefaults
+        let builtInCommands = slackDefaults + chromeDefaults
+        var scoped = builtInCommands
+        for command in settings.resolvedApplicationCommands where command.isValid {
+            scoped.append(VoiceRegisteredAction(action: command.action, detail: command.detail,
+                appBundleID: command.bundleID, appName: command.appName, actionName: command.name,
+                customCommandID: command.id, enabled: command.enabled))
+        }
         for app in settings.resolvedAppOverrides {
             for binding in app.bindings where binding.action != .none {
                 let action: BindingAction
@@ -72,7 +80,7 @@ enum VoiceActionRegistry {
                     action = .from(shortcut: shortcut)
                 } else { action = .tap(binding.action) }
                 guard action.isValid else { continue }
-                let knownName = slackDefaults.first { $0.appBundleID == app.bundleID && $0.action.shortcut?.identity == action.shortcut?.identity }?.title
+                let knownName = builtInCommands.first { $0.appBundleID == app.bundleID && $0.action.shortcut?.identity == action.shortcut?.identity }?.title
                 scoped.append(VoiceRegisteredAction(action: action,
                     detail: "In \(app.name), \(knownName ?? action.title). App override for \(binding.trigger.title). " + action.description,
                     appBundleID: app.bundleID, appName: app.name, actionName: knownName ?? action.title,
@@ -82,11 +90,42 @@ enum VoiceActionRegistry {
         for record in scoped where includeInactiveApplications || (record.enabled && record.appBundleID == activeBundleID) {
             records[record.id] = record
         }
+        let vocabularyByID = Dictionary((settings.actionVocabulary ?? []).map { ($0.actionID, $0.keywordSets) },
+            uniquingKeysWith: { first, _ in first })
         return records.values.map { record in
             var enriched = record
-            enriched.keywordSets = settings.actionVocabulary?.first { $0.actionID == record.id }?.keywordSets ?? []
+            enriched.keywordSets = vocabularyByID[record.id] ?? []
             return enriched
         }.sorted { $0.title == $1.title ? $0.id < $1.id : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    // Chrome's English-layout Mac defaults, verified September 26, 2026:
+    // https://support.google.com/chrome/answer/157179?hl=en
+    // These are app-scoped output keys, never global hotkey registrations.
+    static var chromeDefaults: [VoiceRegisteredAction] {
+        let cmd: UInt64 = 1 << 20, option: UInt64 = 1 << 19, shift: UInt64 = 1 << 17
+        var definitions: [(String, UInt16, UInt64, String, String)] = [
+            ("History", 16, cmd, "Y", "Open Chrome browsing history."),
+            ("Bookmark manager", 11, cmd | option, "B", "Open Chrome’s bookmark manager."),
+            ("Downloads", 38, cmd | shift, "J", "Open Chrome downloads."),
+            ("New tab", 17, cmd, "T", "Open a new Chrome tab."),
+            ("Reopen closed tab", 17, cmd | shift, "T", "Reopen the most recently closed Chrome tab."),
+            ("Next tab", 124, cmd | option, "Right", "Switch to the next Chrome tab."),
+            ("Previous tab", 123, cmd | option, "Left", "Switch to the previous Chrome tab."),
+            ("Focus address bar", 37, cmd, "L", "Select the address bar in Chrome.")
+        ]
+        for (index, code) in [UInt16(18), 19, 20, 21, 23, 22, 26, 28].enumerated() {
+            let number = index + 1
+            definitions.append(("Tab \(number)", code, cmd, String(number), "Switch to Chrome tab \(number), counted from the left."))
+        }
+        definitions.append(("Last tab", 25, cmd, "9", "Switch to the last Chrome tab; Command–9 selects the last tab, not specifically tab nine."))
+        return definitions.map { name, code, modifiers, label, detail in
+            var action = BindingAction.keystroke(RecordedShortcut(keyCode: code, modifiers: modifiers, keyLabel: label))
+            action.name = name
+            return VoiceRegisteredAction(action: action,
+                detail: detail + " Send \(action.shortcut!.readableCombination). Available to voice only while Google Chrome is active.",
+                appBundleID: "com.google.Chrome", appName: "Google Chrome", actionName: name)
+        }
     }
 
     // Slack's documented English-layout macOS defaults, not global hotkey registrations.

@@ -1382,11 +1382,16 @@ extension AppExplorerPresenting {
         if let requiredApp = match.record.appBundleID, frontmostBundleID() != requiredApp {
             voice.fail(VoiceError.message("The active application changed. Please try again.")); return
         }
-        guard let action = currentVoiceCatalog().first(where: { $0.id == match.id })?.action, action.isValid else {
+        guard let current = currentVoiceCatalog().first(where: { $0.id == match.id }),
+              current.enabled, match.record.enabled,
+              current.action == match.record.action,
+              current.appBundleID == match.record.appBundleID,
+              current.overrideTrigger == match.record.overrideTrigger,
+              current.action.isValid else {
             voice.fail(VoiceError.message("This action changed or was removed. Please try again.")); return
         }
         endVoiceMode()
-        performBoundAction(action, fromKeyboard: true)
+        performBoundAction(current.action, fromKeyboard: true)
     }
 
     func goBack() {

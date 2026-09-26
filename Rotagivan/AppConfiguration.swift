@@ -97,6 +97,11 @@ struct AppConfiguration: Codable {
                 throw ConfigurationError("HUD needs named apps, web URLs, or HUD layers with unique directions: up to 16 slots per layer, four nested layers, and 256 entries total. URLs must be HTTP(S) without embedded credentials.")
             }
         }
+        let commands = settings.resolvedApplicationCommands
+        guard commands.count <= 500, Set(commands.map(\.id)).count == commands.count,
+              commands.allSatisfy(\.isValid) else {
+            throw ConfigurationError("Application commands need unique IDs, valid app identifiers, bounded names and descriptions, and physical keys or HTTP(S) URLs targeting their own app (maximum 500).")
+        }
         let apps = settings.appOverrides ?? []
         guard apps.count <= 100, Set(apps.map(\.bundleID)).count == apps.count,
               apps.allSatisfy({ !$0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.name.isEmpty &&
@@ -223,7 +228,8 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "actionVocabulary actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "settings": allowed = "applicationCommands actionVocabulary actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "applicationCommands": allowed = "id bundleID appName name detail action enabled"
             case "actionVocabulary": allowed = "actionID keywordSets"
             case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
             case "sequence": allowed = "kind shortcut bundleID appName"
@@ -234,7 +240,7 @@ private indirect enum ConfigurationValue: Codable {
             case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
             case "actionBindings": allowed = "id trigger action"
             case "trigger": allowed = "keyboard gesture"
-            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath hudNavigation bundleID name url command media windowPlacement tap"
+            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath hudNavigation bundleID name url targetBrowserBundleID command media windowPlacement tap"
             case "keyboard": allowed = "keyCode modifiers keyLabel"
             case "windowPlacement": allowed = "direction layout"
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"

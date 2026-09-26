@@ -284,6 +284,59 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Application actions cannot execute after switching apps")
         controller.dismiss()
 
+        // Custom command IDs are stable while their output changes. Revalidate
+        // the complete output and scope rather than trusting that stable ID.
+        frontApp = "test.commandApp"
+        let commandID = UUID()
+        let originalCommand = VoiceRegisteredAction(action: mute.action, detail: "Original command",
+            appBundleID: frontApp, appName: "Fixture", actionName: "Fixture command", customCommandID: commandID)
+        let customDecision = VoiceDecision(matches: [VoiceMatch(record: originalCommand, probability: 1)], confidence: 1, noMatch: false)
+        controller.prepareVoice = { voice, _ in voice.receive(customDecision, final: true) }
+        func startCustom() {
+            available = [originalCommand]
+            controller.show(waitingForLift: false)
+            controller.beginVoiceMode()
+        }
+        let executionsBefore = executed.count
+        startCustom()
+        var edited = VoiceRegisteredAction(action: pause.action, detail: "Edited output", appBundleID: frontApp,
+            appName: "Fixture", actionName: "Fixture command", customCommandID: commandID)
+        precondition(edited.id == originalCommand.id, "Command identity must survive output edits")
+        available = [edited]
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == executionsBefore,
+            "Stable-ID command edits must not execute a different output than the matched record")
+        controller.dismiss()
+        startCustom()
+        edited = originalCommand; edited.enabled = false; available = [edited]
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == executionsBefore,
+            "Disabled commands must fail closed even if still present in an injected catalog")
+        controller.dismiss()
+        startCustom()
+        edited = originalCommand; edited.appBundleID = "test.otherApp"; available = [edited]
+        precondition(edited.id == originalCommand.id)
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == executionsBefore,
+            "Stable-ID command scope changes must fail closed")
+        controller.dismiss()
+        startCustom(); available = []
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == executionsBefore,
+            "Removed custom commands must fail closed")
+        controller.dismiss()
+        startCustom(); frontApp = "test.otherApp"
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == executionsBefore,
+            "Custom commands must fail closed after an application switch")
+        controller.dismiss()
+        frontApp = "test.commandApp"
+        startCustom()
+        controller.confirmVoiceAction()
+        try await Task.sleep(nanoseconds: 80_000_000)
+        precondition(executed.count == executionsBefore + 1 && executed.last == originalCommand.action,
+            "An unchanged enabled custom command executes its originally matched output exactly once")
+
         // Render without recording or network access.
 
         let preview = VoiceSession()

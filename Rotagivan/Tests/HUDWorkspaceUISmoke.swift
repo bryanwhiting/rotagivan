@@ -95,7 +95,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
             return rect
         }
         func press(_ id: String, in root: NSView? = nil) {
-            precondition(find(id, in: root).accessibilityPerformPress?() == true); settle()
+            precondition(find(id, in: root).accessibilityPerformPress?() == true, "Could not press \(id)"); settle()
         }
         func capture(_ name: String, root: NSView? = nil) throws {
             guard CommandLine.arguments.count > 1 else { return }
@@ -287,7 +287,21 @@ private struct WorkspaceViewportProbe: ViewModifier {
         precondition(nestedAfter == expected, "Nested routed drop must preserve every unrelated layer and root path")
         press("hud-layer-button-main")
         let beforeDefaultTaps = store.settings.appExplorer
-        press("hud-default-taps")
+        let setup = find("hud-workspace-setup") as! NSPopUpButtonCell
+        let setupFrame = frame(setup)
+        let setupPoint = NSPoint(x: setupFrame.midX, y: setupFrame.midY)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard let item = setup.menu?.items.first(where: { $0.title == "Default taps…" }),
+                  let action = item.action else { preconditionFailure("Setup menu must expose default tap settings") }
+            precondition(NSApp.sendAction(action, to: item.target, from: item))
+            let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}",
+                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+            NSApp.postEvent(escape, atStart: false)
+        }
+        send(.leftMouseDown, screen: setupPoint)
+        send(.leftMouseUp, screen: setupPoint)
+        settle()
         guard let tapSheet = panel.attachedSheet, let tapRoot = tapSheet.contentView else { preconditionFailure("Default tap actions need a native sheet") }
         _ = find("default-tap-settings", in: tapRoot)
         try capture("hud-default-taps-sheet", root: tapRoot)

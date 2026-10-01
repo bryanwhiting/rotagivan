@@ -16,13 +16,15 @@ struct HUDSettingsView: View {
             HStack {
                 Text("HUD workspace").font(.title2.weight(.semibold))
                 Spacer()
-                Button("Default taps…", action: onEditDefaultTaps)
-                    .accessibilityIdentifier("hud-default-taps")
-                Menu("Built-in layers") {
-                    ForEach(ExplorerReservedGroup.allCases) { group in
-                        Button(group.title) { selectedGroup = group }
+                Menu("Setup") {
+                    Button("Default taps…", action: onEditDefaultTaps)
+                        .accessibilityIdentifier("hud-default-taps")
+                    Menu("Built-in layers") {
+                        ForEach(ExplorerReservedGroup.allCases) { group in
+                            Button(group.title) { selectedGroup = group }
+                        }
                     }
-                }.fixedSize()
+                }.fixedSize().accessibilityIdentifier("hud-workspace-setup")
             }
             AppExplorerSettingsView(store: store, workspace: true)
         }
@@ -321,17 +323,20 @@ struct AppExplorerSettingsView: View {
     }
 
     private var visualHUDControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 14) {
             visualHUDControlRow
             if workspace {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 8) {
-                        layerRailButton(nil, name: "Main HUD", symbol: "safari")
-                        ForEach(baseSettings.holdLayers ?? []) { layer in
-                            layerRailButton(layer.id, name: layer.name, symbol: layer.builtIn?.symbol ?? "square.3.layers.3d")
-                        }
-                    }.padding(.vertical, 4)
-                }.accessibilityIdentifier("hud-layer-rail")
+                HStack(spacing: 16) {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(spacing: 4) {
+                            layerRailButton(nil, name: "Main HUD", symbol: "safari")
+                            ForEach(baseSettings.holdLayers ?? []) { layer in
+                                layerRailButton(layer.id, name: layer.name, symbol: layer.builtIn?.symbol ?? "square.3.layers.3d")
+                            }
+                        }.padding(.vertical, 4)
+                    }.accessibilityIdentifier("hud-layer-rail")
+                    if groupPath.isEmpty && !editingWindowManager { workspaceLocation.fixedSize() }
+                }
             }
             if !workspace {
                 Text("Click any surrounding HUD to bring it forward and edit it. Use Actions & hotkeys to add actions to the selected HUD.")
@@ -352,7 +357,11 @@ struct AppExplorerSettingsView: View {
                 Divider()
                 Toggle("Animate HUD feedback", isOn: animationBinding)
                 Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
-        } label: { Image(systemName: "slider.horizontal.3") }
+                Divider()
+                Button("Layer settings…") { workspaceDetails = true }
+                    .accessibilityIdentifier("hud-layer-settings")
+                manageHUDCommands
+        } label: { Label("Options", systemImage: "slider.horizontal.3") }
         .fixedSize().help("Theme and HUD options").accessibilityLabel("Theme and HUD options")
     }
     private var windowWorkspace: some View {
@@ -371,15 +380,17 @@ struct AppExplorerSettingsView: View {
     }
     private var workspaceLocation: some View {
         HStack(spacing: 6) {
-            Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle ?? "Main HUD") { groupPath = [] }
-                .buttonStyle(.link).lineLimit(1)
+            if workspaceCanvasOnly || !groupPath.isEmpty {
+                Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle ?? "Main HUD") { groupPath = [] }
+                    .buttonStyle(.link).lineLimit(1)
+            }
             ForEach(groupPath.indices, id: \.self) { index in
                 Image(systemName: "chevron.right").font(.caption2)
                 Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD layer") {
                     groupPath = Array(groupPath.prefix(index + 1))
                 }.buttonStyle(.link).lineLimit(1)
             }
-            Spacer(minLength: 4)
+            if workspaceCanvasOnly || !groupPath.isEmpty { Spacer(minLength: 4) }
             if generatedBuiltIn == nil {
                 Menu {
                     Picker("Slots", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
@@ -408,18 +419,23 @@ struct AppExplorerSettingsView: View {
     }
     private func layerRailButton(_ id: UUID?, name: String, symbol: String) -> some View {
         Button { selectedLayerID = id; groupPath = [] } label: {
-            Label(name, systemImage: symbol).lineLimit(1).padding(.horizontal, 4)
-        }.buttonStyle(.bordered).tint(selectedLayerID == id ? .teal : nil)
+            Text(name).font(.system(size: 12, weight: selectedLayerID == id ? .semibold : .regular))
+                .lineLimit(1).fixedSize().padding(.horizontal, 12).padding(.vertical, 7)
+                .foregroundStyle(selectedLayerID == id ? Color.primary : Color.secondary)
+                .background(selectedLayerID == id ? Color.accentColor.opacity(0.14) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+        }.buttonStyle(.plain)
             .accessibilityIdentifier("hud-layer-button-" + (id?.uuidString ?? "main"))
             .accessibilityValue(selectedLayerID == id ? "Selected" : "Not selected")
     }
     private var visualHUDControlRow: some View {
             HStack {
-                if workspace {
+                if workspaceCanvasOnly {
                     hudLayerPicker.labelsHidden().frame(width: 160)
                         .accessibilityLabel(workspaceCanvasOnly ? "Window layout" : "Editing HUD")
-                } else { hudLayerPicker.frame(maxWidth: 260) }
-                Button(workspace ? "Actions…" : "Actions & hotkeys…") {
+                } else if !workspace { hudLayerPicker.frame(maxWidth: 260) }
+                Button("Actions & hotkeys…") {
                     if !groupPath.isEmpty { openGroupHotkeys() }
                     else if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
                         creatingLayer = false; editingLayer = layer
@@ -464,27 +480,26 @@ struct AppExplorerSettingsView: View {
                 .disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
                 .accessibilityIdentifier("hud-visual-add")
-                Menu {
-                    Button("Import bookmarks…") { importingBookmarks = true }
-                        .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
-                    if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
-                        Button("Rename / edit HUD…") { creatingLayer = false; editingLayer = layer }
-                        Menu("Position") {
-                            ForEach(HUDLayerPosition.allCases) { position in
-                                Button(position.title) { placeHUDLayer(layer.id, at: position) }
-                            }
-                        }
-                        Button("Remove HUD…", role: .destructive) { removingLayer = true }
-                    }
-                } label: { Label("Manage", systemImage: "ellipsis.circle") }
-                    .fixedSize()
                 if workspace && !workspaceCanvasOnly {
-                    Button { workspaceDetails = true } label: { Image(systemName: "gearshape") }
-                        .help("Layer settings").accessibilityLabel("Layer settings…")
-                        .accessibilityIdentifier("hud-layer-settings")
                     workspaceOptions
+                } else {
+                    Menu { manageHUDCommands } label: { Label("Manage", systemImage: "ellipsis.circle") }
+                        .fixedSize()
                 }
             }
+    }
+    @ViewBuilder private var manageHUDCommands: some View {
+        Button("Import bookmarks…") { importingBookmarks = true }
+            .disabled(generatedBuiltIn != nil || isRecentGroup || availableBookmarkSlots.isEmpty)
+        if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
+            Button("Rename / edit HUD…") { creatingLayer = false; editingLayer = layer }
+            Menu("Position") {
+                ForEach(HUDLayerPosition.allCases) { position in
+                    Button(position.title) { placeHUDLayer(layer.id, at: position) }
+                }
+            }
+            Button("Remove HUD…", role: .destructive) { removingLayer = true }
+        }
     }
     private var hudLayerPicker: some View {
         Picker(workspaceCanvasOnly ? "Window layout" : "Editing HUD", selection: $selectedLayerID) {
@@ -531,7 +546,7 @@ struct AppExplorerSettingsView: View {
             if workspace {
                 if !workspaceCanvasOnly { visualHUDControls }
                 else { visualHUDControlRow }
-                if !editingWindowManager { workspaceLocation }
+                if !editingWindowManager && (workspaceCanvasOnly || !groupPath.isEmpty) { workspaceLocation }
                 if editingWindowManager { windowWorkspace }
                 else { visualHUDPreview.frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else {

@@ -245,7 +245,9 @@ struct AppExplorerSettingsView: View {
         return ExplorerSlot.slots(settings.count(at: groupPath)).filter { !occupied.contains($0) }
     }
     private var existingBookmarkURLs: Set<String> {
-        Set(favorites.compactMap(\.url))
+        Set(favorites.compactMap { favorite in
+            favorite.url ?? (favorite.shortcut?.assignedAction?.kind == .openURL ? favorite.shortcut?.assignedAction?.url : nil)
+        })
     }
     private var themeBinding: Binding<ExplorerTheme> {
         Binding(get: { baseSettings.resolvedTheme }, set: { theme in
@@ -744,8 +746,10 @@ struct AppExplorerSettingsView: View {
                     guard !bookmarks.isEmpty, bookmarks.count <= slots.count else { return false }
                     var next = settings
                     for (bookmark, slot) in zip(bookmarks, slots) {
-                        let favorite = AppExplorerFavorite(direction: slot, name: bookmark.title,
-                            url: bookmark.url.absoluteString)
+                        var action = BindingAction.openURL(bookmark.url.absoluteString)
+                        action.targetBrowserBundleID = bookmark.source == .chrome ? "com.google.Chrome" : "com.apple.Safari"
+                        guard var favorite = action.favorite(at: slot) else { return false }
+                        favorite.name = bookmark.title
                         guard next.setFavorite(favorite, at: slot, in: groupPath) else { return false }
                     }
                     guard next.hasValidFavorites, save(next) else { return false }

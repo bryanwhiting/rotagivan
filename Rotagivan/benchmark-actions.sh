@@ -9,6 +9,8 @@ common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResp
 # Compile without the app, input managers, real settings, or live providers.
 xcrun swiftc -O -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VaultCrypto.swift Rotagivan/VoiceActions.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/Tests/ActionCatalogBenchmark.swift \
-  -framework AppKit -framework Security -o "$benchmark_dir/ActionCatalogBenchmark"
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift \
+  Rotagivan/HotKeyManager.swift Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
+  Rotagivan/Tests/ActionCatalogBenchmark.swift \
+  -framework AppKit -framework Carbon -framework Security -o "$benchmark_dir/ActionCatalogBenchmark"
 "$benchmark_dir/ActionCatalogBenchmark"

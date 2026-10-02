@@ -1,6 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct ActionTablePresentationID: Hashable {
+    let revision: UInt64
+    let group: String
+    let subgroup: String
+    let hasSearch: Bool
+}
+
 struct ActionApplicationIcon: View {
     let bundleID: String
     @State private var icon: NSImage?
@@ -52,6 +59,7 @@ struct HotkeyOrganizerView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var keys = ShortcutSettings.shared
     @ObservedObject private var voiceApps = VoiceApplicationIndex.shared
+    @StateObject private var catalog: ActionCatalogSnapshot
     @State private var tab = "Dictionary"
     @AppStorage("actions.showIDs") private var showActionIDs = false
     @State private var actionGroupFilter = "All groups"
@@ -74,6 +82,11 @@ struct HotkeyOrganizerView: View {
     @State private var migratingNamedHotkeyID: String?
     @State private var expandedAssignment: String?
 
+    @MainActor init(store: SettingsStore, catalog: ActionCatalogSnapshot? = nil) {
+        self.store = store
+        _catalog = StateObject(wrappedValue: catalog ?? ActionCatalogSnapshot())
+    }
+
     private var selectedLayer: UInt32 { store.profiles.contains { $0.id == layer } ? layer : store.defaultProfileID }
     private var occupiedGestures: [AppGestureTrigger: String] {
         let gestures = store.gestures(for: selectedLayer, device: device)
@@ -85,10 +98,11 @@ struct HotkeyOrganizerView: View {
         })
     }
     private var audit: HotkeyAudit {
-        HotkeyAudit(settings: store.settings, shortcuts: ShortcutConfiguration(keys), layerID: selectedLayer, device: device)
+        catalog.value?.audit ?? HotkeyAudit()
     }
     private var reservedGlobalKeys: [RecordedShortcut] {
-        audit.assignments.filter {
+        // A background display snapshot must never weaken current assignment validation.
+        HotkeyAudit(settings: store.settings, shortcuts: ShortcutConfiguration(keys), layerID: selectedLayer, device: device).assignments.filter {
             $0.enabled && $0.inputScope == "" && !$0.id.hasPrefix("Global bindings.binding.") &&
             $0.id != migratingNamedHotkeyID.map { "dictionary.hotkey." + $0 }
         }.compactMap(\.shortcut).filter(\.isPhysicalShortcut)
@@ -163,6 +177,10 @@ struct HotkeyOrganizerView: View {
             }
         }
         .font(.system(size: 12))
+        .onAppear { catalog.connect(store: store, keys: keys, apps: voiceApps, layerID: selectedLayer, device: device) }
+        .onDisappear { catalog.disconnect() }
+        .onChange(of: selectedLayer) { _ in catalog.setScope(layerID: selectedLayer, device: device) }
+        .onChange(of: device) { _ in catalog.setScope(layerID: selectedLayer, device: device) }
         .sheet(item: $vocabularyRow) { row in
             ActionVocabularyEditor(row: row) { text in
                 var entries = store.settings.actionVocabulary ?? []
@@ -321,27 +339,24 @@ struct HotkeyOrganizerView: View {
     }
 
     private var dictionary: some View {
-        let rows = ActionTableRow.make(settings: store.settings, applications: voiceApps.applications, audit: audit)
-        let visible = rows.filter { row in
-            (actionGroupFilter == "All groups" || row.group == actionGroupFilter) &&
-                (actionSubgroupFilter == "All subgroups" || row.subgroup == actionSubgroupFilter) &&
-                textMatches([row.id, row.group, row.subgroup, row.name, row.detail, row.keybindings, row.keywords].joined(separator: " "))
-        }
+        let snapshot = catalog.value
+        let visible = snapshot?.filtered(group: actionGroupFilter, subgroup: actionSubgroupFilter, search: search) ?? []
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Picker("Group", selection: $actionGroupFilter) {
                     Text("All groups").tag("All groups")
-                    ForEach(Array(Set(rows.map(\.group))).sorted(), id: \.self) { Text($0).tag($0) }
+                    ForEach(snapshot?.groups ?? [], id: \.self) { Text($0).tag($0) }
                 }.labelsHidden().frame(width: 180).accessibilityLabel("Action group")
                 .onChange(of: actionGroupFilter) { _ in actionSubgroupFilter = "All subgroups" }
-                if rows.contains(where: { (actionGroupFilter == "All groups" || $0.group == actionGroupFilter) && !$0.subgroup.isEmpty }) {
+                if !(snapshot?.subgroups[actionGroupFilter] ?? []).isEmpty {
                 Picker("Subgroup", selection: $actionSubgroupFilter) {
                     Text("All subgroups").tag("All subgroups")
-                    ForEach(Array(Set(rows.filter { actionGroupFilter == "All groups" || $0.group == actionGroupFilter }.map(\.subgroup))).filter { !$0.isEmpty }.sorted(), id: \.self) { Text($0).tag($0) }
+                    ForEach(snapshot?.subgroups[actionGroupFilter] ?? [], id: \.self) { Text($0).tag($0) }
                 }.labelsHidden().frame(width: 180).accessibilityLabel("Action subgroup")
                 }
                 Spacer()
                 Text("\(visible.count) actions").foregroundStyle(.secondary)
+                if catalog.isRefreshing { ProgressView().controlSize(.small).accessibilityLabel("Updating actions") }
             }
             Table(visible) {
                 if showActionIDs {
@@ -413,6 +428,10 @@ struct HotkeyOrganizerView: View {
                 }.width(min: 135, ideal: 200)
             }
             .frame(height: 520)
+            // Recreate the native table when its filter scope changes. AppKit
+            // otherwise reenters its delegate while expanding filtered rows.
+            .id(ActionTablePresentationID(revision: catalog.publishedRevision, group: actionGroupFilter,
+                subgroup: actionSubgroupFilter, hasSearch: !search.isEmpty))
             .accessibilityIdentifier("actions-table")
             if visible.isEmpty { Text("No actions match this search.").foregroundStyle(.secondary) }
             Text("Application commands and defaults run only in their app. Launch hotkeys are separate global assignments. Default descriptions are read-only; custom commands have editable names, descriptions and outputs. Add keyword sets to teach voice your phrases.")

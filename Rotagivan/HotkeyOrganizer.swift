@@ -34,6 +34,7 @@ struct HotkeyAudit {
     }
     var assignments: [Assignment] = []
     var findings: [Finding] = []
+    init() {}
     var displayAssignments: [Assignment] {
         let outputs = Dictionary(grouping: assignments.filter { $0.parentAssignmentID != nil }, by: { $0.parentAssignmentID! })
         return assignments.filter { $0.parentAssignmentID == nil }.map { original in

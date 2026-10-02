@@ -2,14 +2,6 @@ import Foundation
 import ConfigurationYAML
 
 extension ShortcutConfiguration {
-    @MainActor init(_ source: ShortcutSettings) {
-        normal = source.normal; precision = source.precision
-        actions = source.actions; additional = source.additional
-        profileActions = source.profileActions
-        dragShortcut = source.dragShortcut
-        holdToActivate = UserDefaults.standard.object(forKey: "shortcut.hold") as? Bool ?? true
-    }
-
     func preferences(defaultID: UInt32 = 1) throws -> [String: Any] {
         let encoder = JSONEncoder()
         var result: [String: Any] = [

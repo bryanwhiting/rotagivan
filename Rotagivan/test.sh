@@ -16,6 +16,12 @@ for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollRespo
 done
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/HotkeyOrganizerTests.swift -o "$test_dir/HotkeyOrganizerTests"
 "$test_dir/HotkeyOrganizerTests"
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKeyManager.swift \
+  Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
+  Rotagivan/VaultCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift \
+  Rotagivan/Tests/ActionCatalogSnapshotTests.swift -framework AppKit -framework Carbon -framework Security \
+  -o "$test_dir/ActionCatalogSnapshotTests"
+"$test_dir/ActionCatalogSnapshotTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/MacroAuditTests.swift -o "$test_dir/MacroAuditTests"
 "$test_dir/MacroAuditTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
@@ -134,12 +140,12 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift)
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ActionTableTests.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ActionTableTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionTableTests"
 "$test_dir/ActionTableTests" "$test_dir"
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ApplicationCommandUISmoke"
 "$test_dir/ApplicationCommandUISmoke" "$test_dir"
 for test in ApplicationCommandTests BrowserURLDispatcherTests; do

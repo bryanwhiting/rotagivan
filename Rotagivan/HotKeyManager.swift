@@ -11,6 +11,7 @@ extension Notification.Name {
 @MainActor
 final class ShortcutSettings: ObservableObject {
     static let shared = ShortcutSettings()
+    private let defaults: UserDefaults
     @Published var normal: ProfileShortcut { didSet { save() } }
     @Published var precision: ProfileShortcut { didSet { save() } }
     @Published var error: String?
@@ -32,7 +33,7 @@ final class ShortcutSettings: ObservableObject {
         self.profileActions = profileActions
         self.dragShortcut = dragShortcut ?? Self.legacyDragShortcut(
             defaultID: defaultID, actions: actions, profileActions: profileActions)
-        UserDefaults.standard.set(holdToActivate, forKey: "shortcut.hold")
+        defaults.set(holdToActivate, forKey: "shortcut.hold")
         replacingConfiguration = false
         save()
     }
@@ -56,34 +57,44 @@ final class ShortcutSettings: ObservableObject {
     static let keys: [(String, UInt32)] = [("F1",122),("F2",120),("F3",99),("F4",118),("F5",96),("F6",97),("F7",98),("F8",100),("F9",101),("F10",109),("F11",103),("F12",111),("F13",105),("F14",107),("F15",113),("F16",106),("F17",64),("F18",79),("F19",80),("F20",90)] + Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ").enumerated().map { index, letter in
         (String(letter), [UInt32(0),11,8,2,14,3,5,4,34,38,40,37,46,45,31,35,12,15,1,17,32,9,13,7,16,6][index])
     }
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         func read(_ key: String) -> ProfileShortcut? {
-            UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(ProfileShortcut.self, from: $0) }
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(ProfileShortcut.self, from: $0) }
         }
         normal = read("shortcut.normal") ?? ProfileShortcut()
-        let loadedProfileActions = UserDefaults.standard.data(forKey: "shortcut.profileActions").flatMap { try? JSONDecoder().decode([UInt32: [ProfileShortcut]].self, from: $0) } ?? [:]
+        let loadedProfileActions = defaults.data(forKey: "shortcut.profileActions").flatMap { try? JSONDecoder().decode([UInt32: [ProfileShortcut]].self, from: $0) } ?? [:]
         profileActions = loadedProfileActions
-        additional = UserDefaults.standard.data(forKey: "shortcut.additional").flatMap { try? JSONDecoder().decode([UInt32: ProfileShortcut].self, from: $0) } ?? [:]
+        additional = defaults.data(forKey: "shortcut.additional").flatMap { try? JSONDecoder().decode([UInt32: ProfileShortcut].self, from: $0) } ?? [:]
         let loadedActions = (3...5).map { read("shortcut.action.\($0)") ?? ProfileShortcut(keyCode: UInt32($0 == 3 ? 79 : $0 == 4 ? 80 : 90)) }
         actions = loadedActions
-        let defaultID = UserDefaults.standard.data(forKey: "settings.v1")
+        let defaultID = defaults.data(forKey: "settings.v1")
             .flatMap { try? JSONDecoder().decode(StoredSettings.self, from: $0) }?.resolvedDefaultProfileID ?? 1
         dragShortcut = read("shortcut.drag") ?? Self.legacyDragShortcut(
             defaultID: defaultID, actions: loadedActions, profileActions: loadedProfileActions)
         precision = read("shortcut.precision") ?? ProfileShortcut(enabled: true)
-        let legacyHold = UserDefaults.standard.object(forKey: "shortcut.hold") as? Bool ?? true
+        let legacyHold = defaults.object(forKey: "shortcut.hold") as? Bool ?? true
         if normal.holdToActivate == nil { normal.holdToActivate = legacyHold }
         if precision.holdToActivate == nil { precision.holdToActivate = legacyHold }
     }
     private func save() {
         guard !replacingConfiguration else { return }
-        for (index, action) in actions.enumerated() { UserDefaults.standard.set(try? JSONEncoder().encode(action), forKey: "shortcut.action.\(index + 3)") }
-        UserDefaults.standard.set(try? JSONEncoder().encode(normal), forKey: "shortcut.normal")
-        UserDefaults.standard.set(try? JSONEncoder().encode(precision), forKey: "shortcut.precision")
-        UserDefaults.standard.set(try? JSONEncoder().encode(additional), forKey: "shortcut.additional")
-        UserDefaults.standard.set(try? JSONEncoder().encode(profileActions), forKey: "shortcut.profileActions")
-        UserDefaults.standard.set(try? JSONEncoder().encode(dragShortcut), forKey: "shortcut.drag")
+        for (index, action) in actions.enumerated() { defaults.set(try? JSONEncoder().encode(action), forKey: "shortcut.action.\(index + 3)") }
+        defaults.set(try? JSONEncoder().encode(normal), forKey: "shortcut.normal")
+        defaults.set(try? JSONEncoder().encode(precision), forKey: "shortcut.precision")
+        defaults.set(try? JSONEncoder().encode(additional), forKey: "shortcut.additional")
+        defaults.set(try? JSONEncoder().encode(profileActions), forKey: "shortcut.profileActions")
+        defaults.set(try? JSONEncoder().encode(dragShortcut), forKey: "shortcut.drag")
     }
+    var configuration: ShortcutConfiguration {
+        ShortcutConfiguration(normal: normal, precision: precision, actions: actions,
+            additional: additional, profileActions: profileActions, dragShortcut: dragShortcut,
+            holdToActivate: defaults.object(forKey: "shortcut.hold") as? Bool ?? true)
+    }
+}
+
+extension ShortcutConfiguration {
+    @MainActor init(_ source: ShortcutSettings) { self = source.configuration }
 }
 
 // Holds temporarily override the latched profile; toggles survive key release.

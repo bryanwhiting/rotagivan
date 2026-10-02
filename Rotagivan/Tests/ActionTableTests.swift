@@ -54,12 +54,19 @@ import SwiftUI
         store.settings = settings
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         let before = try encoder.encode(store.settings)
-        let host = NSHostingView(rootView: HotkeyOrganizerView(store: store).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light).defaultAppStorage(defaults))
+        let catalog = ActionCatalogSnapshot()
+        let host = NSHostingView(rootView: HotkeyOrganizerView(store: store, catalog: catalog).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light).defaultAppStorage(defaults))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 790), styleMask: [.titled], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host; panel.center(); panel.makeKeyAndOrderFront(nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        let table = descendants(host).compactMap { $0 as? NSTableView }.first!
+        func renderedTable() -> NSTableView { descendants(host).compactMap { $0 as? NSTableView }.first! }
+        var table = renderedTable()
+        let deadline = Date().addingTimeInterval(10)
+        while catalog.value == nil || catalog.isRefreshing {
+            precondition(Date() < deadline, "Background catalog did not finish")
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
         precondition(table.tableColumns.count == 6, "IDs must be hidden by default")
         func capture(_ name: String) throws {
             host.layoutSubtreeIfNeeded()
@@ -68,6 +75,24 @@ import SwiftUI
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
         }
         try capture("actions-table")
+        guard let searchField = descendants(host).compactMap({ $0 as? NSTextField })
+            .first(where: { $0.isEditable && $0.placeholderString == "Search actions, apps or shortcuts" }) else {
+            preconditionFailure("Actions must expose native search")
+        }
+        let buildsBeforeSearch = catalog.buildCount
+        let rowsBeforeSearch = table.numberOfRows
+        searchField.stringValue = "Slack"
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        table = renderedTable()
+        precondition(table.numberOfRows > 0 && table.numberOfRows < rowsBeforeSearch, "Native search must filter the cached table")
+        precondition(catalog.buildCount == buildsBeforeSearch, "Native typing must never reconstruct the catalog")
+        try capture("actions-table-search")
+        searchField.stringValue = ""
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        table = renderedTable()
+        precondition(table.numberOfRows == rowsBeforeSearch && catalog.buildCount == buildsBeforeSearch)
         panel.setContentSize(NSSize(width: 740, height: 790))
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         try capture("actions-table-compact")

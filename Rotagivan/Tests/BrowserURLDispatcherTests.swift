@@ -5,6 +5,7 @@ import AppKit
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         let dispatcher = BrowserURLDispatcher()
+        dispatcher.defaultBrowserBundleID = { _ in "test.browser" }
         let url = URL(string: "https://example.com/work")!
         let browser = URL(fileURLWithPath: "/Applications/Fixture Browser.app")
         var lookups: [String] = []
@@ -40,6 +41,37 @@ import AppKit
         precondition(failures.count == 4 && defaults.count == 1, "A lookup resolving a different bundle must fail closed")
         dispatcher.open(URL(string: "javascript:alert(1)")!, targetBrowserBundleID: "test.browser")
         precondition(failures.count == 4, "Invalid URL schemes are never dispatched")
+
+        var chromeOpens = 0
+        dispatcher.openChrome = { _, completion in chromeOpens += 1; completion(nil) }
+        dispatcher.open(url, targetBrowserBundleID: "com.google.Chrome")
+        dispatcher.defaultBrowserBundleID = { _ in "com.google.Chrome" }
+        dispatcher.open(url, targetBrowserBundleID: nil)
+        precondition(chromeOpens == 2 && defaults.count == 1, "Explicit and default Chrome use tab reuse")
+        dispatcher.openChrome = { _, completion in completion(-1743) }
+        dispatcher.open(url, targetBrowserBundleID: "com.google.Chrome")
+        precondition(failures.count == 5 && defaults.count == 1, "Automation denial must not open duplicates")
+
+        let tabs = ChromeBookmarkTabs(run: { source in
+            precondition(source.contains("mode of w is \"normal\""))
+            precondition(source.contains("if URL of t is requestedURL"))
+            if source.contains("set preferredID to \"fixture-tab\"") { return ("fixture-tab", nil) }
+            precondition(source.contains("set preferredID to \"\""))
+            return ("fixture-tab", nil)
+        })
+        await withCheckedContinuation { continuation in
+            tabs.open(url) { code in precondition(code == nil); continuation.resume() }
+        }
+        await withCheckedContinuation { continuation in
+            tabs.open(url) { code in precondition(code == nil); continuation.resume() }
+        }
+        precondition(ChromeBookmarkTabs.literal("a\"b\\c\nd") == "\"a\\\"b\\\\c\\nd\"")
+        precondition(ChromeBookmarkTabs.script(url: "https://example.com?account=one#section", preferredTab: "")
+            .contains("set normalizedURL to \"https://example.com/?account=one#section\""),
+            "Bare origins must match Chrome's slash normalization without dropping query or fragment")
+        var compileError: NSDictionary?
+        let script = NSAppleScript(source: ChromeBookmarkTabs.script(url: url.absoluteString, preferredTab: ""))!
+        precondition(script.compileAndReturnError(&compileError), "Chrome script must compile: \(String(describing: compileError))")
 
         let suite = "Rotagivan.BrowserDispatch.\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: suite)!

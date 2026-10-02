@@ -94,6 +94,73 @@ active-app scope checks or action execution validation.
 
 No app-performance improvement is claimed by adding this benchmark.
 
+### Catalog snapshot implementation batch
+
+Runtime implementation now separates catalog building from Actions rendering.
+`ActionCatalogSnapshot` admits one background build and retains only the latest
+pending revision. It publishes audit, rows, group lists, and search text together;
+obsolete/disconnected results cannot replace the visible snapshot. Search, filters,
+and view changes reuse the snapshot. Settings, shortcut configuration, the local
+application index, and selected device/layer invalidate it. Global assignment
+reservation checks still use current state, not a cached display audit.
+
+Optimized cached-search medians measured on the same synthetic fixture sizes:
+
+| Synthetic apps / macros | Full row rebuild median in this run | Cached search median | Cached search p95 |
+| --- | ---: | ---: | ---: |
+| 100 / 0 | 19.33 ms | 0.36 ms | 0.40 ms |
+| 300 / 100 | 46.97 ms | 0.68 ms | 0.68 ms |
+| 1000 / 500 | 182.64 ms | 1.76 ms | 1.82 ms |
+
+These timings show the CPU cost avoided during repeated interaction, not a claimed
+HUD startup, animation-frame, live-network, or whole-app speedup. Cold catalog
+construction still takes time in the background. The remaining serialization,
+hashing, icon-loading, and indexing costs need further measurement/optimization.
+Rust integration and the other production gates remain open.
+
+`ActionCatalogSnapshotTests` verifies preserved IDs/order and Unicode matching,
+latest-revision publication, single-build admission, disconnect/reconnect drain,
+coalescing, scan-free repeated filtering, and settings/vocabulary/application/
+shortcut/scope observation with isolated preferences. Native Actions search is
+also instrumented to verify that typing filters rows without another catalog build.
+Native ActionTableTests passed for typing/clearing search, compact layout and ID
+columns, with no NSTableView reentrancy warning. ManualSyncTests passed. The full
+ReleaseSettings test passed without warnings using a temporary source whose
+revision-keyed table identity matches the final product behavior. Configuration,
+snapshot lifecycle and ApplicationCommand UI checks also passed in this batch.
+
+After integrating concurrent main changes, BrowserURLDispatcherTests passed
+again with the onboarding source included. Rotagivan **1.1.194 (196)** was built
+and installed/reopened with `./launch.sh --keep-accessibility`; the installed
+bundle passed strict D47A-certificate-pinned verification, and the built/installed
+executable SHA-256 matched:
+`2a1a8d4df80fed4cd757fc0f6366ffb2e3b011996f9a914063f9f93576c0400a`.
+The running executable was `/Applications/Rotagivan.app/Contents/MacOS/Rotagivan`.
+This does not close the real-Chrome, physical cross-Mac, billing, or Rust gates.
+
+## Chrome bookmark tab reuse
+
+Chrome URL dispatch now queries Chrome's live normal-window tabs on a serial
+background queue, rather than asking Launch Services to open another URL. It
+prefers the last tab selected for that exact bookmark URL, otherwise focuses an
+existing exact match, and only creates a tab when none remains. Remembered IDs
+are bounded, process-local, and never uploaded. Closed or navigated-away tabs are
+not reused; incognito windows are excluded. Rapid repeated requests are serialized.
+Explicit Chrome actions and URLs whose default browser is Chrome use this path.
+Newly imported bookmarks retain their source browser, website icon and title.
+
+The first use requires macOS Automation consent to control Chrome. Denial produces
+an actionable error and does not fall back to opening duplicates. URL/script
+errors are not logged with private query strings. Bare-origin trailing slashes are
+normalized without discarding queries/fragments. Exact URL matching deliberately
+does not collapse different queries/fragments or infer redirect destinations.
+Chrome does not expose profile identity through this scripting dictionary; this
+is not yet a profile-aware browser index or persisted browsing history.
+
+Tests use injected runners and compile the generated AppleScript against the
+installed Chrome dictionary, without launching or modifying real browser tabs.
+Live tab focusing and first-use consent still require a hands-on Chrome check.
+
 ## Sync/backend baseline
 
 `npm test` in `SyncBackend` passed **10 tests** against the existing isolated Worker

@@ -697,6 +697,11 @@ extension AppExplorerPresenting {
                 icon: nil, url: nil, mediaAction: media))
         }
         if let shortcut = favorite.shortcut {
+            if let action = shortcut.assignedAction, action.kind == .openURL, favorite.isValidDestination,
+               let url = action.url.flatMap(AppExplorerFavorite.webURL) {
+                return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                    icon: nil, url: url, isWebURL: true, shortcut: shortcut))
+            }
             let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
             return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
                 icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil))

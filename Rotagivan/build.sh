@@ -37,6 +37,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/Models.swift" \
   "$script_dir/HotkeyOrganizer.swift" \
   "$script_dir/ActionTableRow.swift" \
+  "$script_dir/ActionCatalogSnapshot.swift" \
   "$script_dir/HotkeyOrganizerView.swift" \
   "$script_dir/ApplicationCommandEditor.swift" \
   "$script_dir/AppOverrides.swift" \

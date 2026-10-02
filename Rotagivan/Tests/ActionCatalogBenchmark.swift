@@ -41,6 +41,11 @@ import Foundation
             measure("action_table") {
                 ActionTableRow.make(settings: settings, applications: apps, audit: audit).count
             }
+            let snapshot = ActionCatalogValue.build(ActionCatalogInput(settings: settings, shortcuts: keys,
+                applications: apps, layerID: 1, device: .navigator))
+            measure("cached_search") {
+                snapshot.filtered(group: "All groups", subgroup: "All subgroups", search: "synthetic app 9").count
+            }
         }
         let output: [String: Any] = ["fixture": "synthetic-v1", "checksum": checksum,
             "optimized": true, "results": results]

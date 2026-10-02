@@ -26,8 +26,34 @@ struct ActionPickerItem: Identifiable {
     let category: ActionPickerCategory
     let title: String
     let detail: String
+    var applicationURL: URL? = nil
     var id: String { action.identity }
     var symbol: String { action.pickerSymbol }
+}
+
+/// Resolve icons only for visible rows, using the indexed application path.
+/// Keep the action identity independent of this machine's installation path.
+struct ActionPickerItemIcon: View {
+    let item: ActionPickerItem
+    @State private var icon: NSImage?
+    var body: some View {
+        Group {
+            if let icon { Image(nsImage: icon).resizable().scaledToFit().padding(1) }
+            else {
+                Image(systemName: item.symbol).font(.system(size: 16))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+            }
+        }
+        .frame(width: 34, height: 34)
+        .accessibilityHidden(true)
+        .task(id: item.applicationURL) {
+            icon = nil
+            guard item.action.kind == .openApp, let url = item.applicationURL,
+                  url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return }
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        }
+    }
 }
 
 extension BindingAction {
@@ -52,10 +78,10 @@ enum ActionPickerCatalog {
                      applications: [ExplorerApplication], allowPointer: Bool) -> [ActionPickerItem] {
         var items: [ActionPickerItem] = []
         var seen = Set<String>()
-        func add(_ action: BindingAction, _ category: ActionPickerCategory, detail: String? = nil) {
+        func add(_ action: BindingAction, _ category: ActionPickerCategory, detail: String? = nil, applicationURL: URL? = nil) {
             guard action.isValid, seen.insert(action.identity).inserted else { return }
             items.append(ActionPickerItem(action: action, category: category,
-                title: dictionary.title(for: action), detail: detail ?? action.description))
+                title: dictionary.title(for: action), detail: detail ?? action.description, applicationURL: applicationURL))
         }
         CommonMacShortcut.all.forEach { add($0.action, .shortcuts, detail: $0.detail) }
         dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -76,7 +102,7 @@ enum ActionPickerCatalog {
             add(.hudLayer(nil), .hud)
             layers.forEach { add(.hudLayer($0), .hud) }
         } else { destinations.forEach { add(.hudDestination($0), .hud) } }
-        applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name), .apps) }
+        applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name), .apps, applicationURL: $0.url) }
         if allowPointer {
             [TapAction.leftClick, .doubleLeftClick, .tripleLeftClick, .rightClick, .appExplorer,
              .windowManager, .enter, .optionF19].forEach { add(.tap($0), .pointer) }
@@ -206,9 +232,7 @@ struct ActionPickerModal: View {
                             List(selection: $selectedID) {
                                 ForEach(results) { item in
                                     HStack(spacing: 12) {
-                                        Image(systemName: item.symbol).font(.system(size: 16))
-                                            .frame(width: 34, height: 34)
-                                            .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+                                        ActionPickerItemIcon(item: item)
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                                             Text(item.detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)

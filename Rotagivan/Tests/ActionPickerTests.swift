@@ -6,7 +6,9 @@ import SwiftUI
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         let macro = NamedHotkey(name: "Research workspace", shortcut: RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C"))
-        let apps = [ExplorerApplication(bundleID: "test.slack", name: "Slack", url: URL(fileURLWithPath: "/Applications/Slack.app"))]
+        // Use an installed system icon without launching the application.
+        let iconURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        let apps = [ExplorerApplication(bundleID: "test.slack", name: "Slack", url: iconURL)]
         let items = ActionPickerCatalog.make(dictionary: [macro], layers: [], destinations: [], applications: apps, allowPointer: true)
         precondition(Set(items.map(\.id)).count == items.count)
         precondition(items.allSatisfy { !$0.detail.isEmpty && $0.action.isValid })
@@ -14,6 +16,9 @@ import SwiftUI
         precondition(ActionPickerCatalog.search(items, query: "voice", category: .hud).first?.action == .command(.activateVoiceMode))
         precondition(ActionPickerCatalog.search(items, query: "research", category: .all).first?.action.macroID == macro.id)
         precondition(ActionPickerCatalog.search(items, query: "slack", category: .apps).first?.action.bundleID == "test.slack")
+        precondition(ActionPickerCatalog.search(items, query: "slack", category: .apps).first?.applicationURL == iconURL,
+            "Application rows must preserve their local indexed path for icon loading")
+        precondition(items.filter { $0.category != .apps }.allSatisfy { $0.applicationURL == nil })
         precondition(ActionPickerCatalog.search(items, query: "volume", category: .media).count == 2)
         precondition(ActionPickerCatalog.search(items, query: "volume", category: .macros).isEmpty)
         precondition(ActionPickerCatalog.search(items, query: "zzzz-no-match", category: .all).isEmpty)
@@ -43,6 +48,10 @@ import SwiftUI
             let field = descendants(host).compactMap { $0 as? NSTextField }.first { $0.placeholderString?.contains("Search actions") == true }!
             panel.makeFirstResponder(field)
             let editor = field.currentEditor() as! NSTextView
+            editor.selectAll(nil); editor.insertText("slack", replacementRange: editor.selectedRange())
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            precondition(chosen == nil, "Loading an app icon never executes its action")
+            try capture("app-icon")
             editor.selectAll(nil); editor.insertText("volume", replacementRange: editor.selectedRange())
             RunLoop.main.run(until: Date().addingTimeInterval(0.3))
             precondition(chosen == nil)

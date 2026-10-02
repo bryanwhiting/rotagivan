@@ -107,12 +107,7 @@ struct RotagivanApp: App {
         hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [], availableIDs: Set(store.settings.availableLayerIDs))
         hotKeys.install()
         if store.settings.enabled { hid.start() }
-        if !AXIsProcessTrusted() {
-            AccessibilitySetupController.shared.show {
-                hid.stop()
-                if store.settings.enabled { hid.start() }
-            }
-        }
+        if hid.needsOnboarding { hid.presentOnboarding() }
     }
 
     private func openSettingsWindow() {
@@ -168,11 +163,7 @@ struct NavigatorPanel: View {
                     Text("Accessibility permission").font(.caption)
                     Spacer(minLength: 0)
                     Button("Grant") {
-                        AccessibilitySetupController.shared.show {
-                            trusted = true
-                            hid.stop()
-                            if store.settings.enabled { hid.start() }
-                        }
+                        hid.presentOnboarding { trusted = true }
                     }.buttonStyle(.borderedProminent).controlSize(.small)
                 }
                 .padding(8)

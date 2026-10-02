@@ -2,11 +2,25 @@ import AppKit
 import ApplicationServices
 import SwiftUI
 
+struct OnboardingInputStatus: Equatable {
+    var allowedOnMac = false
+    var enabledInProfile = false
+    var appEnabled = true
+    var status = "Disabled on this Mac"
+    var actionsEnabled: Bool { allowedOnMac && enabledInProfile }
+}
+
 /// Only observes permission. macOS remains responsible for authorizing access.
 @MainActor
 final class AccessibilitySetupState: ObservableObject {
     @Published private(set) var trusted: Bool
+    enum Step { case accessibility, trackpad }
+    @Published var step: Step = .accessibility
+    @Published private(set) var input = OnboardingInputStatus()
     @Published var settingsOpenFailed = false
+    private var readInput: () -> OnboardingInputStatus = { OnboardingInputStatus() }
+    private var writeInput: (Bool) -> Void = { _ in }
+    private var inputReviewed: () -> Void = {}
     private let probe: () -> Bool
     var onGranted: (() -> Void)?
     private var timer: Timer?
@@ -23,7 +37,37 @@ final class AccessibilitySetupState: ObservableObject {
         let newlyGranted = current && !trusted
         trusted = current
         if current { settingsOpenFailed = false }
-        if newlyGranted { onGranted?() }
+        if newlyGranted {
+            onGranted?()
+            step = .trackpad
+        }
+        if !current { step = .accessibility }
+        input = readInput()
+    }
+
+    func configureInput(read: @escaping () -> OnboardingInputStatus,
+                        write: @escaping (Bool) -> Void, reviewed: @escaping () -> Void) {
+        readInput = read
+        writeInput = write
+        inputReviewed = reviewed
+        input = readInput()
+    }
+
+    func setAppleInput(_ enabled: Bool) {
+        guard trusted else { return }
+        writeInput(enabled)
+        input = readInput()
+    }
+
+    func finishInputSetup() -> Bool {
+        refresh()
+        guard trusted, step == .trackpad else { return false }
+        inputReviewed()
+        return true
+    }
+
+    static func shouldPresent(trusted: Bool, inputReviewed: Bool, appleInputAllowed: Bool) -> Bool {
+        !trusted || (!inputReviewed && !appleInputAllowed)
     }
 
     func startMonitoring() {
@@ -84,7 +128,12 @@ final class AccessibilitySetupController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    func show(onGranted: @escaping () -> Void) {
+    func show(readInput: @escaping () -> OnboardingInputStatus = { OnboardingInputStatus() },
+              setAppleInput: @escaping (Bool) -> Void = { _ in },
+              inputReviewed: @escaping () -> Void = {},
+              onGranted: @escaping () -> Void) {
+        state.configureInput(read: readInput, write: setAppleInput, reviewed: inputReviewed)
+        state.step = state.trusted ? .trackpad : .accessibility
         state.onGranted = onGranted
         state.settingsOpenFailed = false
         if panel == nil {
@@ -135,13 +184,24 @@ struct AccessibilitySetupView: View {
     let close: () -> Void
 
     var body: some View {
+        Group {
+            if state.step == .trackpad { trackpadStep }
+            else { accessibilityStep }
+        }
+        .padding(26)
+        .frame(width: 410)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var accessibilityStep: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 12) {
                 Image(systemName: state.trusted ? "checkmark.shield.fill" : "hand.raised.fill")
                     .font(.system(size: 28)).foregroundStyle(state.trusted ? Color.green : Color.accentColor)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(state.trusted ? "Your Mac. Connected." : "Connect your Mac.").font(.title2.weight(.semibold))
-                    Text("One permission to get things moving.").font(.callout).foregroundStyle(.secondary)
+                    Text("Step 1 of 2 · Accessibility").font(.callout).foregroundStyle(.secondary)
                 }
             }
             Text("Accessibility lets Rotagivan run your shortcuts, control the pointer, and arrange windows when you use an action.")
@@ -174,7 +234,7 @@ struct AccessibilitySetupView: View {
                     .font(.callout.weight(.medium))
                     .accessibilityIdentifier("accessibility-permission-status")
             }
-            Text(state.trusted ? "You’re ready. Newly granted access reconnects Rotagivan automatically." : "We’ll detect access and reconnect automatically. If dragging isn’t convenient, use + in System Settings to choose Rotagivan.")
+            Text(state.trusted ? "Permission is ready. Continue to choose your input." : "We’ll detect access and continue automatically. If dragging isn’t convenient, use + in System Settings to choose Rotagivan.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 if !state.trusted {
@@ -182,15 +242,61 @@ struct AccessibilitySetupView: View {
                         .accessibilityIdentifier("accessibility-check-again")
                 }
                 Spacer()
-                Button(state.trusted ? "Done" : "Set up later", action: close)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("accessibility-close")
+                if state.trusted {
+                    Button("Continue") { state.step = .trackpad }
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("onboarding-continue")
+                } else {
+                    Button("Set up later", action: close)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("accessibility-close")
+                }
             }
         }
-        .padding(26)
-        .frame(width: 410)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var trackpadStep: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Image(systemName: "rectangle.and.hand.point.up.left")
+                .font(.system(size: 34)).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Make your next move.").font(.title2.weight(.semibold))
+                Text("Step 2 of 2 · Your input").font(.callout).foregroundStyle(.secondary)
+            }
+            Label("Accessibility is enabled", systemImage: "checkmark.circle.fill")
+                .font(.callout).foregroundStyle(.green)
+            Text("Use a built-in or Magic Trackpad to open your HUD and run gesture actions.")
+                .font(.callout).fixedSize(horizontal: false, vertical: true)
+            Toggle("Enable Apple trackpad gestures", isOn: Binding(
+                get: { state.input.actionsEnabled }, set: { state.setAppleInput($0) }))
+                .toggleStyle(.switch)
+                .accessibilityIdentifier("onboarding-apple-input")
+            Text("Turns on “Allow Apple input on this Mac” and Apple actions in this profile. This Mac’s input choice is not synced.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(state.input.appEnabled ? state.input.status : "Rotagivan is disabled. Enable it in General to use gestures.")
+                    .font(.callout.weight(.medium))
+                    .accessibilityIdentifier("onboarding-input-status")
+                Text(state.input.actionsEnabled ? "Try a quick two-finger tap with both fingers close together. Lift without pressing down. The result follows your configured tap action." : "Only using Navigator or keyboard shortcuts? You can skip Apple gestures and enable them later in Devices.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            Text("Apple trackpad support is experimental. Native pointing and scrolling stay under macOS control.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                Button("Accessibility") { state.step = .accessibility }
+                    .accessibilityIdentifier("onboarding-back")
+                Spacer()
+                Button(state.input.actionsEnabled ? "Done" : "Skip Apple gestures") {
+                    if state.finishInputSetup() { close() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding-finish")
+            }
+        }
     }
 
     private func step(_ number: String, title: String, detail: String) -> some View {

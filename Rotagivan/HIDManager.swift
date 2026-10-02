@@ -830,6 +830,46 @@ final class NavigatorHIDManager: ObservableObject {
         else { gestures.process(report, receivedAt: receivedAt) }
     }
 
+    private static let inputOnboardingKey = "onboarding.inputReviewed.v1"
+
+    var needsOnboarding: Bool {
+        AccessibilitySetupState.shouldPresent(trusted: AXIsProcessTrusted(),
+            inputReviewed: inputPreferences.bool(forKey: Self.inputOnboardingKey),
+            appleInputAllowed: appleTrackpadEnabled)
+    }
+
+    func presentOnboarding(onGranted: (() -> Void)? = nil) {
+        AccessibilitySetupController.shared.show(
+            readInput: { [weak self] in
+                guard let self else { return OnboardingInputStatus() }
+                return OnboardingInputStatus(allowedOnMac: self.appleTrackpadEnabled,
+                    enabledInProfile: self.store.settings.resolvedDevices.appleEnabled,
+                    appEnabled: self.store.settings.enabled, status: self.appleTrackpadStatus)
+            },
+            setAppleInput: { [weak self] enabled in
+                guard let self else { return }
+                if enabled {
+                    var devices = self.store.settings.resolvedDevices
+                    devices.appleEnabled = true
+                    self.store.settings.devices = devices
+                }
+                let wasAllowed = self.appleTrackpadEnabled
+                self.setAppleTrackpadEnabled(enabled)
+                // A local opt-in can already exist while this profile's actions
+                // were disabled. Start them after the explicit onboarding choice.
+                if enabled && wasAllowed { self.startAppleInput() }
+            },
+            inputReviewed: { [weak self] in
+                self?.inputPreferences.set(true, forKey: Self.inputOnboardingKey)
+            },
+            onGranted: { [weak self] in
+                guard let self else { return }
+                self.stop()
+                if self.store.settings.enabled { self.start() }
+                onGranted?()
+            })
+    }
+
     func setAppleTrackpadEnabled(_ enabled: Bool) {
         guard appleTrackpadEnabled != enabled else { return }
         appleTrackpadEnabled = enabled

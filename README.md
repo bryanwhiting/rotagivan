@@ -993,14 +993,27 @@ switch. The guide stays visible beside System Settings. The tile carries the
 running app’s file URL, so macOS receives the actual application rather than an
 icon image; it never moves or deletes the app.
 
-The guide checks permission while it is open and reconnects once when access
-is granted. **Set up later** closes it without changing permissions. For a
-keyboard-friendly alternative, choose **Show in Finder** and use **+** in System
-Settings. Reopen the guide from **General → Accessibility setup…** or the
-menu-bar **Grant** button. Already-authorized launches skip it automatically.
-No Accessibility grants, signing identities, or trust settings are reset.
-Apple trackpad input still requires **Devices → Allow Apple input on this Mac**;
-that separate local choice is not silently enabled by granting Accessibility.
+The guide checks permission while it is open, reconnects once when access is
+granted, and advances to **Your input**. **Enable Apple trackpad gestures** is an
+explicit opt-in: it turns on **Allow Apple input on this Mac** and Apple actions
+in the current profile, then displays the live trackpad status. macOS keeps
+control of native pointing and scrolling. A disabled app stays disabled; the
+guide explains how to enable it in General. Apple trackpad support remains
+experimental.
+
+Users who only use Navigator or keyboard shortcuts can choose **Skip Apple
+gestures**. That choice is remembered locally, so the guide does not reappear
+on every launch. Existing authorized users who already enabled Apple input
+also skip automatic onboarding. A fresh Mac with Accessibility already granted
+but no input choice starts directly at **Your input**. This local opt-in and
+onboarding decision are not synced.
+
+**Set up later** on the permission step closes the guide without changing
+permissions. For a keyboard-friendly alternative, choose **Show in Finder** and
+use **+** in System Settings. Reopen either step from **General → Set up this
+Mac…** or the menu-bar **Grant** button. No Accessibility grants, signing
+identities, or trust settings are reset; granting Accessibility alone never
+silently opts into Apple input.
 
 ## Current verification and setup
 

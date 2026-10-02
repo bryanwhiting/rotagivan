@@ -29,7 +29,18 @@ import SwiftUI
         let state = AccessibilitySetupState(probe: { permission })
         let controller = AccessibilitySetupController(state: state, appURL: fixture,
             openSettings: { settingsRequests += 1; return false }, revealApp: { revealed = $0 })
-        controller.show { grants += 1 }
+        var input = OnboardingInputStatus()
+        var writes: [Bool] = []
+        var reviews = 0
+        func show() {
+            controller.show(readInput: { input }, setAppleInput: { enabled in
+                writes.append(enabled)
+                input.allowedOnMac = enabled
+                if enabled { input.enabledInProfile = true }
+                input.status = enabled ? "Monitoring 1 Apple trackpad · native motion" : "Disabled on this Mac"
+            }, inputReviewed: { reviews += 1 }, onGranted: { grants += 1 })
+        }
+        show()
         let panel = controller.panel!
         let host = panel.contentView!
         func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.15)) }
@@ -45,7 +56,14 @@ import SwiftUI
             return item
         }
         func press(_ id: String) {
-            precondition(find(id).accessibilityPerformPress?() == true)
+            if id == "onboarding-apple-input" {
+                _ = find(id)
+                let switches = views(host).compactMap { $0 as? NSSwitch }
+                precondition(switches.count == 1, "One native trackpad opt-in switch")
+                switches[0].performClick(nil)
+            } else {
+                precondition(find(id).accessibilityPerformPress?() == true, "Could not press \(id)")
+            }
             settle()
         }
         func capture(_ name: String) throws {
@@ -56,6 +74,13 @@ import SwiftUI
         }
         settle()
         precondition(state.isMonitoring && !state.trusted && grants == 0)
+        state.setAppleInput(true)
+        precondition(writes.isEmpty && reviews == 0, "Permission/setup presentation cannot opt into input")
+        precondition(!state.finishInputSetup(), "Cannot finish input setup before granting permission")
+        precondition(AccessibilitySetupState.shouldPresent(trusted: false, inputReviewed: true, appleInputAllowed: true))
+        precondition(AccessibilitySetupState.shouldPresent(trusted: true, inputReviewed: false, appleInputAllowed: false))
+        precondition(!AccessibilitySetupState.shouldPresent(trusted: true, inputReviewed: true, appleInputAllowed: false), "Explicit skip must not prompt at every launch")
+        precondition(!AccessibilitySetupState.shouldPresent(trusted: true, inputReviewed: false, appleInputAllowed: true), "Existing working opt-in must not force onboarding")
         precondition(panel.level == .floating && !panel.hidesOnDeactivate, "Guide must remain visible beside System Settings")
         let drag = views(host).compactMap { $0 as? AccessibilityAppDragView }.first!
         precondition(drag.appURL == fixture.standardizedFileURL)
@@ -72,19 +97,33 @@ import SwiftUI
         precondition(state.trusted && grants == 1)
         state.refresh(); state.startMonitoring()
         precondition(grants == 1, "Repeated checks must not reconnect repeatedly")
-        try capture("accessibility-granted")
+        precondition(state.step == .trackpad && writes.isEmpty && !input.allowedOnMac)
+        try capture("onboarding-trackpad-off")
+        press("onboarding-apple-input")
+        precondition(writes == [true] && state.input.actionsEnabled)
+        precondition(state.input.status.contains("Monitoring 1"))
+        try capture("onboarding-trackpad-on")
+        input.status = "Looking for an Apple trackpad…"; state.refresh()
+        precondition(state.input.status == input.status, "Status changes must refresh in the guide")
+        press("onboarding-apple-input")
+        precondition(writes == [true, false] && !input.allowedOnMac && input.enabledInProfile)
+        press("onboarding-back")
+        precondition(state.step == .accessibility)
+        press("onboarding-continue")
+        precondition(state.step == .trackpad)
         permission = false; state.refresh()
-        precondition(!state.trusted)
+        precondition(!state.trusted && state.step == .accessibility)
         permission = true
         RunLoop.main.run(until: Date().addingTimeInterval(1.2))
         precondition(state.trusted && grants == 2, "Grant is detected while guide is open without pressing a button")
-        press("accessibility-close")
+        press("onboarding-finish")
+        precondition(reviews == 1 && !input.allowedOnMac, "Skip records review without enabling input")
         precondition(!state.isMonitoring && !panel.isVisible)
-        controller.show { grants += 1 }; settle()
+        show(); settle()
         precondition(controller.panel === panel && state.isMonitoring && grants == 2)
         panel.close(); settle()
         precondition(!state.isMonitoring && state.onGranted == nil)
-        print("Accessibility setup PASS: app file-URL drag payload, invalid-target rejection, native guide controls, settings/Finder fallbacks, live grant/revoke/regrant, one reconnect per transition, reuse and timer cleanup. No real permissions or settings changed.")
+        print("Accessibility setup PASS: app file-URL drag payload, invalid-target rejection, native guide controls, settings/Finder fallbacks, explicit input opt-in and skip, local startup gates, live input status, grant/revoke/regrant, one reconnect per transition, reuse and timer cleanup. No real permissions or settings changed.")
         print("Screenshots: \(output.path)")
     }
 }

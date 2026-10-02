@@ -167,14 +167,19 @@ private final class BindingPoster: GestureEventPosting {
             preconditionFailure("Mock voice HUD must open")
         }
         let voiceStrokes: [(Double, Double, ExplorerSlot)] = [
-            (400, 500, .right), (500, 400, .down), (600, 500, .left), (500, 600, .up)]
+            (400, 500, .right), (500, 400, .down), (500, 600, .up), (600, 500, .left)]
         for (x, y, expected) in voiceStrokes {
             directionController.process(report(true))
             directionController.process(report(true, x: x, y: y))
             precondition(directionVoice.selected == expected, "Voice picker shares the inversion preference")
             directionController.process(report(false))
-            precondition(directionVoice.selected == expected && directionController.displayedVoiceSession === directionVoice,
-                "Voice lift resets keep inversion and never execute a selection")
+            if expected == .left {
+                precondition(directionController.displayedVoiceSession == nil,
+                    "The inverted cancel tile exits voice mode on lift")
+            } else {
+                precondition(directionVoice.selected == expected && directionController.displayedVoiceSession === directionVoice,
+                    "Pending voice selections preserve inversion without executing an action")
+            }
         }
         directionController.dismiss()
 

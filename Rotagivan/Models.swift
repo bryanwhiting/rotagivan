@@ -418,6 +418,11 @@ struct ActionBinding: Codable, Equatable, Identifiable {
     var trigger: BindingTrigger
     var action: BindingAction
     var isValid: Bool { trigger.isValid && action.isValid }
+    static var defaultHUDLauncher: Self {
+        Self(id: UUID(uuidString: "59CE0891-8827-4739-BA50-7E801E5BA445")!,
+             trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: 49, modifiers: 1 << 19, keyLabel: "Space")),
+             action: BindingAction(kind: .hudLayer, hudPath: [], name: "Main HUD"))
+    }
 }
 
 extension Array where Element == ActionBinding {
@@ -2131,6 +2136,27 @@ struct ProfileSliderBaseline: Codable {
 
 struct StoredSettings: Codable {
     var actionBindings: [ActionBinding]? = nil
+    @discardableResult mutating func installDefaultHUDLauncher(reservedKeys: Set<String> = []) -> Bool {
+        let launcher = ActionBinding.defaultHUDLauncher
+        let bindings = actionBindings ?? []
+        guard bindings.count < 256,
+              !bindings.contains(where: { $0.id == launcher.id }),
+              !bindings.contains(where: { binding in
+                  guard binding.trigger.keyboard != nil else { return false }
+                  return binding.action.tap == .appExplorer ||
+                      (binding.action.kind == .hudLayer && binding.action.hudLayerID == nil &&
+                       binding.action.windowOwnerPath == nil && (binding.action.hudPath ?? []).isEmpty)
+              }),
+              !bindings.contains(where: { $0.trigger.identity == launcher.trigger.identity }),
+              !reservedKeys.contains(launcher.trigger.keyboard!.identity),
+              !(appExplorer?.holdLayers ?? []).contains(where: {
+                  $0.holdShortcut?.identity == launcher.trigger.keyboard!.identity ||
+                  $0.launchShortcut?.identity == launcher.trigger.keyboard!.identity
+              }),
+              !resolvedHotkeyDictionary.contains(where: { $0.activationShortcut?.identity == launcher.trigger.keyboard!.identity }) else { return false }
+        actionBindings = bindings + [launcher]
+        return true
+    }
     func applyingActionBindings(to gestures: ProfileGestures) -> ProfileGestures {
         var result = gestures
         let assignedGestures = (actionBindings ?? []).filter { $0.isValid && $0.trigger.gesture != nil }
@@ -2386,6 +2412,40 @@ final class SettingsStore: ObservableObject {
             activeConfigurationID = library.activeID
         } else {
             configurationProfiles = [ConfigurationProfile(id: "default", name: "Default", settings: settings, shortcuts: ShortcutConfiguration())]
+        }
+        if !defaults.bool(forKey: "migration.rotagivan.hudLauncher.v1") {
+            func identities(_ keys: [ProfileShortcut]) -> Set<String> {
+                Set(keys.filter(\.enabled).map { key in
+                    let modifiers = UInt64((key.modifiers & 4096 != 0 ? 1 << 18 : 0) |
+                        (key.modifiers & 2048 != 0 ? 1 << 19 : 0) |
+                        (key.modifiers & 512 != 0 ? 1 << 17 : 0) |
+                        (key.modifiers & 256 != 0 ? 1 << 20 : 0))
+                    return RecordedShortcut(keyCode: UInt16(truncatingIfNeeded: key.keyCode), modifiers: modifiers,
+                        keyLabel: key.keyLabel ?? "Key").identity
+                })
+            }
+            var currentKeys = [ProfileShortcut]()
+            for key in ["shortcut.normal", "shortcut.precision", "shortcut.drag", "shortcut.action.3", "shortcut.action.4", "shortcut.action.5"] {
+                if let data = defaults.data(forKey: key), let shortcut = try? JSONDecoder().decode(ProfileShortcut.self, from: data) { currentKeys.append(shortcut) }
+            }
+            if let data = defaults.data(forKey: "shortcut.additional"),
+               let keys = try? JSONDecoder().decode([UInt32: ProfileShortcut].self, from: data) { currentKeys += keys.values }
+            if let data = defaults.data(forKey: "shortcut.profileActions"),
+               let keys = try? JSONDecoder().decode([UInt32: [ProfileShortcut]].self, from: data) { currentKeys += keys.values.flatMap { $0 } }
+            for index in configurationProfiles.indices {
+                let shortcuts = configurationProfiles[index].shortcuts
+                let reserved = identities([shortcuts.normal, shortcuts.precision] + shortcuts.actions +
+                    Array(shortcuts.additional.values) + shortcuts.profileActions.values.flatMap { $0 } +
+                    [shortcuts.resolvedDragShortcut(defaultID: configurationProfiles[index].settings.resolvedDefaultProfileID)])
+                if configurationProfiles[index].id == activeConfigurationID {
+                    settings.installDefaultHUDLauncher(reservedKeys: reserved.union(identities(currentKeys)))
+                    configurationProfiles[index].settings = settings
+                } else {
+                    configurationProfiles[index].settings.installDefaultHUDLauncher(reservedKeys: reserved)
+                }
+            }
+            save()
+            defaults.set(true, forKey: "migration.rotagivan.hudLauncher.v1")
         }
     }
 

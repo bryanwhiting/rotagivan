@@ -6,6 +6,8 @@ test_dir=$(mktemp -d /private/tmp/rotagivan-tests.XXXXXX)
 swift build --package-path YAML -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
 common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift Rotagivan/CredentialWorker.swift)
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/Tests/HUDLauncherTests.swift -framework Security -o "$test_dir/HUDLauncherTests"
+"$test_dir/HUDLauncherTests"
 for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollResponseTests ConfigurationProfileTests PointerProfileTests TapCalibrationSettingsTests HUDMapTests ExplorerTileLayerTests ExplorerTransferTests WindowGroupTests ReservedGroupTests UnifiedBindingScopeTests; do
   xcrun swiftc -j 4 "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"

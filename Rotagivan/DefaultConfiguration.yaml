@@ -2,6 +2,17 @@
 # Engine units, not slider percentages. Permissions and signing are excluded.
 formatVersion: 1
 settings:
+  actionBindings:
+  - id: 59CE0891-8827-4739-BA50-7E801E5BA445
+    trigger:
+      keyboard:
+        keyCode: 49
+        modifiers: 524288
+        keyLabel: Space
+    action:
+      kind: hudLayer
+      hudPath: []
+      name: Main HUD
   customTapProfiles:
   - 2
   defaultProfileID: 2

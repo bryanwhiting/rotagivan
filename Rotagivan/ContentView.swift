@@ -683,9 +683,13 @@ struct ContentView: View {
             Section("Status") {
                 LabeledContent("Navigator") { Text(statusText) }
                 Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }
-                Button("Open Accessibility Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                Button("Accessibility setup…") {
+                    AccessibilitySetupController.shared.show {
+                        hid.stop()
+                        if store.settings.enabled { hid.start() }
+                    }
                 }
+                .accessibilityIdentifier("open-accessibility-setup")
                 Button("Open Input Monitoring Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
                 }

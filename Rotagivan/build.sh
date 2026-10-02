@@ -90,6 +90,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/HIDManager.swift" \
   "$script_dir/HotKeyManager.swift" \
   "$script_dir/CalibrationSettingsView.swift" \
+  "$script_dir/AccessibilitySetup.swift" \
   "$script_dir/ContentView.swift" \
   "$script_dir/ShortcutRecorder.swift" \
   "$script_dir/RotagivanApp.swift" \

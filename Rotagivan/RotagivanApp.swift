@@ -108,8 +108,10 @@ struct RotagivanApp: App {
         hotKeys.install()
         if store.settings.enabled { hid.start() }
         if !AXIsProcessTrusted() {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            AXIsProcessTrustedWithOptions(options)
+            AccessibilitySetupController.shared.show {
+                hid.stop()
+                if store.settings.enabled { hid.start() }
+            }
         }
     }
 
@@ -166,7 +168,11 @@ struct NavigatorPanel: View {
                     Text("Accessibility permission").font(.caption)
                     Spacer(minLength: 0)
                     Button("Grant") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        AccessibilitySetupController.shared.show {
+                            trusted = true
+                            hid.stop()
+                            if store.settings.enabled { hid.start() }
+                        }
                     }.buttonStyle(.borderedProminent).controlSize(.small)
                 }
                 .padding(8)

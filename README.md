@@ -984,6 +984,24 @@ renormalization is performed by import or reset.
 
 Run all regression checks with `zsh Rotagivan/test.sh` (isolated test preferences).
 
+## Accessibility onboarding
+
+When Accessibility is missing, Rotagivan opens a small setup guide instead of
+only displaying the system permission prompt. Choose **Open Accessibility
+Settings**, drag the **Rotagivan.app** tile into the app list, then enable its
+switch. The guide stays visible beside System Settings. The tile carries the
+running app’s file URL, so macOS receives the actual application rather than an
+icon image; it never moves or deletes the app.
+
+The guide checks permission while it is open and reconnects once when access
+is granted. **Set up later** closes it without changing permissions. For a
+keyboard-friendly alternative, choose **Show in Finder** and use **+** in System
+Settings. Reopen the guide from **General → Accessibility setup…** or the
+menu-bar **Grant** button. Already-authorized launches skip it automatically.
+No Accessibility grants, signing identities, or trust settings are reset.
+Apple trackpad input still requires **Devices → Allow Apple input on this Mac**;
+that separate local choice is not silently enabled by granting Accessibility.
+
 ## Current verification and setup
 
 The application builds locally and detects the connected Voyager. An initial “device not open” setup error was corrected by explicitly opening the HID device; successful live operation still needs verification. Enable Rotagivan in System Settings → Privacy & Security → Accessibility and, if requested, Input Monitoring. Quit ZSA Navigator, launch Rotagivan, and use General → Reconnect.

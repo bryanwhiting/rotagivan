@@ -3,6 +3,8 @@ set -euo pipefail
 script_dir=${0:A:h}
 cd "$script_dir/.."
 test_dir=$(mktemp -d /private/tmp/rotagivan-tests.XXXXXX)
+xcrun swiftc Rotagivan/AccessibilitySetup.swift Rotagivan/Tests/AccessibilitySetupTests.swift -framework AppKit -framework SwiftUI -o "$test_dir/AccessibilitySetupTests"
+"$test_dir/AccessibilitySetupTests" "$test_dir"
 swift build --package-path YAML -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
 common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift Rotagivan/CredentialWorker.swift)

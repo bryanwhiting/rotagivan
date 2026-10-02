@@ -107,19 +107,30 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Browse actions and their keybindings. Search or filter by group, then use a row’s menu to assign or edit.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Button { managingOverrides = true } label: {
-                Label("Application overrides…", systemImage: "app.badge")
+            HStack {
+                TextField("Search actions, apps or shortcuts", text: $search).textFieldStyle(.roundedBorder)
+                addActionMenu
+                Menu("Options") {
+                    Picker("View", selection: $tab) {
+                        Text("Actions").tag("Dictionary")
+                        Text("Conflicts").tag("Conflicts")
+                        Text("All assignments").tag("Assignments")
+                        Text("Keyboard").tag("Keyboard")
+                    }
+                    Divider()
+                    Button("Application settings…") { managingOverrides = true }
+                    Toggle("Show action IDs", isOn: $showActionIDs)
+                }.fixedSize().accessibilityIdentifier("actions-options")
             }
-                .help("Manage application-specific actions, including disabled overrides")
-                .accessibilityIdentifier("manage-application-overrides")
-            Picker("View", selection: $tab) {
-                Text("Actions").tag("Dictionary")
-                Text("Conflicts").tag("Conflicts")
-                Text("All assignments").tag("Assignments")
-                Text("Keyboard").tag("Keyboard")
-            }.pickerStyle(.segmented)
+            if tab != "Dictionary" {
+                HStack {
+                    Text(tab == "Assignments" ? "All assignments" : tab).font(.headline)
+                    Spacer()
+                    Button("Back to actions") { tab = "Dictionary" }
+                }
+            }
+            DisclosureGroup("Find an assignment by hotkey or gesture") {
+              VStack(alignment: .leading, spacing: 10) {
             searchControls
             HStack {
                 Picker("Layer", selection: Binding(get: { selectedLayer }, set: { layer = $0 })) {
@@ -131,6 +142,16 @@ struct HotkeyOrganizerView: View {
                 Spacer()
                 if searchShortcut != nil || tapFilter != nil || !search.isEmpty {
                     Button("Clear search") { clearSearch() }.buttonStyle(.link)
+                }
+            }
+                Text("Layer and device apply to gesture assignments and conflict checks, not the action catalog.")
+                    .font(.caption).foregroundStyle(.secondary)
+              }.padding(.top, 8)
+            }.font(.caption)
+            if searchShortcut != nil || tapFilter != nil {
+                HStack {
+                    Label(searchShortcut?.readableCombination ?? tapFilter?.title ?? "", systemImage: "line.3.horizontal.decrease.circle")
+                    Button("Clear filter") { clearSearch() }.buttonStyle(.link)
                 }
             }
             if let error = keys.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
@@ -237,7 +258,6 @@ struct HotkeyOrganizerView: View {
 
     private var searchControls: some View {
         HStack(spacing: 8) {
-            TextField("Search names, apps, keys or actions", text: $search).textFieldStyle(.roundedBorder)
             ShortcutRecorder(title: searchShortcut?.readableCombination ?? "Press hotkey to find…") { shortcut in
                 searchShortcut = shortcut; search = ""; tapFilter = nil; selectedKeyCode = shortcut.keyCode; tab = "Assignments"
             }.frame(width: 170, height: 26)
@@ -251,6 +271,19 @@ struct HotkeyOrganizerView: View {
                 Label(tapFilter?.title ?? "Find tap action", systemImage: "hand.tap")
             }.fixedSize()
         }
+    }
+
+    private var addActionMenu: some View {
+        Menu {
+            Button("Add keyboard action or macro") { beginNewAction() }
+                .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
+            Button("Add application hotkey…") { chooseApplicationHotkey() }
+            Button("Add application command…") { beginApplicationCommand() }
+                .disabled(store.settings.resolvedApplicationCommands.count >= 500)
+                .accessibilityIdentifier("application-command-add")
+            Button("Add assignment…") { assign(.hudLayer(nil)) }
+        } label: { Label("Add action", systemImage: "plus") }
+        .fixedSize()
     }
 
     private func clearSearch() {
@@ -299,24 +332,16 @@ struct HotkeyOrganizerView: View {
                 Picker("Group", selection: $actionGroupFilter) {
                     Text("All groups").tag("All groups")
                     ForEach(Array(Set(rows.map(\.group))).sorted(), id: \.self) { Text($0).tag($0) }
-                }.frame(maxWidth: 220)
+                }.labelsHidden().frame(width: 180).accessibilityLabel("Action group")
                 .onChange(of: actionGroupFilter) { _ in actionSubgroupFilter = "All subgroups" }
+                if rows.contains(where: { (actionGroupFilter == "All groups" || $0.group == actionGroupFilter) && !$0.subgroup.isEmpty }) {
                 Picker("Subgroup", selection: $actionSubgroupFilter) {
                     Text("All subgroups").tag("All subgroups")
                     ForEach(Array(Set(rows.filter { actionGroupFilter == "All groups" || $0.group == actionGroupFilter }.map(\.subgroup))).filter { !$0.isEmpty }.sorted(), id: \.self) { Text($0).tag($0) }
-                }.frame(maxWidth: 230)
-                Toggle("Show action IDs", isOn: $showActionIDs).toggleStyle(.checkbox)
+                }.labelsHidden().frame(width: 180).accessibilityLabel("Action subgroup")
+                }
                 Spacer()
                 Text("\(visible.count) actions").foregroundStyle(.secondary)
-                Menu {
-                    Button("Add keyboard action or macro") { beginNewAction() }
-                        .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
-                    Button("Add application hotkey…") { chooseApplicationHotkey() }
-                    Button("Add application command…") { beginApplicationCommand() }
-                        .disabled(store.settings.resolvedApplicationCommands.count >= 500)
-                        .accessibilityIdentifier("application-command-add")
-                    Button("Add assignment…") { assign(.hudLayer(nil)) }
-                } label: { Label("Add action", systemImage: "plus") }
             }
             Table(visible) {
                 if showActionIDs {

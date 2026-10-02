@@ -82,7 +82,7 @@ import SwiftUI
         }
         for section in ["Actions", "Calibration", "App overrides"] {
             render(section) { host in
-                precondition(find("manage-application-overrides", in: host) != nil,
+                precondition(find("actions-options", in: host) != nil,
                     "Overrides must remain reachable with no application rows, including legacy navigation")
                 precondition(find("tap-calibration", in: host) != nil,
                     "Actions and legacy calibration navigation must expose shared tap calibration")
@@ -90,7 +90,7 @@ import SwiftUI
         }
         store.settings.appOverrides = [AppGestureOverride(bundleID: "test.disabled", name: "Disabled", enabled: false)]
         render("Actions") { host in
-            precondition(find("manage-application-overrides", in: host) != nil,
+            precondition(find("actions-options", in: host) != nil,
                 "Disabled overrides must remain manageable")
         }
         let savedProfile = store.addProfile()

@@ -54,7 +54,7 @@ import SwiftUI
         store.settings = settings
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         let before = try encoder.encode(store.settings)
-        let host = NSHostingView(rootView: HotkeyOrganizerView(store: store).padding(20).frame(width: 1000, height: 790, alignment: .topLeading).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light).defaultAppStorage(defaults))
+        let host = NSHostingView(rootView: HotkeyOrganizerView(store: store).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light).defaultAppStorage(defaults))
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 790), styleMask: [.titled], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host; panel.center(); panel.makeKeyAndOrderFront(nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
@@ -68,6 +68,10 @@ import SwiftUI
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
         }
         try capture("actions-table")
+        panel.setContentSize(NSSize(width: 740, height: 790))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        try capture("actions-table-compact")
+        panel.setContentSize(NSSize(width: 1000, height: 790))
         defaults.set(true, forKey: "actions.showIDs")
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         precondition(table.tableColumns.count == 7, "Show IDs must reveal the seventh column")

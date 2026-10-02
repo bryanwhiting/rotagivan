@@ -1,0 +1,255 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Demo from "../components/Demo.astro";
+---
+
+<Layout
+  title="Rotagivan — Life at lightning speed"
+  description="Put your Mac in motion. Explore Rotagivan’s radial HUD, custom gestures, app shortcuts, and multi-step macros in an interactive demo."
+>
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <p class="eyebrow">
+        <span class="tiny-bolt" aria-hidden="true">
+          ϟ
+        </span>{" "}
+        A NEW RHYTHM FOR YOUR MAC
+      </p>
+      <h1>
+        Life at
+        <br />
+        <em>lightning</em>
+        <br />
+        speed<span class="lime">.</span>
+      </h1>
+      <p class="lede">
+        The thought. The gesture. Done.
+        <br />
+        Bring your apps, shortcuts, and everyday routines into one effortless
+        motion.
+      </p>
+      <div class="button-row">
+        <a class="button" href="#playground">
+          Feel the flow <span aria-hidden="true">↗</span>
+        </a>
+        <a class="quiet-link" href="/download/">
+          Meet Rotagivan
+        </a>
+      </div>
+      <p class="hero-note">Built for macOS · Designed around you</p>
+    </div>
+    <div class="hero-demo" id="playground">
+      <Demo />
+      <span class="demo-caption">
+        LESS REACHING. LESS SEARCHING. MORE DOING.
+      </span>
+    </div>
+  </section>
+  <div class="capability-strip">
+    <div class="wrap">
+      <span>
+        One wheel.
+        <br />
+        <strong>So many possibilities.</strong>
+      </span>
+      <span>App launching</span>
+      <span>Custom gestures</span>
+      <span>Window control</span>
+      <span>Multi-step macros</span>
+    </div>
+  </div>
+  <section class="section wrap" id="how-it-works">
+    <div class="section-heading">
+      <p class="eyebrow">01 / CLOSE THE GAP</p>
+      <h2>
+        Your ideas move fast.
+        <br />
+        <span class="muted">Your Mac should keep up.</span>
+      </h2>
+      <p>
+        Every menu hunt breaks the rhythm. Rotagivan puts your next action where
+        you already are—on a wheel you make your own.
+      </p>
+    </div>
+    <div class="steps">
+      <article>
+        <span class="step-number">01</span>
+        <h3>Make it yours.</h3>
+        <p>
+          Place your favorite apps, websites, and actions on the HUD. Group them
+          the way you think.
+        </p>
+      </article>
+      <article>
+        <span class="step-number">02</span>
+        <h3>Find your gesture.</h3>
+        <p>
+          Assign a hotkey or trackpad gesture. Call up your controls without
+          retracing the same menus.
+        </p>
+      </article>
+      <article>
+        <span class="step-number">03</span>
+        <h3>Stay in the flow.</h3>
+        <p>
+          Choose your next move. Launch, arrange, or run a sequence—and get
+          right back to the work.
+        </p>
+      </article>
+    </div>
+  </section>
+  <section class="feature-section wrap">
+    <div class="feature-card wide">
+      <div>
+        <p class="eyebrow">02 / LESS BUSYWORK</p>
+        <h2>
+          One action.
+          <br />A whole head start.
+        </h2>
+        <p>
+          Opening an app is just the beginning. Chain app launches and
+          keystrokes into a named macro. Turn the setup you repeat into a
+          routine you can reach.
+        </p>
+        <a class="quiet-link" href="#playground">
+          Try Focus on the wheel <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <div
+        class="macro-visual"
+        aria-label="Example macro: Open writing app, send focus shortcut, start writing"
+      >
+        <div class="macro-trigger">
+          <span>ϟ</span> Start writing <kbd>⌥ W</kbd>
+        </div>
+        <div class="macro-step">
+          <b>01</b>
+          <span>
+            Open your writing app
+            <small>The right place, already in focus.</small>
+          </span>
+          <span>✓</span>
+        </div>
+        <div class="macro-step">
+          <b>02</b>
+          <span>
+            Send your focus shortcut
+            <small>Your preferred setup, in sequence.</small>
+          </span>
+          <span>✓</span>
+        </div>
+        <div class="macro-result">
+          The blank page is waiting.
+          <span class="cursor-line" aria-hidden="true"></span>
+        </div>
+        <small class="fineprint">
+          Example configuration. You choose the apps and shortcuts.
+        </small>
+      </div>
+    </div>
+    <div class="feature-card">
+      <p class="eyebrow">YOUR MUSCLE MEMORY</p>
+      <h3>
+        A shortcut that
+        <br />
+        feels like second nature.
+      </h3>
+      <p>
+        Use keyboard hotkeys or Navigator gestures. Tune Navigator pointer
+        response and calibrate timing to the way you move.
+      </p>
+      <div class="key-combo" aria-hidden="true">
+        <kbd>⌥</kbd>
+        <kbd>⇧</kbd>
+        <kbd>Space</kbd>
+        <span>→</span>
+        <span class="key-wheel">ϟ</span>
+      </div>
+    </div>
+    <div class="feature-card">
+      <p class="eyebrow">YOUR CONTEXT</p>
+      <h3>
+        Same Mac.
+        <br />
+        Different headspace.
+      </h3>
+      <p>
+        Build profiles and layers for writing, creating, or daily work. Add
+        app-specific actions that belong to the task in front of you.
+      </p>
+      <div class="profile-pills" aria-label="Example profile names">
+        <span>⌘ Work</span>
+        <span>✳ Create</span>
+        <span>◎ Focus</span>
+      </div>
+    </div>
+  </section>
+  <section class="section wrap compatibility">
+    <div>
+      <p class="eyebrow">03 / FIND YOUR SETUP</p>
+      <h2>
+        Built around
+        <br />
+        <em>your next move.</em>
+      </h2>
+    </div>
+    <div class="compat-list">
+      <article>
+        <span>⌘</span>
+        <div>
+          <h3>Keyboard, meet command center.</h3>
+          <p>Bring actions and HUD layers to your favorite hotkeys.</p>
+        </div>
+      </article>
+      <article>
+        <span>⌁</span>
+        <div>
+          <h3>Made for ZSA Navigator.</h3>
+          <p>
+            Direct touch input, custom gestures, and pointer tuning. Current
+            hardware verification centers on Voyager.
+          </p>
+        </div>
+      </article>
+      <article>
+        <span>◈</span>
+        <div>
+          <h3>Apple trackpad, too. Experimentally.</h3>
+          <p>
+            Optional gesture actions for supported Apple trackpads. macOS keeps
+            control of normal pointing and scrolling.
+          </p>
+        </div>
+      </article>
+      <article>
+        <span>≋</span>
+        <div>
+          <h3>A voice when you want it.</h3>
+          <p>
+            Speak a command, review a suggestion, and confirm. Optional cloud
+            voice features require provider credentials.
+          </p>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section class="closing wrap">
+    <p class="eyebrow">LESS BETWEEN YOU AND YOUR NEXT IDEA.</p>
+    <h2>
+      Make your next move
+      <br />
+      <em>your best move.</em>
+    </h2>
+    <div class="button-row">
+      <a class="button" href="#playground">
+        Take the wheel <span aria-hidden="true">↗</span>
+      </a>
+      <a class="quiet-link" href="/pricing/">
+        Explore pricing
+      </a>
+    </div>
+    <p class="fineprint">
+      Rotagivan is in development. Public release details are coming soon.
+    </p>
+  </section>
+</Layout>

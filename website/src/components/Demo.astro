@@ -1,0 +1,103 @@
+---
+const items = [
+  { label: "Focus", symbol: "◎", position: "north", key: "1" },
+  { label: "Browser", symbol: "◈", position: "northeast", key: "2" },
+  { label: "Windows", symbol: "▥", position: "east", key: "3" },
+  { label: "Music", symbol: "♫", position: "southeast", key: "4" },
+  { label: "Voice", symbol: "≋", position: "south", key: "5" },
+  { label: "Notes", symbol: "≡", position: "southwest", key: "6" },
+  { label: "Work", symbol: "⌘", position: "west", key: "7" },
+  { label: "Apps", symbol: "⊞", position: "northwest", key: "8" },
+];
+---
+
+<section
+  class="demo-shell"
+  aria-label="Interactive Rotagivan preview"
+  data-demo
+>
+  <div class="demo-topline">
+    <span class="traffic" aria-hidden="true">
+      <i></i>
+      <i></i>
+      <i></i>
+    </span>
+    <span>YOUR NEXT MOVE</span>
+    <span class="demo-label">Interactive demo</span>
+  </div>
+  <div class="demo-desktop">
+    <div class="demo-window" data-window>
+      <div class="window-bar">
+        <span data-window-title>Today's workspace</span>
+        <span aria-hidden="true">⌘</span>
+      </div>
+      <div class="window-content">
+        <span class="eyebrow" data-window-kicker>
+          LESS FRICTION. MORE FLOW.
+        </span>
+        <h3 data-window-heading>
+          A little less clicking.
+          <br />A lot more doing.
+        </h3>
+        <p data-window-copy>
+          Choose a command on the wheel to see what happens next.
+        </p>
+        <div class="task-lines" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+      </div>
+    </div>
+    <div
+      class="wheel"
+      role="group"
+      aria-label="Choose a HUD command; use Tab or keys 1 through 8 while focused here"
+      tabindex="0"
+    >
+      <svg class="wheel-segments" viewBox="0 0 400 400" aria-hidden="true">
+        {items.map((_, i) => (
+          <path
+            transform={`rotate(${i * 45} 200 200)`}
+            d="M132 34 A180 180 0 0 1 268 34 L228 130 A75 75 0 0 0 172 130 Z"
+          />
+        ))}
+      </svg>
+      {items.map((item) => (
+        <button
+          class={`wheel-action ${item.position}`}
+          data-action={item.label.toLowerCase()}
+          aria-label={`Try ${item.label}`}
+        >
+          <span class="wheel-symbol" aria-hidden="true">
+            {item.symbol}
+          </span>
+          <span>{item.label}</span>
+          <kbd>{item.key}</kbd>
+        </button>
+      ))}
+      <button class="wheel-center" aria-label="Reset demo" data-reset>
+        <span aria-hidden="true">ϟ</span>
+        <small>YOUR MOVE</small>
+      </button>
+    </div>
+    <div class="demo-toast" role="status" aria-live="polite" aria-atomic="true">
+      <span aria-hidden="true">⌁</span>
+      <span data-status>Click a tile. Find your flow.</span>
+    </div>
+  </div>
+  <div class="demo-bottomline">
+    <span>
+      <kbd>1</kbd>–<kbd>8</kbd> to explore · <kbd>Esc</kbd> to reset
+    </span>
+    <button class="text-button" data-tour>
+      Play a workflow <span aria-hidden="true">▷</span>
+    </button>
+  </div>
+  <p class="demo-disclaimer">
+    Browser simulation. No apps open, audio records, or Mac settings change.
+  </p>
+</section>
+<script>
+  import "../scripts/demo";
+</script>

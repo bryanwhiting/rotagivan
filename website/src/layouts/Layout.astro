@@ -1,0 +1,68 @@
+---
+import "../styles/global.css";
+interface Props {
+  title: string;
+  description: string;
+}
+const { title, description } = Astro.props;
+const current = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#10120f" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    {Astro.site && <link rel="canonical" href={new URL(current, Astro.site)} />}
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a href="#main" class="skip">
+      Skip to content
+    </a>
+    <header class="header wrap">
+      <a href="/" class="brand" aria-label="Rotagivan home">
+        <img src="/favicon.svg" width="30" height="30" alt="" />
+        rotagivan<span class="brand-period">.</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/#how-it-works">How it works</a>
+        <a href="/#playground">Try it</a>
+        <a
+          href="/pricing/"
+          aria-current={current === "/pricing/" ? "page" : undefined}
+        >
+          Pricing
+        </a>
+      </nav>
+      <a class="button small" href="/download/">
+        Get Rotagivan <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="footer wrap">
+      <div>
+        <a href="/" class="brand">
+          rotagivan<span class="brand-period">.</span>
+        </a>
+        <p>Your Mac. At the speed of thought.</p>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="/#playground">Interactive demo</a>
+        <a href="/pricing/">Pricing</a>
+        <a href="/download/">Release & setup</a>
+      </nav>
+      <p class="fineprint">
+        An independent Mac utility. Not affiliated with Apple or ZSA.
+      </p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "rotagivan-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1",
+    "check": "astro check",
+    "deploy": "npm run build && node scripts/cloudflare.mjs deploy",
+    "deploy:check": "npm run build && wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "prettier": "^3.9.9",
+    "prettier-plugin-astro": "^1.1.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.134.0"
+  }
+}

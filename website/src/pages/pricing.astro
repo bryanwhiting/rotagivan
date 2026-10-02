@@ -1,0 +1,107 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout
+  title="Pricing — Rotagivan"
+  description="Explore Rotagivan before release. Try the interactive demo today; app pricing and public download details are coming soon."
+>
+  <div class="wrap">
+    <section class="page-hero">
+      <p class="eyebrow">MORE FLOW. FEWER EXTRA STEPS.</p>
+      <h1>
+        A small change.
+        <br />
+        <em>A different kind of day.</em>
+      </h1>
+      <p class="lede">
+        Try the feeling first. Rotagivan is still in development; app pricing
+        will be announced before public release.
+      </p>
+    </section>
+    <section class="pricing-layout" aria-label="Availability and pricing">
+      <article class="price-card">
+        <span class="pill-label">EXPLORE TODAY</span>
+        <h2>The interactive demo</h2>
+        <p class="price">Free to try.</p>
+        <p>Get a feel for your new command center, right in the browser.</p>
+        <ul>
+          <li>Eight interactive HUD commands</li>
+          <li>A guided workflow you can replay</li>
+          <li>No download or account needed</li>
+          <li>Works with mouse, touch, or keyboard</li>
+        </ul>
+        <a class="button secondary" href="/#playground">
+          Try the demo
+        </a>
+      </article>
+      <article class="price-card featured">
+        <span class="pill-label">IN DEVELOPMENT</span>
+        <h2>Rotagivan for Mac</h2>
+        <p class="price">Pricing coming soon.</p>
+        <p>Your apps, gestures, and routines brought together on your Mac.</p>
+        <ul>
+          <li>Custom HUD layers and app groups</li>
+          <li>Keyboard shortcuts and trackpad actions</li>
+          <li>Multi-step macros and window controls</li>
+          <li>Profiles for your different workflows</li>
+        </ul>
+        <a class="button" href="/download/">
+          See release & setup details
+        </a>
+        <p class="fineprint">
+          Not available to purchase yet. Optional voice services require
+          separate provider credentials and may incur provider charges.
+        </p>
+      </article>
+    </section>
+    <section class="faq">
+      <p class="eyebrow">A FEW THINGS TO KNOW</p>
+      <h2>Before your next move.</h2>
+      <details>
+        <summary>Can I buy or download Rotagivan today?</summary>
+        <p>
+          Public checkout and a customer-ready download are not available yet.
+          The interactive demo is available now, with no signup. This page will
+          show the price and purchase terms when the release is ready.
+        </p>
+      </details>
+      <details>
+        <summary>Is the demo the full app?</summary>
+        <p>
+          No. The demo simulates a handful of workflows inside your browser. The
+          native Mac app connects actions to real apps and inputs after you
+          configure it and grant the required permissions.
+        </p>
+      </details>
+      <details>
+        <summary>Do I need a ZSA Navigator?</summary>
+        <p>
+          The app supports keyboard hotkeys and is built around ZSA Navigator
+          touch input. Apple trackpad gesture actions are experimental and
+          require an explicit opt-in. Hardware support will be documented with
+          the public release.
+        </p>
+      </details>
+      <details>
+        <summary>How do the voice features work?</summary>
+        <p>
+          Voice is optional. It requires provider credentials; audio is sent for
+          transcription through OpenRouter/xAI, and command text and action
+          descriptions are sent to Jev for matching. You review and confirm a
+          suggestion by default. The website demo does not access your
+          microphone.
+        </p>
+      </details>
+      <details>
+        <summary>Will customers need developer tools?</summary>
+        <p>
+          No. The intended public release is a signed, notarized Mac download.
+          Customers will install the app and grant macOS permissions during
+          setup. Local signing and source builds are part of development, not
+          the customer experience.
+        </p>
+      </details>
+    </section>
+  </div>
+</Layout>

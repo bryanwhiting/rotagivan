@@ -1,0 +1,104 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout
+  title="Release & setup — Rotagivan"
+  description="Follow Rotagivan’s path to a customer-ready Mac release and learn how installation, permissions, and your first workflow will work."
+>
+  <div class="wrap">
+    <section class="page-hero">
+      <p class="eyebrow">YOUR MAC. YOUR NEXT MOVE.</p>
+      <h1>
+        Less setup.
+        <br />
+        <em>More possibility.</em>
+      </h1>
+      <p class="lede">
+        A Mac app should start with a download, not a development environment.
+        That’s the experience we’re preparing.
+      </p>
+    </section>
+    <div class="notice">
+      <strong>Public download coming soon.</strong>
+      <br />
+      Rotagivan is in development. A signed, notarized customer release and
+      verified system requirements are not available yet. In the meantime, you
+      can explore the browser demo.
+    </div>
+    <section class="setup-grid" aria-label="Planned customer setup">
+      <article>
+        <span class="step-number">01 / INSTALL</span>
+        <h2>Download. Open.</h2>
+        <p>
+          The planned release will arrive as a Mac download. Move Rotagivan into
+          Applications and launch it. No compiler or personal signing
+          certificate required.
+        </p>
+      </article>
+      <article>
+        <span class="step-number">02 / CONNECT</span>
+        <h2>Give it permission.</h2>
+        <p>
+          Allow Accessibility so Rotagivan can run your chosen actions.
+          Depending on your input setup, macOS may also ask for Input
+          Monitoring. Voice features require microphone permission.
+        </p>
+      </article>
+      <article>
+        <span class="step-number">03 / MAKE IT YOURS</span>
+        <h2>Start with one move.</h2>
+        <p>
+          Add your favorite app to the HUD, give it a hotkey or gesture, and try
+          it. Build up your workspace one useful action at a time.
+        </p>
+      </article>
+    </section>
+    <div class="download-state">
+      <h2>Feel it before you install it.</h2>
+      <p>
+        Explore the wheel, tile a demo window, and play a sample workflow.
+        Nothing changes on your computer.
+      </p>
+      <div class="button-row">
+        <a class="button" href="/#playground">
+          Open the interactive demo
+        </a>
+        <a class="quiet-link" href="/pricing/">
+          View pricing status
+        </a>
+      </div>
+    </div>
+    <section class="faq">
+      <h2>A little clarity.</h2>
+      <details open>
+        <summary>Which Macs will it support?</summary>
+        <p>
+          The app currently targets macOS 13 or later in its bundle metadata.
+          The public support range and available processor architectures will be
+          published after release testing. Apple trackpad support remains
+          experimental; Navigator testing has focused on Voyager.
+        </p>
+      </details>
+      <details>
+        <summary>Why does it need Accessibility?</summary>
+        <p>
+          Rotagivan uses macOS permissions to send configured inputs and manage
+          windows. You control those grants in System Settings → Privacy &
+          Security. Signing the app does not grant these permissions
+          automatically.
+        </p>
+      </details>
+      <details>
+        <summary>What stays local, and what goes online?</summary>
+        <p>
+          Keyboard, gesture, and HUD actions run on your Mac. Opening a website
+          uses your browser’s network connection. Voice sends audio and command
+          data to configured cloud providers, and account sync transfers
+          settings when you explicitly save or load them. Those optional
+          services have separate setup.
+        </p>
+      </details>
+    </section>
+  </div>
+</Layout>

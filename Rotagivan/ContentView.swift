@@ -151,7 +151,7 @@ struct ContentView: View {
         }
     }
 
-    var body: some View {
+    private var settingsLayout: some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -172,6 +172,10 @@ struct ContentView: View {
         .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
         .frame(minWidth: 860, idealWidth: 940, maxWidth: .infinity,
                minHeight: 680, idealHeight: 740, maxHeight: .infinity)
+    }
+
+    private var profileEditingContent: some View {
+        settingsLayout
         .sheet(isPresented: $editingDefaultTaps) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
@@ -191,6 +195,10 @@ struct ContentView: View {
                 return true
             }, onCancel: { renamingProfile = nil })
         }
+    }
+
+    var body: some View {
+        profileEditingContent
         .confirmationDialog(
             "Delete \(pendingLayerDeletion?.name ?? "layer")?",
             isPresented: Binding(get: { pendingLayerDeletion != nil }, set: { if !$0 { pendingLayerDeletion = nil } }),

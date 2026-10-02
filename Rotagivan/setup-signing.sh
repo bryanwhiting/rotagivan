@@ -20,11 +20,11 @@ if security find-certificate -c 'Rotagivan Development' "$keychain" >/dev/null 2
 fi
 signing_tmp=$(mktemp -d -t rotagivan-signing)
 trap 'rm -f "$signing_tmp/key.pem" "$signing_tmp/import-key.pem" "$signing_tmp/certificate.pem"; rmdir "$signing_tmp"' EXIT
-openssl req -new -newkey rsa:3072 -nodes -x509 -sha256 -days 3650 \
+/usr/bin/openssl req -new -newkey rsa:3072 -nodes -x509 -sha256 -days 3650 \
   -config "$script_dir/signing.cnf" \
   -keyout "$signing_tmp/key.pem" -out "$signing_tmp/certificate.pem"
 # Only codesign is preauthorized to use this key; never use security import -A.
-openssl rsa -in "$signing_tmp/key.pem" -out "$signing_tmp/import-key.pem"
+/usr/bin/openssl rsa -in "$signing_tmp/key.pem" -out "$signing_tmp/import-key.pem"
 security import "$signing_tmp/import-key.pem" -k "$keychain" -t priv -f openssl -x -T /usr/bin/codesign
 security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" "$signing_tmp/certificate.pem"
 mkdir -p "$signing_dir"

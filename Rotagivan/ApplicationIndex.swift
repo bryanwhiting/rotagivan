@@ -35,12 +35,12 @@ import Combine
         observing = true; generation = UUID(); observationError = nil
         let token = generation
         observation.start(onChange: { [weak self] in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self, self.observing, self.generation == token else { return }
                 self.scheduleChange()
             }
         }, onError: { [weak self] error in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self, self.observing, self.generation == token else { return }
                 self.observationError = error
             }

@@ -217,7 +217,7 @@ struct MotionCurveEditor: View {
                         if fastRelease { value.fastRelease = seconds } else { value.fineRelease = seconds }
                     } else {
                         let level = min(0.5, max(1.0/32, 1 - (event.location.y-inset)/(size.height-2*inset)))
-                        value.releaseShape = (log(level) / log(0.5) - 1) * 25
+                        value.releaseShape = (Darwin.log(Double(level)) / Darwin.log(0.5) - 1) * 25
                     }
                     curve = value.sanitized
                 }.onEnded { _ in releaseDrag = nil })

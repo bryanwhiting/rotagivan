@@ -85,7 +85,7 @@ final class ApplicationIndexObservation: ApplicationIndexChangeObserving, @unche
             }
             let roots = Array(Set(self.roots + physicalParents + self.roots.map(Self.physicalPath)))
             let box = Context(roots: roots, changed: onChange, reconfigure: { [weak self] in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self, self.generation == token else { return }
                     self.start(onChange: onChange, onError: onError)
                 }

@@ -122,7 +122,7 @@ struct HotkeyAudit {
                     enabled: settings.enabled, kind: "Output", parentAssignmentID: "dictionary.hotkey.\(entry.id)"))
             }
         }
-        let activations: [(UInt32, ProfileShortcut)] = [(1, shortcuts.normal), (2, shortcuts.precision)] + shortcuts.additional.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        let activations: [(UInt32, ProfileShortcut)] = [(UInt32(1), shortcuts.normal), (UInt32(2), shortcuts.precision)] + shortcuts.additional.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         for (id, key) in activations where settings.availableLayerIDs.contains(id) && id != settings.resolvedDefaultProfileID {
             let shortcut = recorded(key)
             assignments.append(Assignment(id: "activation.\(id)", scope: "Global keyboard hotkeys", trigger: shortcut.readableCombination,

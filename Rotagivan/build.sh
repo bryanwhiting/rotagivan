@@ -25,7 +25,7 @@ xcrun swift "$script_dir/DrawIcon.swift" "$build_dir/Rotagivan.iconset"
 iconutil -c icns "$build_dir/Rotagivan.iconset" -o "$app_dir/Contents/Resources/Rotagivan.icns"
 cp "$script_dir/Info.plist" "$app_dir/Contents/Info.plist"
 xcrun swiftc -O -parse-as-library \
-  -I "$yaml_build/Modules" -L "$yaml_build" -lConfigurationYAML \
+  -I "$yaml_build/Modules" -I "$yaml_build" -L "$yaml_build" -lConfigurationYAML \
   -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
   -framework AppKit \
   -framework CoreServices \

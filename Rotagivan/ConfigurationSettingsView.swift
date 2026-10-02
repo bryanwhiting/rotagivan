@@ -17,19 +17,19 @@ struct ConfigurationSettingsView: View {
     private static let backupKey = "configuration.previous.v1"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Configuration").font(.headline)
-            Text("One YAML file contains all layers, motion, scrolling, taps, dragging, hotkeys, and slider calibration. Permissions stay on this Mac.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        DisclosureGroup {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Export or import a local settings file. This is separate from cloud sync; API keys and Mac permissions are never included.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Copy YAML") { perform {
+                Button("Copy settings") { perform {
                     let yaml = try AppConfiguration(store: store).yaml()
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(yaml, forType: .string)
                     status = "Complete configuration copied."
                 } }
-                Button("Save YAML…") { saveFile() }
-                Button("Import YAML…") {
+                Button("Export file…") { saveFile() }
+                Button("Import file…") {
                     text = ""; candidate = nil; error = nil; showingImport = true
                 }
             }
@@ -46,6 +46,9 @@ struct ConfigurationSettingsView: View {
             if let error, !showingImport {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
             }
+          }.padding(.top, 10)
+        } label: {
+            Label("Local backup & restore", systemImage: "externaldrive").font(.headline)
         }
         .sheet(isPresented: $showingImport) { importer }
         .confirmationDialog("Restore the bundled defaults? This replaces every profile, layer and shortcut. You can undo it.", isPresented: $confirmDefaults) {

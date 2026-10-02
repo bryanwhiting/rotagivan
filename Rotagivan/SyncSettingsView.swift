@@ -15,18 +15,15 @@ struct SyncSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+          GroupBox {
+           VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("Account & Sync", systemImage: "icloud").font(.headline)
+                Label("Cloud settings", systemImage: "cloud").font(.headline)
                 Spacer()
                 if sync.busy || sync.restoringLogin { ProgressView().controlSize(.small).accessibilityLabel("Restoring or updating account") }
             }
-            Text("Save and load only when you choose. Nothing syncs automatically.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text("~/.config/rotagivan/settings.yaml").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                Spacer()
-                Button("Show file") { NSWorkspace.shared.activateFileViewerSelecting([sync.localURL]) }
-            }
+            Text("Save your setup on one Mac, then load it on another. Sync is manual.")
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !sync.credentialsReady {
                 Text(sync.restoringLogin ? "Restoring your saved account…" : "Your saved account is unavailable. Retry before saving or loading settings.")
                     .fixedSize(horizontal: false, vertical: true)
@@ -37,11 +34,14 @@ struct SyncSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else if let account = sync.account {
-                LabeledContent("Signed in as", value: account.email)
                 HStack {
+                Text(account.email).textSelection(.enabled)
+                Spacer()
+                Menu("Account") {
                     Button("Change password…") { changingPassword = true }
                     Button("Sign out") { Task { await sync.signOut() } }
-                }.disabled(sync.busy)
+                }.fixedSize().disabled(sync.busy)
+                }
             } else {
                 TextField("Email", text: $email).textContentType(.username)
                 SecureField("Password (12+ characters)", text: $password)
@@ -63,10 +63,10 @@ struct SyncSettingsView: View {
             LabeledContent("Last save", value: sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "—")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("Save") { Task { await sync.save(); if sync.error == nil && sync.vault.unlocked { await sync.vault.save() } } }
+                Button(sync.account == nil ? "Save on this Mac" : "Save to cloud") { Task { await sync.save(); if sync.error == nil && sync.vault.unlocked { await sync.vault.save() } } }
                     .accessibilityIdentifier("sync-save")
                     .help(sync.account == nil ? "Save current app settings to settings.yaml." : "Save current app settings to the cloud and settings.yaml.")
-                Button("Load") {
+                Button(sync.account == nil ? "Load from this Mac" : "Load from cloud…") {
                     guard sync.credentialsReady else { return }
                     cloudLoadPreview = nil
                     if sync.account == nil { confirmLoad = true }
@@ -85,8 +85,22 @@ struct SyncSettingsView: View {
             Text(!sync.credentialsReady ? "Save and Load remain unavailable until your saved account is restored."
                 : sync.account == nil
                 ? "Save and Load use settings.yaml on this Mac. Replaced copies are backed up."
-                : "Save writes to your cloud account and settings.yaml. Load uses the cloud copy. Replaced copies are backed up.")
+                : "Load replaces this Mac’s settings after confirmation. A backup is kept. Unlocked API keys are saved and loaded separately.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            DisclosureGroup("Storage & privacy") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(sync.localURL.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Spacer()
+                        Button("Reveal file") { NSWorkspace.shared.activateFileViewerSelecting([sync.localURL]) }
+                    }
+                    Text("Passwords and login tokens never go in YAML. Cloud sync doesn't change Accessibility, Input Monitoring, launch-at-login, or this Mac's enable switch.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.padding(.top, 8)
+            }.font(.caption)
+           }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+          }
             if sync.credentialsReady {
                 CredentialVaultView(vault: sync.vault)
             } else {
@@ -94,9 +108,6 @@ struct SyncSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("sync-vault-awaiting-account")
             }
-            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
-            Text("Passwords and login tokens never go in YAML. Cloud sync doesn't change Accessibility, Input Monitoring, launch-at-login, or this Mac's enable switch.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .textFieldStyle(.roundedBorder)
         .onChange(of: sync.credentialsReady) { ready in

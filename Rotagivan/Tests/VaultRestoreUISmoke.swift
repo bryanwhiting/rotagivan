@@ -33,6 +33,9 @@ import SwiftUI
             }
             return item
         }
+        func keyEditorIsHidden() -> Bool {
+            !controls().contains { $0.accessibilityLabel?() == "Save encrypted key" || $0.accessibilityLabel?() == "Load saved key" }
+        }
         func capture(_ state: String) throws {
             host.layoutSubtreeIfNeeded(); panel.display(); host.displayIfNeeded()
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
@@ -42,13 +45,12 @@ import SwiftUI
         }
         settle()
         precondition(continuation != nil && vault.restoringLocal && !vault.localReady)
-        precondition(button("Save encrypted key").isAccessibilityEnabled?() == false)
-        precondition(button("Load / refresh").isAccessibilityEnabled?() == false)
+        precondition(keyEditorIsHidden(), "Restoring keys must not show an unusable editor")
         precondition(button("Use recovery code…").isAccessibilityEnabled?() == false)
         try capture("loading")
         continuation!.resume(throwing: CredentialWorkerError.busy); continuation = nil; settle()
         precondition(!vault.restoringLocal && !vault.localReady && vault.error != nil)
-        precondition(button("Save encrypted key").isAccessibilityEnabled?() == false)
+        precondition(keyEditorIsHidden(), "Locked keys show recovery, not a disabled editor")
         precondition(button("Use recovery code…").isAccessibilityEnabled?() == true)
         let retry = controls().first { $0.accessibilityIdentifier?() == "vault-restore-retry" }!
         precondition(retry.isAccessibilityEnabled?() == true)

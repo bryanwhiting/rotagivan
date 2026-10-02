@@ -14,41 +14,48 @@ struct CredentialVaultView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Encrypted API keys", systemImage: "lock.shield").font(.headline)
+                    Label("Voice API key", systemImage: "lock.shield").font(.headline)
                     Spacer()
                     if vault.busy || vault.restoringLocal { ProgressView().controlSize(.small).accessibilityLabel("Restoring or updating encrypted keys") }
                 }
                 HStack {
                     Text("OpenRouter")
                     Spacer()
-                    Text(!vault.localReady ? "Unavailable" : (vault.hasRemote || vault.hasKey ? "••••••••" : "Not saved")).monospaced()
+                    Text(vault.account == nil ? "Sign in first" : (!vault.localReady ? "Locked on this Mac" : (vault.hasKey ? "Ready" : (vault.hasRemote ? "Saved in cloud" : "Not set up"))))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Label(vault.status, systemImage: vault.unlocked ? "lock.shield.fill" : "lock")
+                Text("OpenRouter powers voice recognition. Your key is encrypted before upload and unlocked only on trusted Macs.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if vault.localReady || vault.restoringLocal {
+                Label(vault.localReady && !vault.hasKey && !vault.hasRemote && vault.account != nil
+                      ? "Paste a key to get started, or load one saved on another Mac." : vault.status,
+                      systemImage: vault.unlocked ? "lock.shield.fill" : "lock")
                     .font(.caption).foregroundStyle(vault.unlocked ? Color.green : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                }
                 if let date = vault.savedAt {
                     Text("Last encrypted save: " + date.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                SecureField("New OpenRouter key (optional)", text: $apiKey).textContentType(.password)
-                    .disabled(unavailable)
                 if vault.account != nil && !vault.localReady && !vault.restoringLocal {
                     Button("Unlock API keys") { vault.retryLocalRestore() }
                         .accessibilityIdentifier("vault-restore-retry")
                     Text("This button may ask for your login Keychain password. Once unlocked, voice reuses the keys in memory; it does not request access on each command.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
+                if vault.localReady && vault.account != nil {
+                SecureField(vault.hasKey ? "Replace OpenRouter API key" : "Paste OpenRouter API key", text: $apiKey).textContentType(.password)
+                    .disabled(unavailable)
                 HStack {
                     Button("Save encrypted key") {
                         let key = apiKey; apiKey = ""
                         Task { await vault.save(apiKey: key.isEmpty ? nil : key) }
                     }
-                    Button("Import ~/.env and save") { Task { await vault.save(importEnvironment: true) } }
-                    Button("Load / refresh") { Task { await vault.load() } }
+                    Button("Load saved key") { Task { await vault.load() } }
                 }.disabled(unavailable)
-                if !vault.unlocked {
+                }
+                if !vault.unlocked && vault.account != nil && !vault.localReady {
                     HStack {
-                        Button("Request access on this Mac") { Task { await vault.requestAccess() } }.disabled(unavailable)
                         Button("Use recovery code…") { recoveryOpen = true }
                             .disabled(recoveryUnavailable)
                     }
@@ -59,9 +66,25 @@ struct CredentialVaultView: View {
                     Text("On a trusted Mac, refresh this section, select this request, and enter the code shown HERE. Then press Load here. Never approve a code supplied only by the server or an unexpected request.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                if vault.unlocked {
-                    Button("Show recovery code…") { vault.showRecoveryCode(); showRecovery = vault.recoveryCode != nil }
+                if vault.account != nil && vault.localReady {
+                  DisclosureGroup("Recovery & advanced") {
+                    VStack(alignment: .leading, spacing: 10) {
+                    if !vault.unlocked {
+                        HStack {
+                            Button("Request access on this Mac") { Task { await vault.requestAccess() } }.disabled(unavailable)
+                            Button("Use recovery code…") { recoveryOpen = true }.disabled(recoveryUnavailable)
+                        }
+                    }
+                    Button("Import key from ~/.env") { Task { await vault.save(importEnvironment: true) } }
                         .disabled(unavailable)
+                    if vault.unlocked {
+                      Button("Show recovery code…") { vault.showRecoveryCode(); showRecovery = vault.recoveryCode != nil }
+                        .disabled(unavailable)
+                    }
+                    }.padding(.top, 8)
+                  }.font(.caption)
+                }
+                if vault.unlocked {
                     ForEach(vault.pending) { device in
                         HStack {
                             Label(device.name, systemImage: "laptopcomputer")
@@ -70,10 +93,10 @@ struct CredentialVaultView: View {
                         }.disabled(unavailable)
                     }
                 }
-                Text("API keys are encrypted before upload and decrypted only on trusted Macs. Private keys stay in this Mac’s Keychain—not iCloud. Settings YAML and backups never contain API keys. Ordinary settings are not end-to-end encrypted.")
+                Text("API keys are encrypted at rest. Settings files never contain API keys; ordinary settings are not end-to-end encrypted.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let error = vault.error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-            }.padding(6)
+            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
         }
         .onDisappear { apiKey = ""; recoveryInput = ""; approvalCode = ""; vault.recoveryCode = nil }
         .onChange(of: vault.account) { _ in

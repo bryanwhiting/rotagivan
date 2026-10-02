@@ -13,6 +13,15 @@ settings:
       kind: hudLayer
       hudPath: []
       name: Main HUD
+  - id: D73781B8-68ED-45EE-AE78-0D9294DEB5AB
+    trigger:
+      keyboard:
+        keyCode: 49
+        modifiers: 655360
+        keyLabel: Space
+    action:
+      kind: command
+      command: activateVoiceMode
   customTapProfiles:
   - 2
   defaultProfileID: 2

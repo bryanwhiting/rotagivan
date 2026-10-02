@@ -423,6 +423,11 @@ struct ActionBinding: Codable, Equatable, Identifiable {
              trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: 49, modifiers: 1 << 19, keyLabel: "Space")),
              action: BindingAction(kind: .hudLayer, hudPath: [], name: "Main HUD"))
     }
+    static var defaultVoiceLauncher: Self {
+        Self(id: UUID(uuidString: "D73781B8-68ED-45EE-AE78-0D9294DEB5AB")!,
+             trigger: BindingTrigger(keyboard: RecordedShortcut(keyCode: 49, modifiers: (1 << 19) | (1 << 17), keyLabel: "Space")),
+             action: .command(.activateVoiceMode))
+    }
 }
 
 extension Array where Element == ActionBinding {
@@ -2137,12 +2142,20 @@ struct ProfileSliderBaseline: Codable {
 struct StoredSettings: Codable {
     var actionBindings: [ActionBinding]? = nil
     @discardableResult mutating func installDefaultHUDLauncher(reservedKeys: Set<String> = []) -> Bool {
-        let launcher = ActionBinding.defaultHUDLauncher
+        installDefaultLauncher(.defaultHUDLauncher, reservedKeys: reservedKeys)
+    }
+    @discardableResult mutating func installDefaultVoiceLauncher(reservedKeys: Set<String> = []) -> Bool {
+        installDefaultLauncher(.defaultVoiceLauncher, reservedKeys: reservedKeys)
+    }
+    private mutating func installDefaultLauncher(_ launcher: ActionBinding, reservedKeys: Set<String>) -> Bool {
         let bindings = actionBindings ?? []
         guard bindings.count < 256,
               !bindings.contains(where: { $0.id == launcher.id }),
               !bindings.contains(where: { binding in
                   guard binding.trigger.keyboard != nil else { return false }
+                  if launcher.action.command == .activateVoiceMode {
+                      return binding.action.command == .activateVoiceMode
+                  }
                   return binding.action.tap == .appExplorer ||
                       (binding.action.kind == .hudLayer && binding.action.hudLayerID == nil &&
                        binding.action.windowOwnerPath == nil && (binding.action.hudPath ?? []).isEmpty)
@@ -2413,7 +2426,9 @@ final class SettingsStore: ObservableObject {
         } else {
             configurationProfiles = [ConfigurationProfile(id: "default", name: "Default", settings: settings, shortcuts: ShortcutConfiguration())]
         }
-        if !defaults.bool(forKey: "migration.rotagivan.hudLauncher.v1") {
+        let needsHUDLauncher = !defaults.bool(forKey: "migration.rotagivan.hudLauncher.v1")
+        let needsVoiceLauncher = !defaults.bool(forKey: "migration.rotagivan.voiceLauncher.v1")
+        if needsHUDLauncher || needsVoiceLauncher {
             func identities(_ keys: [ProfileShortcut]) -> Set<String> {
                 Set(keys.filter(\.enabled).map { key in
                     let modifiers = UInt64((key.modifiers & 4096 != 0 ? 1 << 18 : 0) |
@@ -2438,14 +2453,18 @@ final class SettingsStore: ObservableObject {
                     Array(shortcuts.additional.values) + shortcuts.profileActions.values.flatMap { $0 } +
                     [shortcuts.resolvedDragShortcut(defaultID: configurationProfiles[index].settings.resolvedDefaultProfileID)])
                 if configurationProfiles[index].id == activeConfigurationID {
-                    settings.installDefaultHUDLauncher(reservedKeys: reserved.union(identities(currentKeys)))
+                    let activeReserved = reserved.union(identities(currentKeys))
+                    if needsHUDLauncher { settings.installDefaultHUDLauncher(reservedKeys: activeReserved) }
+                    if needsVoiceLauncher { settings.installDefaultVoiceLauncher(reservedKeys: activeReserved) }
                     configurationProfiles[index].settings = settings
                 } else {
-                    configurationProfiles[index].settings.installDefaultHUDLauncher(reservedKeys: reserved)
+                    if needsHUDLauncher { configurationProfiles[index].settings.installDefaultHUDLauncher(reservedKeys: reserved) }
+                    if needsVoiceLauncher { configurationProfiles[index].settings.installDefaultVoiceLauncher(reservedKeys: reserved) }
                 }
             }
             save()
             defaults.set(true, forKey: "migration.rotagivan.hudLauncher.v1")
+            defaults.set(true, forKey: "migration.rotagivan.voiceLauncher.v1")
         }
     }
 

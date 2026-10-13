@@ -106,7 +106,13 @@ import Combine
                 pendingChange = false
                 let token = generation
                 isRefreshing = true
-                let result = await Task.detached(priority: .utility) { scan() }.value
+                let result = await Task.detached(priority: .utility) {
+                    let result = scan()
+                    if result.errors.isEmpty {
+                        _ = RustApplicationSearch.shared.search("", applications: result.applications, limit: 0)
+                    }
+                    return result
+                }.value
                 guard token == generation else { continue }
                 lastAttemptAt = Date()
                 if result.errors.isEmpty {

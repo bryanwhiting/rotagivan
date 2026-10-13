@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import OSLog
+import Combine
 
 @MainActor protocol AppExplorerPresenting: AnyObject {
     var isVisible: Bool { get }
@@ -30,6 +31,13 @@ extension AppExplorerPresenting {
     private var recents: AppExplorerRecents
     private var observers: [NSObjectProtocol] = []
     private var panel: ExplorerPanel?
+    private var launcherMenuSnapshot: [LauncherAction] = []
+    private var launcherMenuRefresh: Task<Void, Never>?
+    private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
+    private var launcherActionSnapshot: [LauncherAction] = []
+    private var pendingMenuAction: LauncherAction?
+    private var searchObservation: AnyCancellable?
+    private var privateEditorOpen = false
     private var timer: Timer?
     private var escapeMonitor: Any?
     private var input = AppExplorerSelection(waitingForLift: false)
@@ -117,10 +125,21 @@ extension AppExplorerPresenting {
     var onKeyboardBindingAction: ((BindingAction) -> Void)?
     var onPresentationChanged: (() -> Void)?
     var contextIsValid: (() -> Bool)?
+    var noteStore = TemporaryIntentionStore.shared
+    var microphoneAdmission = VoiceMicrophoneAdmission.shared
+    var makeVoiceSession: () -> VoiceSession = { VoiceSession() }
+    var loadVoiceApplications: () async -> Void = { await VoiceApplicationIndex.shared.load() }
     weak var editingStore: SettingsStore?
     var onEditingChanged: ((Bool) -> Void)?
     var isVisible: Bool { panel != nil }
-    var isEditing: Bool { model.isEditing }
+    var isEditing: Bool { model.isEditing || privateEditorOpen }
+    var makeRealtimeSession: () -> RealtimeLauncherSession = { RealtimeLauncherSession() }
+    var useRealtimeVoice: () -> Bool = { UserDefaults.standard.string(forKey: LauncherVoiceProvider.preferenceKey) == LauncherVoiceProvider.openAIRealtime.rawValue }
+    var displayedRealtimeSession: RealtimeLauncherSession? { model.realtimeSession }
+    var displayedLauncherActions: [LauncherAction] { model.launcherActions }
+    var displayedLauncherQuery: String { model.launcherQuery }
+    var displayedLauncherResults: [ExplorerApplication] { model.launcherResults }
+    var displayedLauncherSelection: Int { model.launcherSelection }
     var displayedEntries: [ExplorerEntry] { model.entries }
     var displayedOrbitProgress: Double { model.orbitProgress }
     var displayedHUDMap: [HUDCarouselPreview] { model.carouselPreviews }
@@ -178,7 +197,8 @@ extension AppExplorerPresenting {
     /// Switch the open panel's scope without changing its source application or
     /// releasing the trackpad that owns its pointer lock.
     func switchLayer(_ id: UUID?) {
-        if model.voiceSession != nil { endVoiceMode() }
+        if model.voiceSession != nil || model.realtimeSession != nil { endVoiceMode() }
+        pendingMenuAction = nil
         guard isVisible, !isEditing else { return }
         if let id {
             guard let layer = configuration().holdLayers?.first(where: { $0.id == id }),
@@ -315,6 +335,23 @@ extension AppExplorerPresenting {
         }
         loadEntries()
         model.selected = nil
+        model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
+        pendingMenuAction = nil; launcherMenuSnapshot = []
+        launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
+        let menuGeneration = selectionGeneration
+        if let pid = sourcePID {
+            launcherMenuRefresh = Task { [weak self] in
+                let menus = await Task.detached(priority: .utility) { LauncherMenuCatalog.scan(pid: pid) }.value
+                guard let self, self.isVisible, self.selectionGeneration == menuGeneration, !Task.isCancelled else { return }
+                self.launcherMenuSnapshot = menus
+                if !self.model.launcherQuery.isEmpty { self.updateLauncherResults(VoiceApplicationIndex.shared.applications) }
+            }
+        }
+        searchObservation = VoiceApplicationIndex.shared.$applications.sink { [weak self] apps in
+            guard let self, !self.model.launcherQuery.isEmpty else { return }
+            self.updateLauncherResults(apps)
+        }
+        Task { await VoiceApplicationIndex.shared.load() }
         input = makeSelection(waitingForLift: waitingForLift)
         let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -440,8 +477,110 @@ extension AppExplorerPresenting {
         }
     }
 
+    private func updateLauncherResults(_ apps: [ExplorerApplication]) {
+        let selectedID = model.launcherActions.indices.contains(model.launcherSelection)
+            ? model.launcherActions[model.launcherSelection].id : nil
+        launcherActionSnapshot = LauncherAction.apps(apps) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot
+        model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot)
+        model.launcherResults = model.launcherActions.compactMap { if case .app(let app) = $0.target { return app }; return nil }
+        model.launcherSelection = selectedID.flatMap { id in model.launcherActions.firstIndex { $0.id == id } } ?? 0
+    }
+
+    private func chooseLauncherAction() {
+        guard model.launcherActions.indices.contains(model.launcherSelection) else { return }
+        let action = model.launcherActions[model.launcherSelection]
+        // Stop speech before confirmation: incoming partials must never change the
+        // identity selected by an explicit Return key.
+        model.realtimeSession?.cancel(); model.realtimeSession = nil
+        switch action.target {
+        case .app(let app): launchSearchResult(app)
+        case .rotaSettings: dismiss(); openSettings()
+        case .registered(let id):
+            guard let original = launcherRegisteredSnapshot.first(where: { $0.id == id }),
+                  let current = currentVoiceCatalog().first(where: { $0.id == id }), current == original,
+                  current.enabled, current.appBundleID == nil || current.appBundleID == frontmostBundleID() else {
+                pendingMenuAction = nil
+                model.message = "This action or active app changed. Reopen the launcher and choose again."
+                return
+            }
+            guard pendingMenuAction == action else {
+                pendingMenuAction = action
+                model.message = "Confirm action: " + action.name + " · press Return again or Esc to cancel"
+                return
+            }
+            performBoundAction(current.action, fromKeyboard: true)
+        case .menu(let menu):
+            guard pendingMenuAction == action else {
+                pendingMenuAction = action
+                model.message = "Confirm menu action: " + action.name + " · press Return again or Esc to cancel"
+                return
+            }
+            dismiss()
+            if let error = LauncherMenuCatalog.execute(menu) { NSLog("Rotagivan menu action unavailable: %@", error) }
+        }
+    }
+
+    @discardableResult private func processLauncherKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, !model.showingWindowManager, !model.showingAppWindows,
+              !model.showingMediaControls else { return false }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard modifiers.isEmpty else { return false }
+        let searching = !model.launcherQuery.isEmpty || model.realtimeSession != nil
+        if searching {
+            switch event.keyCode {
+            case 53: dismiss(); return true
+            case 125, 126:
+                if pendingMenuAction != nil { model.message = nil }
+                pendingMenuAction = nil
+                let count = model.launcherActions.count
+                if count > 0 { model.launcherSelection = (model.launcherSelection + (event.keyCode == 125 ? 1 : count - 1)) % count }
+                deadline = Date().addingTimeInterval(60); return true
+            case 36, 76:
+                if !event.isARepeat { chooseLauncherAction() }; return true
+            case 51, 117:
+                model.realtimeSession?.cancel(); model.realtimeSession = nil; pendingMenuAction = nil
+                if !model.launcherQuery.isEmpty { model.launcherQuery.removeLast() }
+                updateLauncherResults(VoiceApplicationIndex.shared.applications)
+                deadline = Date().addingTimeInterval(60); return true
+            default: break
+            }
+        }
+        guard let text = event.characters, !text.isEmpty,
+              text.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && !($0.value >= 0xF700 && $0.value <= 0xF8FF) }),
+              searching || !text.trimmingCharacters(in: .whitespaces).isEmpty else { return searching }
+        // Printable keys take precedence over plain-letter layer bindings. Modified
+        // shortcuts and Window Manager keys retain their existing behavior.
+        if model.voiceSession != nil { endVoiceMode() }
+        model.launcherQuery = String((model.launcherQuery + text).prefix(256))
+        model.launcherSelection = 0
+        resetLocalGesture(); model.selected = nil
+        updateLauncherResults(VoiceApplicationIndex.shared.applications)
+        deadline = Date().addingTimeInterval(60)
+        return true
+    }
+
+    private func launchSearchResult(_ app: ExplorerApplication) {
+        guard isVisible, contextIsValid?() != false else { return }
+        guard ExplorerApplicationCatalog.bundleIdentifier(at: app.url) == app.bundleID else {
+            model.message = "This app moved or was removed. Refreshing the index…"
+            Task { await VoiceApplicationIndex.shared.refresh(force: true) }
+            return
+        }
+        dismiss()
+        let generation = selectionGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectionGeneration == generation, !self.isVisible,
+                  self.contextIsValid?() != false else { return }
+            self.openApplication(app.url, Self.activationConfiguration()) { [weak self] pid in
+                guard let self, let pid, self.selectionGeneration == generation, !self.isVisible else { return }
+                self.focusApplicationWindow(pid)
+            }
+        }
+    }
+
     @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
         guard isVisible, !isEditing, contextIsValid?() != false else { return false }
+        if processLauncherKey(event) { return true }
         if let voice = model.voiceSession {
             if event.type == .keyDown && !event.isARepeat {
                 if event.keyCode == 53 { endVoiceMode(); return true }
@@ -753,7 +892,7 @@ extension AppExplorerPresenting {
         guard isVisible else { return }
         contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
         guard contextIsValid?() != false else { dismiss(); return }
-        guard !isEditing else { return }
+        guard !isEditing, model.launcherQuery.isEmpty, model.realtimeSession == nil else { return }
         if let voice = model.voiceSession {
             // Match the ordinary HUD: preview on movement, commit on lift.
             // Only arm a result that was ready when the finger selected it.
@@ -1150,7 +1289,7 @@ extension AppExplorerPresenting {
     }
 
     private func choose(_ direction: ExplorerSlot, fromKeyboard: Bool = false) {
-        guard isVisible, !isEditing else { return }
+        guard isVisible, !isEditing, model.launcherQuery.isEmpty else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
         if model.showingWindowManager && model.windowFullScreen && entry?.command != .exitFullScreen {
@@ -1334,6 +1473,7 @@ extension AppExplorerPresenting {
     }
 
     func centerTap() {
+        if let realtime = model.realtimeSession { realtime.finish(); return }
         guard isVisible, !isEditing else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         if let voice = model.voiceSession {
@@ -1367,7 +1507,7 @@ extension AppExplorerPresenting {
     /// A reusable action always targets the main HUD and preserves its input owner.
     func activateVoiceMode() {
         guard isVisible, !isEditing, contextIsValid?() != false else { return }
-        guard model.voiceSession == nil else { return }
+        guard model.voiceSession == nil, model.realtimeSession == nil else { return }
         switchLayer(nil)
         beginVoiceMode()
     }
@@ -1376,7 +1516,34 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing, contextIsValid?() != false else { return }
         endVoiceMode()
         resetLocalGesture()
-        let voice = VoiceSession()
+        model.launcherQuery = ""; model.launcherActions = []; model.launcherResults = []; model.launcherSelection = 0
+        if useRealtimeVoice() {
+            let session = makeRealtimeSession(); session.admission = microphoneAdmission
+            model.realtimeSession = session
+            session.onTranscript = { [weak self, weak session] text in
+                guard let self, let session, self.isVisible, self.model.realtimeSession === session,
+                      self.contextIsValid?() != false else { return }
+                self.pendingMenuAction = nil
+                self.model.launcherQuery = text
+                self.model.launcherSelection = 0
+                self.updateLauncherResults(VoiceApplicationIndex.shared.applications)
+            }
+            deadline = Date().addingTimeInterval(40)
+            session.start()
+            return
+        }
+        let voice = makeVoiceSession()
+        voice.noteStore = noteStore
+        voice.microphoneAdmission = microphoneAdmission
+        voice.onPrivateEditorChanged = { [weak self, weak voice] editing in
+            guard let self, let voice, self.model.voiceSession === voice else { return }
+            self.privateEditorOpen = editing
+            self.panel?.privateEntryEditing = editing
+            self.panel?.allowsEditing = self.model.isEditing || editing
+            self.onEditingChanged?(editing || self.model.isEditing)
+            if !editing { self.deadline = Date().addingTimeInterval(15) }
+        }
+        voice.registerCloudSession()
         let capturedApp = sourceBundleID
         voice.isCatalogCurrent = { [weak self, weak voice] snapshot in
             guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
@@ -1395,16 +1562,23 @@ extension AppExplorerPresenting {
         input = makeSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(120)
         if let prepareVoice { prepareVoice(voice, currentVoiceCatalog()); return }
+        let loadApplications = loadVoiceApplications
         voicePreparation = Task { [weak self, weak voice] in
-            await VoiceApplicationIndex.shared.load()
+            await loadApplications()
             guard !Task.isCancelled, let self, let voice, self.isVisible, self.model.voiceSession === voice,
-                  self.contextIsValid?() != false else { return }
+                  self.contextIsValid?() != false, voice.phase == .preparing else { return }
             voice.start(catalog: self.currentVoiceCatalog())
         }
     }
 
     func endVoiceMode() {
+        model.realtimeSession?.cancel(); model.realtimeSession = nil
         voiceSwipeMatchID = nil
+        if privateEditorOpen {
+            privateEditorOpen = false
+            panel?.privateEntryEditing = false; panel?.allowsEditing = model.isEditing
+            onEditingChanged?(model.isEditing)
+        }
         voicePreparation?.cancel(); voicePreparation = nil
         model.voiceSession?.cancel(); model.voiceSession = nil
         input = makeSelection(waitingForLift: contactIsDown)
@@ -1412,6 +1586,7 @@ extension AppExplorerPresenting {
     }
 
     func confirmVoiceAction() {
+        guard !privateEditorOpen else { return }
         guard let voice = model.voiceSession, contextIsValid?() != false else { return }
         if voice.selected == .left { endVoiceMode(); return }
         if voice.phase == .listening { voice.finishListening(); return }
@@ -1579,6 +1754,10 @@ extension AppExplorerPresenting {
     }
 
     func dismiss() {
+        launcherMenuRefresh?.cancel(); launcherMenuRefresh = nil
+        launcherMenuSnapshot = []; launcherActionSnapshot = []; launcherRegisteredSnapshot = []; pendingMenuAction = nil
+        searchObservation = nil
+        model.launcherQuery = ""; model.launcherResults = []; model.launcherSelection = 0
         endVoiceMode()
         entryCache.removeAll(keepingCapacity: true)
         entryCacheSettings = nil
@@ -1616,10 +1795,13 @@ final class ExplorerPanel: NSPanel {
     var onSettings: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
     var allowsEditing = false
+    var privateEntryEditing = false
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func resignKey() { super.resignKey(); if !allowsEditing { onCancel?() } }
-    override func cancelOperation(_ sender: Any?) { onCancel?() }
+    override func cancelOperation(_ sender: Any?) {
+        if privateEntryEditing { super.cancelOperation(sender) } else { onCancel?() }
+    }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Recorded Command-key chords must reach the applet before menu-bar
         // commands (for example Cmd-M) can act on Rotagivan's own window.
@@ -1810,6 +1992,11 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
+    @Published var realtimeSession: RealtimeLauncherSession?
+    @Published var launcherActions: [LauncherAction] = []
+    @Published var launcherQuery = ""
+    @Published var launcherResults: [ExplorerApplication] = []
+    @Published var launcherSelection = 0
     @Published var voiceSession: VoiceSession?
     // MRU starts at the left and proceeds clockwise. Positions freeze on open.
     static let directions = AppExplorerSettings.recentDirections
@@ -1905,18 +2092,50 @@ struct AppExplorerView: View {
         if model.showingMediaControls { return "Tap to play / pause · swipe to control · Esc to close" }
         if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
         if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
-        return model.groupNames.isEmpty ? "Swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
+        return model.groupNames.isEmpty ? "Type to search apps · swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
     }
 
     var body: some View {
         Group {
-            if let voice = model.voiceSession {
+            if let realtime = model.realtimeSession {
+                VStack(spacing: 12) { RealtimeLauncherStatus(session: realtime); launcherSearchHUD }
+            } else if let voice = model.voiceSession {
                 VoiceHUDView(session: voice, theme: model.theme, onExit: onVoiceExit,
                     onRetry: onVoiceRetry, onConfirm: onVoiceConfirm,
                     forceReduceTransparency: forceReduceTransparency)
                     .frame(width: 950, height: 850)
-            } else { normalHUD }
+            } else if !model.launcherQuery.isEmpty { launcherSearchHUD } else { normalHUD }
         }
+    }
+
+    private var launcherSearchHUD: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(model.launcherQuery, systemImage: "magnifyingglass")
+                .font(.title2).accessibilityLabel("Search apps: " + model.launcherQuery)
+            Divider()
+            if model.launcherActions.isEmpty {
+                Text("No matching apps · the index refreshes in the background").foregroundStyle(.secondary)
+            }
+            ForEach(Array(model.launcherActions.enumerated()), id: \.element.id) { index, app in
+                HStack {
+                    Image(systemName: "app.fill").font(.title2).frame(width: 28, height: 28)
+                    VStack(alignment: .leading) {
+                        Text(app.name).font(.headline)
+                        Text(app.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if index == model.launcherSelection { Image(systemName: "return") }
+                }.padding(8)
+                    .background(index == model.launcherSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .cornerRadius(8)
+                    .accessibilityAddTraits(index == model.launcherSelection ? .isSelected : [])
+            }
+            if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+            Text("↑↓ choose · Return launch · Backspace edit · Esc close")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 540)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .frame(width: 950, height: model.realtimeSession == nil ? 850 : nil)
     }
 
     private var normalHUD: some View {
@@ -2432,5 +2651,18 @@ struct AppExplorerView: View {
         ExplorerPreviewDrag(enabled: isPreview && !model.showingRecents && model.entries.contains { $0.direction == direction },
             source: direction, theme: model.theme, count: model.slotCount, depth: model.groupNames.count,
             onChanged: onPreviewDrag, onEnded: onPreviewDrop)
+    }
+}
+
+private struct RealtimeLauncherStatus: View {
+    @ObservedObject var session: RealtimeLauncherSession
+    var body: some View {
+        VStack(spacing: 8) {
+            Label("OpenAI Realtime · " + OpenAIRealtimeTransport.model, systemImage: "mic.fill").font(.headline)
+            Text(session.message).font(.caption)
+            if session.phase == .listening { Button("Finish speaking") { session.finish() } }
+            if session.phase == .failed { Button("Retry voice") { session.start() } }
+            Text("Audio → OpenAI · matching stays local · no automatic execution").font(.caption2).foregroundStyle(.secondary)
+        }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 }

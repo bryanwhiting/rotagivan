@@ -20,7 +20,8 @@ enum ExplorerApplicationCatalog {
     static var roots: [URL] {
         [URL(fileURLWithPath: "/Applications", isDirectory: true),
          FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
-         URL(fileURLWithPath: "/System/Applications", isDirectory: true)]
+         URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+         URL(fileURLWithPath: "/System/Cryptexes/App/System/Applications", isDirectory: true)]
     }
 
     static func application(at url: URL) -> ExplorerApplication? {
@@ -182,5 +183,55 @@ enum ExplorerApplicationCatalog {
             return URL(fileURLWithPath: path).standardizedFileURL
         }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+}
+
+/// A process-local Rust index. Bundle metadata is scanned in the background by
+/// VoiceApplicationIndex; queries only read this complete in-memory snapshot.
+final class RustApplicationSearch: @unchecked Sendable {
+    static let shared = RustApplicationSearch()
+    private typealias New = @convention(c) () -> UnsafeMutableRawPointer?
+    private typealias Free = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    private typealias Add = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+    private typealias Search = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutablePointer<Int>?, Int) -> Int
+    private let lock = NSLock()
+    private var cached: [ExplorerApplication] = []
+    private var index: UnsafeMutableRawPointer?
+    private var library: UnsafeMutableRawPointer?
+    private var create: New?
+    private var destroy: Free?
+    private var add: Add?
+    private var query: Search?
+    var isAvailable: Bool { query != nil }
+    init(path: String? = nil) {
+        guard let path = path ?? Bundle.main.url(forResource: "librota_search", withExtension: "dylib")?.path,
+              let library = dlopen(path, RTLD_NOW | RTLD_LOCAL) else { return }
+        self.library = library
+        guard let n = dlsym(library, "rota_index_new"), let f = dlsym(library, "rota_index_free"),
+              let a = dlsym(library, "rota_index_add"), let s = dlsym(library, "rota_index_search") else { return }
+        create = unsafeBitCast(n, to: New.self); destroy = unsafeBitCast(f, to: Free.self)
+        add = unsafeBitCast(a, to: Add.self); query = unsafeBitCast(s, to: Search.self)
+    }
+    deinit { destroy?(index); if let library { dlclose(library) } }
+    private func normalized(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+    }
+    func search(_ text: String, applications: [ExplorerApplication], limit: Int = 12) -> [ExplorerApplication] {
+        lock.lock(); defer { lock.unlock() }
+        guard let query, let create, let add else {
+            return Array(ExplorerApplicationCatalog.search(text, in: applications).prefix(max(0, limit)))
+        }
+        if index == nil || cached != applications {
+            destroy?(index); index = create(); cached = applications
+            for app in cached { normalized(app.name).withCString { name in
+                normalized(app.bundleID).withCString { id in add(index, name, id) }
+            } }
+        }
+        var hits = [Int](repeating: 0, count: min(max(0, limit), cached.count))
+        guard !hits.isEmpty else { return [] }
+        let count = normalized(text).withCString { text in
+            hits.withUnsafeMutableBufferPointer { buffer in query(index, text, buffer.baseAddress, buffer.count) }
+        }
+        return hits.prefix(count).compactMap { cached.indices.contains($0) ? cached[$0] : nil }
     }
 }

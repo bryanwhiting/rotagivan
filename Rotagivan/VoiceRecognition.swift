@@ -10,15 +10,16 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     private var speechAt: TimeInterval?
     private let now: @Sendable () -> TimeInterval
     private var failed = false
+    private let maximumBytes: Int
     private var levels = [Double](repeating: 0, count: 48)
-    init(now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.now = now }
+    init(now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, maximumBytes: Int = VoiceAudioBuffer.maximumBytes) { self.now = now; self.maximumBytes = maximumBytes }
     func waveform() -> [Double] {
         lock.lock(); defer { lock.unlock() }; return levels
     }
     static let maximumBytes = 16_000 * 2 * 12
     func append(_ data: Data, rms: Double) {
         lock.lock(); defer { lock.unlock() }
-        pcm.append(data.prefix(max(0, Self.maximumBytes - pcm.count)))
+        pcm.append(data.prefix(max(0, maximumBytes - pcm.count)))
         let level = rms.isFinite ? max(0, min(1, rms)) : 0
         levels.append(min(1, sqrt(level) * 2.5)); levels.removeFirst()
         if level > 0.008 { speechAt = now() }
@@ -51,20 +52,26 @@ final class VoiceAudioBuffer: @unchecked Sendable {
 }
 
 @MainActor final class VoiceMicrophone: VoiceAudioCapturing {
-    let buffer = VoiceAudioBuffer()
+    let buffer: VoiceAudioBuffer
+    private let sampleRate: Double
+    init(sampleRate: Int = 16000) {
+        self.sampleRate = Double(sampleRate)
+        self.buffer = VoiceAudioBuffer(maximumBytes: sampleRate * 2 * 12)
+    }
     private var engine: AVAudioEngine?
     func start() throws {
+        let sampleRate = sampleRate
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0,
-              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: format, to: target) else {
             throw VoiceError.message("No usable microphone is available.")
         }
         let buffer = buffer
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { samples, _ in
-            let capacity = AVAudioFrameCount(Double(samples.frameLength) * 16_000 / format.sampleRate) + 64
+            let capacity = AVAudioFrameCount(Double(samples.frameLength) * sampleRate / format.sampleRate) + 64
             guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { buffer.fail(); return }
             var supplied = false
             var error: NSError?
@@ -112,9 +119,19 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     @Published private(set) var message = "Preparing microphone…"
     @Published private(set) var waveform = [Double](repeating: 0, count: 48)
     var onFinalMatch: (() -> Void)?
+    var onPrivateEditorChanged: ((Bool) -> Void)?
+    var noteDictation: NoteDictationSession?
     private var deliveredFinal = false
     @Published var selected: ExplorerSlot = .up
     private var microphone: VoiceAudioCapturing?
+    var microphoneAdmission = VoiceMicrophoneAdmission.shared
+    private var microphoneLease: UUID?
+    private var cloudRegistration: UUID?
+    private var requestingMicrophonePermission = false
+    private func releaseMicrophoneIfSafe() {
+        guard !requestingMicrophonePermission, let id = microphoneLease else { return }
+        microphoneAdmission.release(id); microphoneLease = nil
+    }
     var makeMicrophone: () -> VoiceAudioCapturing = { VoiceMicrophone() }
     private var timer: Timer?
     private var preparation: Task<Void, Never>?
@@ -137,6 +154,31 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     var isCatalogCurrent: ([VoiceRegisteredAction]) -> Bool = { _ in true }
     private var cloud: VoiceCloudServing?
     private var catalog: [VoiceRegisteredAction] = []
+    // UI-only local note. It is never read by action classification.
+    var noteStore = TemporaryIntentionStore.shared
+    deinit {
+        // Preparation/worker tasks hold self until their actual await drains.
+        // A dropped idle/listening/ready session has no such owner; clean up
+        // resources without resurrecting a deinitializing session.
+        let mic = microphone, service = cloud, gate = microphoneAdmission
+        let lease = microphoneLease, registration = cloudRegistration
+        let inputTimer = timer, preparing = preparation, running = operation
+        Task { @MainActor in
+            preparing?.cancel(); running?.cancel(); inputTimer?.invalidate()
+            mic?.stop(); mic?.buffer.clear(); service?.close()
+            if let lease { gate.release(lease) }
+            if let registration { gate.endCloud(registration) }
+        }
+    }
+    func registerCloudSession() {
+        if cloudRegistration == nil {
+            let id = UUID()
+            guard microphoneAdmission.registerCloud(id, cancel: { [weak self] in self?.cancel() }) else {
+                fail(VoiceError.message("The note editor is open. Close it before starting action voice. Nothing was run.")); return
+            }
+            cloudRegistration = id
+        }
+    }
     var makeCloud: () async throws -> VoiceCloudServing = {
         let key = try await OpenRouterCredential.loadAsync()
         try Task.checkCancellation()
@@ -163,12 +205,23 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         generation = UUID()
         let token = generation
         self.catalog = catalog
+        let microphoneID = UUID()
+        guard microphoneAdmission.acquireCloud(microphoneID, cancel: { [weak self] in self?.cancel() }) else {
+            fail(VoiceError.message("The note editor or another microphone session is active. Close the note editor and retry. Nothing was run.")); return
+        }
+        microphoneLease = microphoneID; cloudRegistration = microphoneID
         deliveredFinal = false
         finalPending = false; finalDeadline = nil
         transcript = ""; decision = nil; selected = .up
         phase = .preparing; message = "Preparing voice credentials…"
         preparation = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if token != self.generation || self.microphone == nil {
+                    self.microphoneAdmission.release(microphoneID)
+                    if self.microphoneLease == microphoneID { self.microphoneLease = nil }
+                }
+            }
             do {
                 let preparedCloud = try await self.makeCloud()
                 guard token == self.generation, !Task.isCancelled else {
@@ -177,7 +230,9 @@ final class VoiceAudioBuffer: @unchecked Sendable {
                 }
                 self.cloud = preparedCloud
                 self.message = "Preparing microphone…"
+                self.requestingMicrophonePermission = true
                 let allowed = await self.requestPermission()
+                self.requestingMicrophonePermission = false
                 guard token == self.generation, !Task.isCancelled else { return }
                 guard allowed else { throw VoiceError.message("Microphone access is off. Enable Rotagivan in System Settings → Privacy & Security → Microphone, then try again.") }
                 let mic = self.makeMicrophone()
@@ -222,6 +277,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         microphone.stop()
         let (pcm, speechAt, failed) = microphone.buffer.snapshot()
         microphone.buffer.clear(); self.microphone = nil
+        releaseMicrophoneIfSafe()
         guard !failed, speechAt != nil, !pcm.isEmpty else { fail(VoiceError.message("No speech heard. Tap the center to retry.")); return }
         phase = .matching; message = "Transcribing your speech…"
         finalPending = true
@@ -328,6 +384,8 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     func fail(_ error: Error) {
         generation = UUID(); preparation?.cancel(); preparation = nil
         microphone?.stop(); microphone?.buffer.clear(); microphone = nil
+        releaseMicrophoneIfSafe()
+        if let id = cloudRegistration { microphoneAdmission.endCloud(id); cloudRegistration = nil }
         timer?.invalidate(); timer = nil
         operation?.cancel(); queued = nil; finalDeadline = nil; finalPending = false; lastProvisionalTranscript = nil
         cloud?.close(); cloud = nil
@@ -340,6 +398,8 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         preparation?.cancel(); preparation = nil
         operation?.cancel(); queued = nil; finalDeadline = nil; finalPending = false; lastProvisionalTranscript = nil
         microphone?.stop(); microphone?.buffer.clear(); microphone = nil
+        releaseMicrophoneIfSafe()
+        if let id = cloudRegistration { microphoneAdmission.endCloud(id); cloudRegistration = nil }
         timer?.invalidate(); timer = nil
         cloud?.close(); cloud = nil
         waveform = Array(repeating: 0, count: 48)
@@ -421,6 +481,11 @@ struct VoiceHUDView: View {
                     systemImage: session.phase == .listening ? "mic.fill" : "waveform")
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.accent)
                 Spacer()
+                TemporaryIntentionControl(store: session.noteStore, compact: true,
+                    speech: session.noteDictation,
+                    admission: session.microphoneAdmission,
+                    onPresent: { session.onPrivateEditorChanged?(true) },
+                    onDismiss: { session.onPrivateEditorChanged?(false) })
                 Button(action: onExit) { Image(systemName: "xmark").font(.system(size: 11)) }
                     .buttonStyle(.plain).frame(width: 24, height: 24)
                     .accessibilityLabel("Cancel voice mode").accessibilityIdentifier("voice.cancel")

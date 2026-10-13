@@ -3,12 +3,19 @@ import SwiftUI
 
 struct VoiceModeSettingsView: View {
     @ObservedObject var store: SettingsStore
+    @AppStorage(LauncherVoiceProvider.preferenceKey) private var localProvider = LauncherVoiceProvider.openRouter.rawValue
+    @ObservedObject var intentionStore: TemporaryIntentionStore = .shared
     @ObservedObject private var index = VoiceApplicationIndex.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
         GroupBox("Action matching") {
             VStack(alignment: .leading, spacing: 12) {
+                Picker("Voice provider", selection: $localProvider) {
+                    ForEach(LauncherVoiceProvider.allCases) { Text($0.label).tag($0.rawValue) }
+                }.accessibilityIdentifier("voice-provider")
+                Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Return selects; menu actions require a second Return. Auto-decide applies only to OpenRouter/Jev.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Start listening when HUD opens", isOn: Binding(
                     get: { store.settings.appExplorer?.resolvedVoiceAutoStart ?? false },
                     set: { enabled in
@@ -62,6 +69,9 @@ struct VoiceModeSettingsView: View {
                 }
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
         }
+        GroupBox("Temporary intention") {
+            TemporaryIntentionControl(store: intentionStore).padding(10)
+        }
         }
         .font(.system(size: 12))
         .accessibilityIdentifier("voice-mode-settings")
@@ -113,6 +123,7 @@ struct ContentView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var hid: NavigatorHIDManager
     @ObservedObject var sync: SettingsSync
+    @ObservedObject var intentionStore: TemporaryIntentionStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "HUD"
     @State private var actionDevice: GestureDevice = .navigator
@@ -129,8 +140,10 @@ struct ContentView: View {
     private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
-         initialSection: String = "HUD", initialDevice: GestureDevice = .navigator) {
+         initialSection: String = "HUD", initialDevice: GestureDevice = .navigator,
+         intentionStore: TemporaryIntentionStore = .shared) {
         self.store = store; self.hid = hid; self.sync = sync
+        self.intentionStore = intentionStore
         let resolvedSection: String
         switch initialSection {
         case "Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides": resolvedSection = "Actions"
@@ -328,7 +341,7 @@ struct ContentView: View {
                     .padding(.top, 12)
             }
             .accessibilityIdentifier("tap-calibration")
-        case "Voice mode": VoiceModeSettingsView(store: store)
+        case "Voice mode": VoiceModeSettingsView(store: store, intentionStore: intentionStore)
         case "Pointer & scrolling": pointerSettings
         default: hudAndTapSettings
         }

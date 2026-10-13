@@ -62,6 +62,8 @@ import SwiftUI
             panel.close()
         }
         render("Voice mode") { host in
+            precondition(find("voice-provider", in: host) != nil,
+                "Voice settings must expose the OpenAI Realtime provider selector")
             precondition(find("settings-section-Voice mode", in: host) != nil)
             precondition(find("settings-section-Calibration", in: host) == nil)
             precondition(find("settings-section-App overrides", in: host) == nil)

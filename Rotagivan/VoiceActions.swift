@@ -161,11 +161,11 @@ enum VoiceError: Error, LocalizedError {
 }
 enum OpenRouterCredential {
     /// Literal dotenv parser; never execute/source this file.
-    static func parse(_ contents: String) -> String? {
+    static func parse(_ contents: String, variable: String = "OPENROUTER_API_KEY") -> String? {
         for original in contents.components(separatedBy: .newlines).reversed() {
             var line = original.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("export ") { line = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
-            guard let separator = line.firstIndex(of: "="), line[..<separator].trimmingCharacters(in: .whitespaces) == "OPENROUTER_API_KEY" else { continue }
+            guard let separator = line.firstIndex(of: "="), line[..<separator].trimmingCharacters(in: .whitespaces) == variable else { continue }
             var value = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespaces)
             if let quote = value.first, quote == "\"" || quote == "'" {
                 guard let end = value.dropFirst().firstIndex(of: quote) else { return nil }
@@ -187,11 +187,11 @@ enum OpenRouterCredential {
         catch let error as CredentialWorkerError { throw VoiceError.message(error.localizedDescription) }
         catch let error as VaultFailure { throw VoiceError.message(error.localizedDescription) }
     }
-    static func loadEnvironment() throws -> String {
-        if let value = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], valid(value) { return value }
+    static func loadEnvironment(variable: String = "OPENROUTER_API_KEY") throws -> String {
+        if let value = ProcessInfo.processInfo.environment[variable], valid(value) { return value }
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".env")
-        if let text = try? String(contentsOf: url, encoding: .utf8), let key = parse(text) { return key }
-        throw VoiceError.message("Add OPENROUTER_API_KEY to ~/.env to use voice mode.")
+        if let text = try? String(contentsOf: url, encoding: .utf8), let key = parse(text, variable: variable) { return key }
+        throw VoiceError.message("Add \(variable) to ~/.env to use this voice provider.")
     }
 }
 struct VoiceMatch: Identifiable {

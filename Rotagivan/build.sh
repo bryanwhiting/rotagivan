@@ -23,12 +23,15 @@ install -m 644 "$yaml_dir/.build/checkouts/Yams/LICENSE" "$app_dir/Contents/Reso
 install -m 644 "$yaml_dir/LibYAML-LICENSE.txt" "$app_dir/Contents/Resources/LibYAML-LICENSE.txt"
 xcrun swift "$script_dir/DrawIcon.swift" "$build_dir/Rotagivan.iconset"
 iconutil -c icns "$build_dir/Rotagivan.iconset" -o "$app_dir/Contents/Resources/Rotagivan.icns"
+rustc --edition 2021 -O --crate-type cdylib "$script_dir/RustSearch/search.rs" -o "$app_dir/Contents/Resources/librota_search.dylib"
+codesign --force --sign "$signing_identity" "$app_dir/Contents/Resources/librota_search.dylib"
 cp "$script_dir/Info.plist" "$app_dir/Contents/Info.plist"
 xcrun swiftc -O -parse-as-library \
   -I "$yaml_build/Modules" -I "$yaml_build" -L "$yaml_build" -lConfigurationYAML \
   -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
   -framework AppKit \
   -framework CoreServices \
+  -framework AVFoundation \
   -framework SwiftUI \
   -framework Carbon \
   -framework IOKit \
@@ -78,7 +81,13 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/BindingEditor.swift" \
   "$script_dir/HUDLayerHotkeyEditor.swift" \
   "$script_dir/VoiceActions.swift" \
+  "$script_dir/TemporaryIntention.swift" \
+  "$script_dir/VoiceMicrophoneAdmission.swift" \
+  "$script_dir/NoteDictationSession.swift" \
+  "$script_dir/TemporaryIntentionView.swift" \
   "$script_dir/VoiceRecognition.swift" \
+  "$script_dir/OpenAIRealtime.swift" \
+  "$script_dir/LauncherActions.swift" \
   "$script_dir/AppExplorer.swift" \
   "$script_dir/AppExplorerSettingsView.swift" \
   "$script_dir/GestureEngine.swift" \

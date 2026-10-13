@@ -115,11 +115,21 @@ private func transportEventually(_ condition: () -> Bool) async {
             VoiceRegisteredAction(action: .openApp(bundleID: "fixture.app.\(index)", name: "Fixture \(index)"), detail: "Offline fixture")
         }
         VoiceFixtureProtocol.reset()
+        let privateMarker = "PRIVATE_INTENTION_NEVER_SENT_72E1"
+        try TemporaryIntentionStore.shared.set(text: privateMarker)
         let batches = cloud()
         let result = try await batches.classify("fixture", catalog: catalog)
         precondition(result.shortlisted)
         let requests = VoiceFixtureProtocol.snapshot().0
         precondition(requests.count == 3, "Two batches plus one finalists decision expected")
+        for request in requests {
+            let payload = try VoiceFixtureProtocol.payload(request)
+            precondition(Set((payload["state"] as! [String: Any]).keys) == ["transcript"],
+                "Private intention must never add remote state fields, including finalist batches")
+            let bytes = try JSONSerialization.data(withJSONObject: payload)
+            precondition(!String(decoding: bytes, as: UTF8.self).contains(privateMarker))
+        }
+        TemporaryIntentionStore.shared.clear()
         var seen = Set<String>()
         for request in requests.prefix(2) {
             let payload = try VoiceFixtureProtocol.payload(request)

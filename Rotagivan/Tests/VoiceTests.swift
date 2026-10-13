@@ -15,6 +15,7 @@ private final class FakeVoiceCloud: VoiceCloudServing {
     let decision: VoiceDecision
     var delay: UInt64 = 1_000_000
     var requests = 0
+    var classifications = 0
     init(_ decision: VoiceDecision) { self.decision = decision }
     func transcribe(_ wav: Data) async throws -> String {
         precondition(String(data: wav.prefix(4), encoding: .ascii) == "RIFF")
@@ -23,6 +24,7 @@ private final class FakeVoiceCloud: VoiceCloudServing {
         return "open Slack"
     }
     func classify(_ transcript: String, catalog: [VoiceRegisteredAction]) async throws -> VoiceDecision {
+        classifications += 1
         precondition(transcript == "open Slack")
         return decision
     }
@@ -42,6 +44,11 @@ private final class FakeVoiceCloud: VoiceCloudServing {
     var pending: [CheckedContinuation<Bool, Never>] = []
     func request() async -> Bool { await withCheckedContinuation { pending.append($0) } }
     func resolve(_ allowed: Bool) { pending.removeFirst().resume(returning: allowed) }
+}
+@MainActor private final class VoiceIndexGate {
+    var pending: CheckedContinuation<Void, Never>?
+    func load() async { await withCheckedContinuation { pending = $0 } }
+    func resolve() { pending?.resume(); pending = nil }
 }
 
 @MainActor private final class ThrowingVoicePreparationGate {
@@ -340,6 +347,107 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         func partial(_ voice: VoiceSession, _ microphone: ClockMicrophone, _ clock: VoiceTestClock) {
             clock.advance(0.75); microphone.speech(); voice.tick()
         }
+        // A local note is inert UI state, never action-ranking context.
+        for stage in ["preparing", "listening", "stt", "classify", "ready"] {
+            let intent = TemporaryIntentionStore()
+            try intent.set(text: "Synthetic campaign")
+            let (voice, microphone, cloud, clock) = timedVoice()
+            voice.noteStore = intent
+            if stage == "preparing" { voice.registerCloudSession() }
+            else { await listening(voice) }
+            if stage == "stt" || stage == "classify" {
+                partial(voice, microphone, clock)
+                await voiceEventually({ cloud.pendingStages == ["stt"] }, "Intent fixture STT")
+                if stage == "classify" {
+                    cloud.text()
+                    await voiceEventually({ cloud.pendingStages == ["classify"] }, "Intent fixture classification")
+                }
+            }
+            if stage == "ready" { voice.receive(decision, final: true) }
+            let previousPhase = voice.phase
+            let previousIDs = voice.decision?.matches.map(\.id)
+            try intent.set(text: "A different local note")
+            intent.clear()
+            precondition(voice.phase == previousPhase && voice.decision?.matches.map(\.id) == previousIDs,
+                "Set/replace/clear note must not affect action voice in \(stage)")
+            if stage == "stt" || stage == "classify" {
+                voice.cancel()
+                if stage == "stt" { cloud.text("late stale text") } else { cloud.decision(decision) }
+                await voiceEventually({ !voice.pipelineAdmission.occupied }, "Cancelled transport must eventually drain")
+            }
+            voice.cancel()
+        }
+        var intentionNow = ContinuousClock().now
+        let delayedIntent = TemporaryIntentionStore(now: { intentionNow }, sleepUntil: { _ in
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+        })
+        try delayedIntent.set(text: "Original intention")
+        let delayedVoice = VoiceSession()
+        delayedVoice.noteStore = delayedIntent
+        delayedVoice.registerCloudSession()
+        delayedVoice.receive(decision, final: true)
+        intentionNow = intentionNow.advanced(by: .seconds(1800))
+        delayedIntent.refreshExpiry()
+        precondition(delayedVoice.selectedMatch?.id == slack.id && delayedVoice.phase == .ready &&
+            delayedVoice.decision?.matches.map(\.probability) == decision.matches.map(\.probability),
+            "Note expiry cannot alter ready candidates, Jev scores or confirmation")
+        delayedVoice.cancel()
+        delayedIntent.clear()
+
+        // Private editor lifetime—not merely dictation—is a global barrier.
+        let privateGate = VoiceMicrophoneAdmission(), entryToken = UUID(), otherEntry = UUID()
+        let (privateCloudVoice, privateMic, privateCloud, privateClock) = timedVoice()
+        privateCloudVoice.microphoneAdmission = privateGate
+        await listening(privateCloudVoice)
+        partial(privateCloudVoice, privateMic, privateClock)
+        await voiceEventually({ privateCloud.pendingStages == ["stt"] }, "Old cloud request fixture")
+        privateGate.beginPrivateEntry(entryToken)
+        precondition(privateCloudVoice.phase == .cancelled && privateMic.stops > 0)
+        let blockedVoice = VoiceSession(), blockedMic = FakeMicrophone()
+        var cloudPreparations = 0
+        blockedVoice.microphoneAdmission = privateGate
+        blockedVoice.makeCloud = { cloudPreparations += 1; return fake }
+        blockedVoice.makeMicrophone = { blockedMic }; blockedVoice.requestPermission = { true }
+        blockedVoice.start(catalog: catalog)
+        precondition(blockedVoice.phase == .failed && cloudPreparations == 0 && blockedMic.starts == 0,
+            "Private editor blocks cloud before credentials, permissions, microphone or STT")
+        privateCloud.text("late private-era result")
+        await voiceEventually({ !privateCloudVoice.pipelineAdmission.occupied }, "Old cloud must drain")
+        precondition(privateCloudVoice.decision == nil && privateCloud.stages == ["stt"])
+        privateGate.beginPrivateEntry(otherEntry); privateGate.endPrivateEntry(entryToken)
+        blockedVoice.start(catalog: catalog)
+        precondition(blockedVoice.phase == .failed && cloudPreparations == 0)
+        privateGate.endPrivateEntry(otherEntry); blockedVoice.cancel()
+
+        let privatePermissionGate = VoicePermissionGate(), permissionMic = FakeMicrophone(), permissionVoice = VoiceSession()
+        permissionVoice.microphoneAdmission = privateGate
+        permissionVoice.makeCloud = { fake }; permissionVoice.makeMicrophone = { permissionMic }
+        permissionVoice.requestPermission = { await privatePermissionGate.request() }
+        permissionVoice.start(catalog: catalog)
+        await voiceEventually({ privatePermissionGate.pending.count == 1 }, "Cloud permission fixture")
+        privateGate.beginPrivateEntry(entryToken)
+        let localLease = UUID()
+        precondition(permissionVoice.phase == .cancelled && !privateGate.acquirePrivate(localLease),
+            "Cloud permission cancellation must acknowledge completion before private microphone admission")
+        privatePermissionGate.resolve(true)
+        await voiceEventually({ !privateGate.occupied }, "Permission cancellation must drain")
+        precondition(permissionMic.starts == 0 && privateGate.acquirePrivate(localLease))
+        privateGate.release(localLease); privateGate.endPrivateEntry(entryToken)
+        for phase in ["listening", "ready"] {
+            let dropGate = VoiceMicrophoneAdmission(), dropMic = FakeMicrophone()
+            var dropping: VoiceSession? = VoiceSession()
+            weak var dropped = dropping
+            dropping!.microphoneAdmission = dropGate
+            dropping!.makeCloud = { fake }; dropping!.makeMicrophone = { dropMic }; dropping!.requestPermission = { true }
+            dropping!.automaticTicks = false
+            dropping!.start(catalog: catalog)
+            await voiceEventually({ dropping?.phase == .listening }, "Dropped session fixture")
+            if phase == "ready" { dropping!.receive(decision, final: true) }
+            dropping = nil
+            await voiceEventually({ dropped == nil && !dropGate.occupied }, "Dropped session must release actual microphone ownership")
+            precondition(dropMic.stops > 0 && dropGate.acquirePrivate(UUID()),
+                "Dropping \(phase) session cannot strand a global microphone lease")
+        }
         // Final audio preempts either stage, but never starts another request
         // until a cancellation-ignoring old transport actually returns.
         for heldStage in ["stt", "classify"] {
@@ -616,6 +724,130 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         precondition(controller.processLayerKey(key(36)))
         precondition(controller.displayedVoiceSession?.phase == .failed && executed.count == 2, "Removed IDs fail closed")
         controller.dismiss(); available = catalog
+        let controllerIntent = TemporaryIntentionStore()
+        try controllerIntent.set(text: "Controller fixture intention")
+        controller.noteStore = controllerIntent
+        controller.show(waitingForLift: false); controller.centerTap()
+        precondition(controller.displayedVoiceSession?.phase == .ready)
+        controllerIntent.clear()
+        precondition(controller.displayedVoiceSession?.phase == .ready &&
+            controller.displayedVoiceSession?.selectedMatch?.id == slack.id && executed.count == 2,
+            "Clearing the note must not alter controller action choices")
+        controller.displayedVoiceSession?.select(.left)
+        controller.confirmVoiceAction()
+        precondition(controller.displayedVoiceSession == nil && executed.count == 2,
+            "Expired/changed intention never prevents ignoring or exiting voice mode")
+        controller.dismiss(); controller.noteStore = .shared
+        let indexGate = VoiceIndexGate(), earlyPrivateGate = VoiceMicrophoneAdmission()
+        let preIndexVoice = VoiceSession(), preIndexMic = FakeMicrophone()
+        var preIndexCloudCalls = 0
+        preIndexVoice.makeCloud = { preIndexCloudCalls += 1; return fake }
+        preIndexVoice.makeMicrophone = { preIndexMic }; preIndexVoice.requestPermission = { true }
+        controller.microphoneAdmission = earlyPrivateGate
+        controller.makeVoiceSession = { preIndexVoice }
+        controller.loadVoiceApplications = { await indexGate.load() }
+        let oldPrepare = controller.prepareVoice
+        controller.prepareVoice = nil
+        controller.show(waitingForLift: false); controller.centerTap()
+        await voiceEventually({ indexGate.pending != nil }, "Awaiting initial index fixture")
+        let earlyEntry = UUID()
+        earlyPrivateGate.beginPrivateEntry(earlyEntry)
+        precondition(preIndexVoice.phase == .cancelled)
+        earlyPrivateGate.endPrivateEntry(earlyEntry)
+        indexGate.resolve()
+        for _ in 0..<50 { await Task.yield() }
+        precondition(preIndexVoice.phase == .cancelled && preIndexCloudCalls == 0 && preIndexMic.starts == 0,
+            "Closing a private editor cannot resurrect cancelled index preparation")
+        controller.dismiss(); controller.prepareVoice = oldPrepare
+        controller.makeVoiceSession = { VoiceSession() }
+        controller.loadVoiceApplications = { await VoiceApplicationIndex.shared.load() }
+        controller.microphoneAdmission = .shared
+        // The actual nonactivating ExplorerPanel must allow private native
+        // text entry, not dismiss on popup focus or consume Space as Run.
+        let hudPrivateGate = VoiceMicrophoneAdmission(), hudIntent = TemporaryIntentionStore()
+        let hudNoteMic = FakeMicrophone(), hudNoteCloud = FakeVoiceCloud(decision)
+        let hudNote = NoteDictationSession(microphone: hudNoteMic, admission: hudPrivateGate,
+            pipelineAdmission: VoicePipelineAdmission(), makeCloud: { hudNoteCloud }, requestPermission: { true })
+        controller.microphoneAdmission = hudPrivateGate; controller.noteStore = hudIntent
+        controller.prepareVoice = { voice, _ in voice.noteDictation = hudNote; voice.receive(decision, final: true) }
+        controller.show(waitingForLift: false); controller.centerTap()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+        func nativeViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(nativeViews) }
+        func axNodes(_ object: Any) -> [AnyObject] {
+            let node = object as AnyObject
+            return [node] + (node.accessibilityChildren?() ?? []).flatMap(axNodes)
+        }
+        func nativeControl(_ id: String, window: NSWindow) -> AnyObject? {
+            guard let view = window.contentView else { return nil }
+            let nodes: [AnyObject] = nativeViews(view).flatMap { axNodes($0) }
+            return nodes.first { $0.accessibilityIdentifier?() == id }
+        }
+        guard let realHUD = NSApp.windows.first(where: { $0 is ExplorerPanel && $0.isVisible }),
+              let intentButton = nativeControl("temporary-intention-control", window: realHUD) else {
+            preconditionFailure("Missing actual HUD intention control")
+        }
+        let previousRequests = fake.requests, previousExecutions = executed.count
+        func captureHUDPrivate(_ window: NSWindow, name: String) throws {
+            guard let path = CommandLine.arguments.dropFirst().first, let view = window.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to:
+                URL(fileURLWithPath: path).appendingPathComponent(name + ".png"))
+        }
+        guard let initialWheelFrame = nativeControl("voice.confirm", window: realHUD)?.accessibilityFrame?() else {
+            preconditionFailure("Missing actual HUD wheel center geometry")
+        }
+        try captureHUDPrivate(realHUD, name: "private-intention-hud-before")
+        precondition(intentButton.accessibilityPerformPress?() == true)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        precondition(controller.isVisible && controller.isEditing && hudPrivateGate.privateEntryActive &&
+            controller.displayedVoiceSession?.phase == .cancelled,
+            "Opening private popup cancels ready voice before editing and preserves actual HUD")
+        precondition(nativeControl("voice.confirm", window: realHUD)?.accessibilityFrame?() == initialWheelFrame,
+            "Private intention entry must not shift the shared HUD wheel")
+        guard let popup = NSApp.windows.first(where: { nativeControl("temporary-intention-input", window: $0) != nil }),
+              let field = popup.contentView.flatMap({ nativeViews($0).compactMap { $0 as? NSTextField }.first { $0.isEditable } }) else {
+            preconditionFailure("Missing actual HUD popup native input")
+        }
+        popup.makeKeyAndOrderFront(nil); NSApp.activate(); field.selectText(nil)
+        guard let editor = popup.firstResponder as? NSTextView else { preconditionFailure("Missing popup field editor") }
+        editor.insertText("Private marketing", replacementRange: NSRange(location: 0, length: (editor.string as NSString).length))
+        precondition(!controller.processLayerKey(key(49)), "HUD key router must not consume private text Space")
+        let space = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: popup.windowNumber, context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+        NSApp.sendEvent(space)
+        editor.insertText("campaign", replacementRange: editor.selectedRange())
+        precondition(editor.string == "Private marketing campaign" && executed.count == previousExecutions)
+        popup.makeFirstResponder(nil)
+        precondition(nativeControl("temporary-intention-set", window: popup)?.accessibilityPerformPress?() == true)
+        precondition(hudIntent.snapshot().text == "Private marketing campaign")
+        try captureHUDPrivate(realHUD, name: "private-intention-hud-open")
+        try captureHUDPrivate(popup, name: "private-intention-hud-popup")
+        precondition(nativeControl("temporary-intention-dictate", window: popup)?.accessibilityPerformPress?() == true)
+        await voiceEventually({ hudNote.phase == .listening }, "Actual HUD note dictation fixture")
+        precondition(nativeControl("temporary-intention-dictation-stop", window: popup)?.accessibilityPerformPress?() == true)
+        await voiceEventually({ hudNote.phase == .finished }, "Note transcription must finish without action classification")
+        precondition(hudNoteCloud.requests == 1 && hudNoteCloud.classifications == 0 && hudNote.transcript == "open Slack")
+        precondition(fake.requests == previousRequests && executed.count == previousExecutions,
+            "Note STT stays separate from action voice and never executes actions")
+        let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: popup.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+        NSApp.sendEvent(escape)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        precondition(controller.isVisible && !controller.isEditing && !hudPrivateGate.privateEntryActive &&
+            controller.displayedVoiceSession?.phase == .cancelled && executed.count == previousExecutions,
+            "Escape closes private popup without dispatch, HUD dismissal or cloud restart")
+        precondition(intentButton.accessibilityPerformPress?() == true)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        controller.dismiss()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        precondition(!controller.isEditing && !hudPrivateGate.privateEntryActive)
+        controller.show(waitingForLift: false); controller.centerTap()
+        precondition(!controller.isEditing && controller.displayedVoiceSession?.phase == .ready,
+            "HUD reopened after private popup dismissal must not retain editing state")
+        controller.dismiss(); hudIntent.clear()
+        controller.noteStore = .shared; controller.microphoneAdmission = .shared; controller.prepareVoice = oldPrepare
         controller.show(waitingForLift: false); controller.centerTap()
         controller.displayedVoiceSession?.select(.left)
         controller.confirmVoiceAction()

@@ -10,6 +10,11 @@ yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
 common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift Rotagivan/CredentialWorker.swift)
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/Tests/HUDLauncherTests.swift -framework Security -o "$test_dir/HUDLauncherTests"
 "$test_dir/HUDLauncherTests"
+xcrun swiftc -j 4 Rotagivan/TemporaryIntention.swift Rotagivan/Tests/TemporaryIntentionTests.swift -o "$test_dir/TemporaryIntentionTests"
+"$test_dir/TemporaryIntentionTests"
+xcrun swiftc -j 4 Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/Tests/VoiceMicrophoneAdmissionTests.swift \
+  -o "$test_dir/VoiceMicrophoneAdmissionTests"
+"$test_dir/VoiceMicrophoneAdmissionTests"
 for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollResponseTests ConfigurationProfileTests PointerProfileTests TapCalibrationSettingsTests HUDMapTests ExplorerTileLayerTests ExplorerTransferTests WindowGroupTests ReservedGroupTests UnifiedBindingScopeTests; do
   xcrun swiftc -j 4 "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"
@@ -122,8 +127,10 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventP
   -framework AppKit -framework CoreGraphics -o "$test_dir/PointerLayerIsolationTests"
 "$test_dir/PointerLayerIsolationTests"
 ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
+  Rotagivan/TemporaryIntention.swift Rotagivan/TemporaryIntentionView.swift \
+  Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/NoteDictationSession.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
-  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/AppExplorer.swift \
+  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/OpenAIRealtime.swift Rotagivan/LauncherActions.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
@@ -164,7 +171,7 @@ xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
 xcrun swiftc -j 4 Rotagivan/CredentialWorker.swift Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
 "$test_dir/VaultCryptoTests"
 for test in CredentialVaultTests VaultRestoreUISmoke VoiceTransportTests; do
-xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift \
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift Rotagivan/TemporaryIntention.swift \
   Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
@@ -172,6 +179,9 @@ done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceTests"
 "$test_dir/VoiceTests" "$test_dir"
+xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/NoteDictationTests.swift \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/NoteDictationTests"
+"$test_dir/NoteDictationTests"
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/VoiceHUDUISmoke.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/VoiceHUDUISmoke"
 "$test_dir/VoiceHUDUISmoke" "$test_dir"
@@ -213,7 +223,7 @@ settings_sources=()
 while IFS= read -r source; do
   settings_sources+=("Rotagivan/$source")
 done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)" \\/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
-for test in ReleaseSettingsTests HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
+for test in ReleaseSettingsTests TemporaryIntentionUISmoke HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit \

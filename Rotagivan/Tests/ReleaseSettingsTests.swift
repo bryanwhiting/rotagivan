@@ -39,10 +39,10 @@ import SwiftUI
             }
             return accessible.first { $0.accessibilityIdentifier?() == identifier }
         }
-        func render(_ section: String, check: (NSView) -> Void) {
+        func render(_ section: String, width: CGFloat = 940, height: CGFloat = 740, check: (NSView) -> Void) {
             let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync,
                 initialSection: section).defaultAppStorage(defaults))
-            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 940, height: 740),
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                 styleMask: [.titled], backing: .buffered, defer: false)
             panel.isReleasedWhenClosed = false
             panel.contentView = host
@@ -55,7 +55,7 @@ import SwiftUI
                ["Voice mode", "Actions"].contains(section),
                let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                 host.cacheDisplay(in: host.bounds, to: bitmap)
-                let destination = URL(fileURLWithPath: directory).appendingPathComponent("release-\(section).png")
+                let destination = URL(fileURLWithPath: directory).appendingPathComponent("release-\(section)-\(Int(width))x\(Int(height)).png")
                 try! bitmap.representation(using: .png, properties: [:])!.write(to: destination)
             }
             panel.orderOut(nil)
@@ -91,6 +91,23 @@ import SwiftUI
             }
         }
         store.settings.appOverrides = [AppGestureOverride(bundleID: "test.disabled", name: "Disabled", enabled: false)]
+        func tableViewport(in view: NSView) -> NSScrollView? {
+            if let table = view as? NSTableView { return table.enclosingScrollView }
+            return view.subviews.lazy.compactMap { tableViewport(in: $0) }.first
+        }
+        var compactTableSize = CGSize.zero
+        render("Actions") { host in
+            guard let table = tableViewport(in: host) else { preconditionFailure("Missing Actions table") }
+            compactTableSize = table.bounds.size
+            precondition(compactTableSize.width >= 700, "Compact Actions must retain usable table width")
+        }
+        render("Actions", width: 1492, height: 1000) { host in
+            guard let table = tableViewport(in: host) else { preconditionFailure("Missing expanded Actions table") }
+            precondition(table.bounds.width > compactTableSize.width + 450,
+                "Actions table must grow with the settings window width")
+            precondition(table.bounds.height > compactTableSize.height + 100,
+                "Actions table must grow with the settings window height")
+        }
         render("Actions") { host in
             precondition(find("actions-options", in: host) != nil,
                 "Disabled overrides must remain manageable")

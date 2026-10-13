@@ -315,7 +315,9 @@ struct ContentView: View {
                         }
                         pageContent
                     }
-                    .frame(width: 708, alignment: .leading).padding(22)
+                    .frame(width: selection == "Actions" ? max(708, viewport.size.width - 44) : 708,
+                        alignment: .leading).padding(22)
+                    .environment(\.actionsTableHeight, max(520, viewport.size.height - 240))
                     .frame(minWidth: viewport.size.width, minHeight: viewport.size.height, alignment: .topLeading)
                     .id(store.activeConfigurationID)
                 }

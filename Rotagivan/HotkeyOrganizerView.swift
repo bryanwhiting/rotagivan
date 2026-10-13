@@ -1,6 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct ActionsTableHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 520
+}
+
+extension EnvironmentValues {
+    var actionsTableHeight: CGFloat {
+        get { self[ActionsTableHeightKey.self] }
+        set { self[ActionsTableHeightKey.self] = newValue }
+    }
+}
+
 private struct ActionTablePresentationID: Hashable {
     let revision: UInt64
     let group: String
@@ -56,6 +67,7 @@ struct ActionVocabularyEditor: View {
 }
 
 struct HotkeyOrganizerView: View {
+    @Environment(\.actionsTableHeight) private var tableHeight
     @ObservedObject var store: SettingsStore
     @ObservedObject private var keys = ShortcutSettings.shared
     @ObservedObject private var voiceApps = VoiceApplicationIndex.shared
@@ -427,7 +439,8 @@ struct HotkeyOrganizerView: View {
                     }
                 }.width(min: 135, ideal: 200)
             }
-            .frame(height: 520)
+            .frame(maxWidth: .infinity)
+            .frame(height: tableHeight)
             // Recreate the native table when its filter scope changes. AppKit
             // otherwise reenters its delegate while expanding filtered rows.
             .id(ActionTablePresentationID(revision: catalog.publishedRevision, group: actionGroupFilter,

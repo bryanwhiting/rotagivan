@@ -5,6 +5,7 @@ import SwiftUI
     @MainActor static func main() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         let suite = "Rotagivan.ActionTable.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -101,6 +102,35 @@ import SwiftUI
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         precondition(table.tableColumns.count == 7, "Show IDs must reveal the seventh column")
         try capture("actions-table-ids")
+        // Press the real inline control; opening and canceling must be draft-only.
+        searchField.stringValue = "Lock Screen"
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        func accessible(_ object: Any) -> [AnyObject] {
+            let element = object as AnyObject
+            return [element] + (element.accessibilityChildren?() ?? []).flatMap(accessible)
+        }
+        func elements(in view: NSView) -> [AnyObject] { descendants(view).flatMap(accessible) }
+        let lockRow = rows.first { $0.action.command == .lockScreen }!
+        guard let assignButton = elements(in: host).first(where: {
+            $0.accessibilityIdentifier?() == "assign-action-hotkey-\(lockRow.id)"
+        }) else { preconditionFailure("Every assignable row must expose its inline hotkey button") }
+        precondition(assignButton.accessibilityPerformPress?() == true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        guard let sheet = panel.sheets.first, let sheetContent = sheet.contentView else {
+            preconditionFailure("Inline assignment must open the shared editor")
+        }
+        let sheetElements = elements(in: sheetContent)
+        precondition(!sheetElements.contains { ($0.accessibilityLabel?() ?? "").contains("Tap or swipe") },
+            "Inline hotkey assignment must hide the gesture picker")
+        precondition(sheetElements.contains { ($0.accessibilityLabel?() ?? "").contains("Action: \(lockRow.name)") },
+            "The editor must be prefilled with the clicked action")
+        guard let cancel = sheetElements.first(where: { $0.accessibilityLabel?() == "Cancel" }) else {
+            preconditionFailure("Assignment editor must support cancellation")
+        }
+        precondition(cancel.accessibilityPerformPress?() == true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(panel.sheets.isEmpty)
         let after = try encoder.encode(store.settings)
         precondition(after == before, "Browsing the table must not change actions or assignments")
         panel.orderOut(nil); panel.close()

@@ -45,6 +45,17 @@ private struct PreviewHost: View {
         defer { ticker.invalidate() }
 
         func snapshot(_ name: String) throws -> Data {
+            // Timer callbacks can be coalesced while AppKit/SwiftUI warms up or
+            // the machine is busy. A fixed wall-time wait does not establish
+            // that the parent actually rebuilt. Require observed updates for
+            // every state, with a bounded timeout if the timer stops entirely.
+            let initialRevision = fixture.parentRevision
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            repeat {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            } while fixture.parentRevision - initialRevision < 20 && ContinuousClock.now < deadline
+            precondition(fixture.parentRevision - initialRevision >= 20,
+                         "Parent update timer stalled during \(name): only \(fixture.parentRevision - initialRevision) callbacks")
             RunLoop.main.run(until: Date().addingTimeInterval(0.25))
             host.layoutSubtreeIfNeeded()
             let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!

@@ -2,7 +2,7 @@
 set -euo pipefail
 script_dir=${0:A:h}
 cd "$script_dir/.."
-test_dir=$(mktemp -d /private/tmp/rotagivan-tests.XXXXXX)
+test_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/rotagivan-tests.XXXXXX")
 xcrun swiftc Rotagivan/AccessibilitySetup.swift Rotagivan/Tests/AccessibilitySetupTests.swift -framework AppKit -framework SwiftUI -o "$test_dir/AccessibilitySetupTests"
 "$test_dir/AccessibilitySetupTests" "$test_dir"
 swift build --package-path YAML -c release --product ConfigurationYAML
@@ -15,6 +15,10 @@ xcrun swiftc -j 4 Rotagivan/TemporaryIntention.swift Rotagivan/Tests/TemporaryIn
 xcrun swiftc -j 4 Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/Tests/VoiceMicrophoneAdmissionTests.swift \
   -o "$test_dir/VoiceMicrophoneAdmissionTests"
 "$test_dir/VoiceMicrophoneAdmissionTests"
+xcrun swiftc -j 4 Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/TemporaryIntention.swift \
+  Rotagivan/LocalIntentionSpeech.swift Rotagivan/Tests/LocalIntentionSpeechTests.swift \
+  -framework Speech -framework AVFoundation -o "$test_dir/LocalIntentionSpeechTests"
+"$test_dir/LocalIntentionSpeechTests"
 for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollResponseTests ConfigurationProfileTests PointerProfileTests TapCalibrationSettingsTests HUDMapTests ExplorerTileLayerTests ExplorerTransferTests WindowGroupTests ReservedGroupTests UnifiedBindingScopeTests; do
   xcrun swiftc -j 4 "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"
@@ -227,7 +231,7 @@ for test in ReleaseSettingsTests TemporaryIntentionUISmoke HUDWorkspaceUISmoke H
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit \
-  -framework Carbon -framework Security -framework ServiceManagement -o "$test_dir/$test"
+  -framework Carbon -framework Security -framework ServiceManagement -framework Speech -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
 done
 echo "All tests passed. Test binaries: $test_dir"

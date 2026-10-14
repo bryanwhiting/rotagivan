@@ -87,15 +87,35 @@ enum ExplorerApplicationCatalog {
         return nil
     }
 
-    static func scan(roots: [URL] = Self.roots) -> [ExplorerApplication] {
+    static func scan() -> [ExplorerApplication] {
+        scanWithStatus().applications
+    }
+
+    static func scan(roots: [URL]) -> [ExplorerApplication] {
         scanWithStatus(roots: roots).applications
     }
 
-    static func scanWithStatus(roots: [URL] = Self.roots) -> ScanResult {
+    static func scanWithStatus() -> ScanResult {
+        scanWithStatus(roots: roots, includeFinder: true)
+    }
+
+    static func scanWithStatus(roots: [URL]) -> ScanResult {
+        scanWithStatus(roots: roots, includeFinder: false)
+    }
+
+    private static func scanWithStatus(roots: [URL], includeFinder: Bool) -> ScanResult {
         let manager = FileManager.default
         var seen = Set<String>()
         var result: [ExplorerApplication] = []
         var errors: [String] = []
+        if includeFinder {
+            let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.finder")
+                ?? URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app", isDirectory: true)
+            if let finder = application(at: finderURL) {
+                seen.insert(finder.url.resolvingSymlinksInPath().path)
+                result.append(finder)
+            }
+        }
         for root in roots {
             // An explicitly selected application root may be a symlink (for
             // example ~/Applications on another volume). Traverse its target,
@@ -183,6 +203,58 @@ enum ExplorerApplicationCatalog {
             return URL(fileURLWithPath: path).standardizedFileURL
         }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+}
+
+struct ExplorerFolder: Identifiable, Hashable, Sendable {
+    let name: String
+    let url: URL
+    var id: String { url.standardizedFileURL.path }
+    var location: String { url.deletingLastPathComponent().path }
+}
+
+enum ExplorerFolderCatalog {
+    static func roots(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        [home, home.appendingPathComponent("Desktop", isDirectory: true),
+         home.appendingPathComponent("Documents", isDirectory: true),
+         home.appendingPathComponent("Downloads", isDirectory: true),
+         home.appendingPathComponent("Applications", isDirectory: true),
+         home.appendingPathComponent("Movies", isDirectory: true),
+         home.appendingPathComponent("Music", isDirectory: true),
+         home.appendingPathComponent("Pictures", isDirectory: true),
+         home.appendingPathComponent("Public", isDirectory: true),
+         URL(fileURLWithPath: "/Applications", isDirectory: true),
+         URL(fileURLWithPath: "/System/Applications", isDirectory: true)]
+    }
+
+    /// Index standard locations and one level of visible child folders; do not
+    /// recurse through user data or follow symlinks while building launcher results.
+    static func scan(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [ExplorerFolder] {
+        let manager = FileManager.default
+        var folders: [String: ExplorerFolder] = [:]
+        let searchRoots = roots(home: home)
+        for root in searchRoots {
+            guard (try? root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            let standardized = root.standardizedFileURL
+            folders[standardized.path] = ExplorerFolder(
+                name: standardized == home.standardizedFileURL ? "Home" : standardized.lastPathComponent,
+                url: standardized)
+            guard let children = try? manager.contentsOfDirectory(at: standardized,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]) else { continue }
+            for child in children {
+                guard folders.count < 2_000,
+                      child.pathExtension.lowercased() != "app",
+                      child.lastPathComponent != "Library",
+                      let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                      values.isDirectory == true, values.isSymbolicLink != true else { continue }
+                let childURL = child.standardizedFileURL
+                folders[childURL.path] = ExplorerFolder(name: childURL.lastPathComponent, url: childURL)
+            }
+        }
+        return folders.values.sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+        }
     }
 }
 

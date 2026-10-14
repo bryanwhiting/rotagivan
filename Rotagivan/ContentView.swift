@@ -136,7 +136,7 @@ struct ContentView: View {
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
         ("Actions", "bolt.circle"), ("Voice mode", "waveform"),
-        ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape")]
+        ("Pointer & scrolling", "cursorarrow.motionlines"), ("General", "gearshape"), ("Sync & backup", "arrow.triangle.2.circlepath")]
     private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
@@ -148,7 +148,7 @@ struct ContentView: View {
         switch initialSection {
         case "Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides": resolvedSection = "Actions"
         case "Profiles", "Pointer layers": resolvedSection = "Pointer & scrolling"
-        case "Devices", "HUD", "Actions", "Voice mode", "Pointer & scrolling", "General": resolvedSection = initialSection
+        case "Devices", "HUD", "Actions", "Voice mode", "Pointer & scrolling", "General", "Sync & backup": resolvedSection = initialSection
         default: resolvedSection = "HUD"
         }
         _selection = State(initialValue: resolvedSection)
@@ -277,7 +277,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("THIS PROFILE").font(.system(size: 9, weight: .semibold, design: .monospaced))
+            Text("SETTINGS").font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
             ForEach(sections, id: \.0) { title, icon in
                 Button { selection = title } label: {
@@ -310,7 +310,7 @@ struct ContentView: View {
                         if selection != "Pointer & scrolling" {
                             Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                                 .accessibilityIdentifier("settings-page-heading")
-                            Text(selection == "General" ? "Account, permissions and startup belong to this Mac. Configurations include every profile." : "Settings for \(store.activeConfigurationName)")
+                            Text(selection == "Sync & backup" ? "One configuration includes all profiles. Choose when to sync or restore." : selection == "General" ? "Permissions and startup belong to this Mac." : "Settings for \(store.activeConfigurationName)")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         pageContent
@@ -334,6 +334,9 @@ struct ContentView: View {
     @ViewBuilder private var pageContent: some View {
         switch selection {
         case "General": general
+        case "Sync & backup":
+            SyncSettingsView(sync: sync)
+            ConfigurationSettingsView(store: store, hid: hid)
         case "Devices": devices
         case "HUD": hudAndTapSettings
         case "Actions":
@@ -709,10 +712,6 @@ struct ContentView: View {
             Section {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
             }
-            Divider()
-            ConfigurationSettingsView(store: store, hid: hid)
-            Divider()
-            SyncSettingsView(sync: sync)
             Divider()
             Section {
                 Text("Rotagivan is an independent, editable implementation. Quit ZSA Navigator before using Rotagivan’s Navigator driver. Apple trackpad actions are independent of that driver.")

@@ -1,6 +1,14 @@
 import AppKit
 import ApplicationServices
 
+struct ChromeRecentTab: Hashable, Sendable {
+    let windowIndex: Int
+    let tabIndex: Int
+    let title: String
+    let url: String
+    var id: String { "chrome-tab:\(windowIndex):\(tabIndex):\(url)" }
+}
+
 struct LauncherMenuAction: Hashable, Sendable {
     let pid: pid_t
     let indices: [Int]
@@ -8,22 +16,37 @@ struct LauncherMenuAction: Hashable, Sendable {
     var id: String { "menu:\(pid):" + indices.map(String.init).joined(separator: ".") }
 }
 struct LauncherAction: Identifiable, Hashable, Sendable {
-    enum Target: Hashable, Sendable { case app(ExplorerApplication), rotaSettings, menu(LauncherMenuAction), registered(String) }
+    enum Target: Hashable, Sendable { case app(ExplorerApplication), folder(ExplorerFolder), chromeTab(ChromeRecentTab), rotaSettings, menu(LauncherMenuAction), registered(String) }
     let id: String
     let name: String
     let detail: String
     let target: Target
     var searchEntry: ExplorerApplication {
         if case .app(let app) = target { return app }
+        if case .folder(let folder) = target {
+            return ExplorerApplication(bundleID: folder.url.path, name: folder.name, url: folder.url)
+        }
         return ExplorerApplication(bundleID: id, name: name, url: URL(fileURLWithPath: "/launcher-index/" + id))
     }
     static func apps(_ apps: [ExplorerApplication]) -> [Self] {
         apps.map { Self(id:$0.id,name:$0.name,detail:$0.location,target:.app($0)) }
     }
+    static func folders(_ folders: [ExplorerFolder]) -> [Self] {
+        folders.map { folder in
+            Self(id: "folder:" + folder.id, name: folder.name, detail: folder.location, target: .folder(folder))
+        }
+    }
+    static func chromeTabs(_ tabs: [ChromeRecentTab]) -> [Self] {
+        tabs.map { tab in
+            Self(id: tab.id, name: "Chrome tab · " + (tab.title.isEmpty ? tab.url : tab.title),
+                 detail: "Window \(tab.windowIndex), tab \(tab.tabIndex) · \(tab.url)", target: .chromeTab(tab))
+        }
+    }
     static func registered(_ records: [VoiceRegisteredAction]) -> [Self] {
         records.filter { $0.enabled && $0.action.kind != .openApp }.map {
-            Self(id: "registered:" + $0.id, name: $0.title,
-                detail: ($0.appName ?? "Mac action") + " · Return twice to confirm", target: .registered($0.id))
+            let category = $0.action.kind == .macro ? "Macro" : ($0.action.kind == .openURL ? "Website bookmark" : ($0.appName ?? "Mac action"))
+            return Self(id: "registered:" + $0.id, name: $0.title,
+                detail: category + " · Return twice to confirm", target: .registered($0.id))
         }
     }
     static var settings: Self {

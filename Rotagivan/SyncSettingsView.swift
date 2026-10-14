@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SyncSettingsView: View {
     @ObservedObject var sync: SettingsSync
+    @State private var accountExpanded = false
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -18,12 +19,28 @@ struct SyncSettingsView: View {
           GroupBox {
            VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("Cloud settings", systemImage: "cloud").font(.headline)
+                Label("Sync settings", systemImage: "arrow.triangle.2.circlepath").font(.headline)
                 Spacer()
                 if sync.busy || sync.restoringLogin { ProgressView().controlSize(.small).accessibilityLabel("Restoring or updating account") }
             }
-            Text("Save your setup on one Mac, then load it on another. Sync is manual.")
+            Text("Sync all profiles, HUD layouts, actions, shortcuts, voice options, and pointer settings with one click. Sync is manual.")
                 .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LabeledContent("Destination", value: !sync.credentialsReady ? (sync.restoringLogin ? "Restoring account…" : "Account unavailable") : sync.account == nil ? "settings.yaml on this Mac" : "Your existing cloud account + this Mac")
+                .font(.caption).foregroundStyle(.secondary)
+            Button(sync.busy ? "Syncing…" : "Sync settings") { Task { await sync.save() } }
+                .accessibilityIdentifier("sync-save")
+                .buttonStyle(.borderedProminent)
+                .disabled(sync.busy || !sync.credentialsReady || sync.restoringLogin)
+                .help("Save the current complete configuration to the displayed destination.")
+            LabeledContent("Last successful save", value: !sync.credentialsReady ? "Unavailable until account restore" : sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "Not saved yet")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(!sync.credentialsReady ? "Sync stays unavailable until your saved account is restored." : sync.account == nil ? "Saves locally. Sign in below to also save to your existing cloud service." : "Saves this Mac’s current configuration to the cloud. On another Mac, use Restore saved settings below.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("API keys are excluded; encrypted-vault transfers stay separate. Permissions, launch-at-login, the enable switch, and the local voice-provider choice stay on this Mac when restoring cloud settings.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            DisclosureGroup("Account & restore", isExpanded: $accountExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
             if !sync.credentialsReady {
                 Text(sync.restoringLogin ? "Restoring your saved account…" : "Your saved account is unavailable. Retry before saving or loading settings.")
                     .fixedSize(horizontal: false, vertical: true)
@@ -60,13 +77,7 @@ struct SyncSettingsView: View {
                 Text("Email is your login name. Verification and password-reset emails aren't available yet; save your password in a password manager. Signing in does not save or load settings.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            LabeledContent("Last save", value: sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "—")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button(sync.account == nil ? "Save on this Mac" : "Save to cloud") { Task { await sync.save(); if sync.error == nil && sync.vault.unlocked { await sync.vault.save() } } }
-                    .accessibilityIdentifier("sync-save")
-                    .help(sync.account == nil ? "Save current app settings to settings.yaml." : "Save current app settings to the cloud and settings.yaml.")
-                Button(sync.account == nil ? "Load from this Mac" : "Load from cloud…") {
+                Button("Restore saved settings…") {
                     guard sync.credentialsReady else { return }
                     cloudLoadPreview = nil
                     if sync.account == nil { confirmLoad = true }
@@ -81,13 +92,11 @@ struct SyncSettingsView: View {
                 }
                     .accessibilityIdentifier("sync-load")
                     .help(sync.account == nil ? "Load settings.yaml into this app." : "Load your saved cloud settings into this app.")
-            }.disabled(sync.busy || !sync.credentialsReady || sync.restoringLogin)
-            Text(!sync.credentialsReady ? "Save and Load remain unavailable until your saved account is restored."
-                : sync.account == nil
-                ? "Save and Load use settings.yaml on this Mac. Replaced copies are backed up."
-                : "Load replaces this Mac’s settings after confirmation. A backup is kept. Unlocked API keys are saved and loaded separately.")
+            .disabled(sync.busy || !sync.credentialsReady || sync.restoringLogin)
+            Text("Restore replaces the current configuration after confirmation and keeps a backup. It does not transfer API keys.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            }.padding(.top, 8)
+            }
             DisclosureGroup("Storage & privacy") {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -102,7 +111,9 @@ struct SyncSettingsView: View {
            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
           }
             if sync.credentialsReady {
-                CredentialVaultView(vault: sync.vault)
+                DisclosureGroup("Encrypted API keys (separate)") {
+                    CredentialVaultView(vault: sync.vault).padding(.top, 8)
+                }.accessibilityIdentifier("sync-separate-vault")
             } else {
                 Label("Encrypted API keys will appear after your saved account is restored.", systemImage: "lock.shield")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -110,14 +121,15 @@ struct SyncSettingsView: View {
             }
         }
         .textFieldStyle(.roundedBorder)
+        .onAppear { if !sync.credentialsReady { accountExpanded = true } }
         .onChange(of: sync.credentialsReady) { ready in
-            if !ready { confirmLoad = false; cloudLoadPreview = nil; changingPassword = false; clearPasswords() }
+            if !ready { accountExpanded = true; confirmLoad = false; cloudLoadPreview = nil; changingPassword = false; clearPasswords() }
         }
         .confirmationDialog(sync.account == nil ? "Load settings.yaml?" : "Load your saved cloud settings?", isPresented: $confirmLoad) {
             Button("Back up current settings and load") {
                 guard sync.credentialsReady else { return }
                 let preview = cloudLoadPreview
-                Task { await sync.load(expectedCloudSave: preview); if sync.error == nil && sync.account != nil { await sync.vault.load() } }
+                Task { await sync.load(expectedCloudSave: preview) }
             }
         } message: {
             Text(cloudLoadPreview?.confirmationMessage ?? "This replaces this Mac's current settings. A backup will be kept.")

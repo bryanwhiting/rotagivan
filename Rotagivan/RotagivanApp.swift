@@ -226,7 +226,7 @@ struct NavigatorPanel: View {
             }
             Divider()
             HStack {
-                Button("All Settings…") {
+                Button("Settings…") {
                     openWindow(id: "settings")
                     NSApp.activate(ignoringOtherApps: true)
                 }.buttonStyle(.link)
@@ -301,7 +301,7 @@ struct RotagivanMenuBarLabel: View {
 struct SettingsButton: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Button("Open Settings…") {
+        Button("Settings…") {
             openWindow(id: "settings")
             NSApp.activate(ignoringOtherApps: true)
         }

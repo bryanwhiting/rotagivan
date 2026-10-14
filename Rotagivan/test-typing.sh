@@ -2,7 +2,7 @@
 set -euo pipefail
 script_dir=${0:A:h}
 cd "$script_dir/.."
-test_dir=$(mktemp -d /tmp/rotagivan-typing.XXXXXX)
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/rotagivan-typing.XXXXXX")
 # Native UI/FSEvents need the logged-in macOS session. No installed app is changed.
 rustc --edition 2021 -O --test "$script_dir/RustSearch/search.rs" -o "$test_dir/rust-tests"
 "$test_dir/rust-tests" --nocapture

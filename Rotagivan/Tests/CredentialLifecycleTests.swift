@@ -99,6 +99,8 @@ private final class BlockingCredentialProbe: @unchecked Sendable {
             "Pending account restore must explain that encrypted-key status is unknown")
         precondition(!allElements().contains { $0.accessibilityLabel?() == "Not saved" },
             "Unknown account must not imply that its encrypted keys are missing")
+        precondition(!allElements().contains { $0.accessibilityLabel?()?.hasPrefix("Saves locally.") == true },
+            "Unknown account must not claim signed-out local-save semantics")
         precondition(!allElements().contains { $0.accessibilityLabel?() == "Sign in" },
             "Unknown saved login must not render a signed-out fallback")
         sync.retryLoginRestore()

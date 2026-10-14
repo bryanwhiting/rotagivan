@@ -92,6 +92,62 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
         }
     }
 
+    static func snapshot() -> [ChromeRecentTab] {
+        let source = """
+        set output to ""
+        try
+            tell application "Google Chrome"
+                repeat with w in windows
+                    set wi to index of w
+                    repeat with ti from 1 to count of tabs of w
+                        set t to tab ti of w
+                        set tabTitle to title of t
+                        set tabURL to URL of t
+                        set output to output & (wi as text) & tab & (ti as text) & tab & tabTitle & tab & tabURL & linefeed
+                    end repeat
+                end repeat
+            end tell
+        on error
+            return ""
+        end try
+        return output
+        """
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return [] }
+        let result = script.executeAndReturnError(&error)
+        guard error == nil, let text = result.stringValue, !text.isEmpty else { return [] }
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
+            let fields = line.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false)
+            guard fields.count == 4, let window = Int(fields[0]), let tab = Int(fields[1]) else { return nil }
+            return ChromeRecentTab(windowIndex: window, tabIndex: tab, title: String(fields[2]), url: String(fields[3]))
+        }
+    }
+
+    static func activate(_ tab: ChromeRecentTab) -> Bool {
+        let source = """
+        try
+            tell application "Google Chrome"
+                if (count of windows) < \(tab.windowIndex) then return false
+                set w to window \(tab.windowIndex)
+                if (count of tabs of w) < \(tab.tabIndex) then return false
+                set t to tab \(tab.tabIndex) of w
+                if (URL of t as text) is not \(literal(tab.url)) then return false
+                set active tab index of w to \(tab.tabIndex)
+                set minimized of w to false
+                set index of w to 1
+                activate
+                return true
+            end tell
+        on error
+            return false
+        end try
+        """
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return false }
+        let result = script.executeAndReturnError(&error)
+        return error == nil && result.booleanValue
+    }
+
     static func execute(_ source: String) -> (tabID: String?, error: Int?) {
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else { return (nil, -2700) }

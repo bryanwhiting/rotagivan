@@ -184,6 +184,18 @@ import SwiftUI
         cloud.failPut = false
 
         cloud.calls = []
+        cloud.beforeGet = { await sync.save() }
+        await sync.save()
+        check(cloud.calls == ["GET settings", "PUT settings"] && sync.error == nil && !sync.busy,
+              "Repeated clicks during a save must produce one upload; explicit retry recovers after failure")
+        defaults.set("fixture-openai-secret", forKey: "OPENAI_ROTA_KEY")
+        defaults.set("fixture-login-secret", forKey: "sync.password")
+        defaults.set("fixture-vault-secret", forKey: "vault.passphrase")
+        let exported = String(decoding: try JSONEncoder().encode(AppConfiguration(store: store)), as: UTF8.self) + (try working.yaml())
+        check(!exported.contains("fixture-") && !exported.contains("OPENAI_ROTA_KEY") && !exported.contains("sync.password"),
+              "Generic settings capture must not sweep credential or unrelated defaults into YAML")
+
+        cloud.calls = []
         let beforeAccountChange = try await files.rawDigest()
         await sync.signOut()
         check(cloud.calls == ["POST logout"], "Sign out must not transfer settings")

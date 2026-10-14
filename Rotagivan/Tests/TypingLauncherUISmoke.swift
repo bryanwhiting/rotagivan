@@ -3,6 +3,17 @@ import AppKit
  @MainActor static func main() async throws {
   _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
   await VoiceApplicationIndex.shared.load()
+  precondition(VoiceApplicationIndex.shared.applications.contains { $0.bundleID == "com.apple.finder" }, "Finder should be part of type-to-find")
+  let folderFixture = URL(fileURLWithPath:CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("folder-catalog-fixture", isDirectory:true)
+  let projects = folderFixture.appendingPathComponent("Documents/Client Projects", isDirectory:true)
+  try FileManager.default.createDirectory(at:projects, withIntermediateDirectories:true)
+  defer { try? FileManager.default.removeItem(at:folderFixture) }
+  let foundFolders = ExplorerFolderCatalog.scan(home:folderFixture)
+  precondition(foundFolders.contains { $0.url == projects }, "Visible child folders should be indexed")
+  let matchingFolders = LauncherAction.search("client projects", actions:LauncherAction.folders(foundFolders))
+  precondition(matchingFolders.first?.name == "Client Projects", "Folder names should be searchable")
+  let applicationFolders = LauncherAction.search("Applications", actions:LauncherAction.folders(foundFolders))
+  precondition(applicationFolders.contains { if case .folder(let folder) = $0.target { return folder.url.path == "/Applications" }; return false }, "Applications should be a searchable folder")
   let suite = "Rotagivan.TypingSmoke." + UUID().uuidString
   let defaults = UserDefaults(suiteName:suite)!
   defer { defaults.removePersistentDomain(forName:suite) }
@@ -49,6 +60,18 @@ import AppKit
   precondition(controller.isVisible)
   precondition(controller.processLayerKey(key(53)))
   precondition(!controller.isVisible)
+  let tabActions = LauncherAction.chromeTabs([
+   ChromeRecentTab(windowIndex:1,tabIndex:1,title:"Alpha panel",url:"https://alpha.example/"),
+   ChromeRecentTab(windowIndex:1,tabIndex:2,title:"Beta dashboard",url:"https://beta.example/")
+  ])
+  let tabResults = LauncherAction.search("chrome",actions:tabActions)
+  precondition(tabResults.map(\.name) == ["Chrome tab · Alpha panel","Chrome tab · Beta dashboard"],"Chrome tabs remain listed in window/tab order")
+  var settingsOpened = false
+  controller.onSettings = { settingsOpened = true }
+  controller.show(waitingForLift:false)
+  precondition(controller.processLayerKey(key(44,"/")),"Slash should open settings")
+  try await Task.sleep(nanoseconds:100_000_000)
+  precondition(settingsOpened && !controller.isVisible,"Slash opens settings without consuming a search character")
   controller.showWindowManager(waitingForLift:false)
   _ = controller.processLayerKey(key(0,"s"))
   precondition(controller.displayedLauncherQuery.isEmpty,"Window Manager retains its key routing")

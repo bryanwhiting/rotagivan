@@ -35,6 +35,8 @@ extension AppExplorerPresenting {
     private var launcherMenuRefresh: Task<Void, Never>?
     private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
     private var launcherActionSnapshot: [LauncherAction] = []
+    private var chromeTabSnapshot: [ChromeRecentTab] = []
+    private var folderSnapshot: [ExplorerFolder] = []
     private var pendingMenuAction: LauncherAction?
     private var searchObservation: AnyCancellable?
     private var privateEditorOpen = false
@@ -336,9 +338,14 @@ extension AppExplorerPresenting {
         loadEntries()
         model.selected = nil
         model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
-        pendingMenuAction = nil; launcherMenuSnapshot = []
+        pendingMenuAction = nil; launcherMenuSnapshot = []; chromeTabSnapshot = []; folderSnapshot = []
         launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
         let menuGeneration = selectionGeneration
+        Task.detached(priority: .utility) { [weak self] in
+            let tabs = ChromeBookmarkTabs.snapshot()
+            let folders = ExplorerFolderCatalog.scan()
+            await self?.acceptLauncherSnapshots(tabs: tabs, folders: folders, generation: menuGeneration)
+        }
         if let pid = sourcePID {
             launcherMenuRefresh = Task { [weak self] in
                 let menus = await Task.detached(priority: .utility) { LauncherMenuCatalog.scan(pid: pid) }.value
@@ -477,10 +484,17 @@ extension AppExplorerPresenting {
         }
     }
 
+    private func acceptLauncherSnapshots(tabs: [ChromeRecentTab], folders: [ExplorerFolder], generation: UInt64) {
+        guard isVisible, selectionGeneration == generation else { return }
+        chromeTabSnapshot = tabs
+        folderSnapshot = folders
+        if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
+    }
+
     private func updateLauncherResults(_ apps: [ExplorerApplication]) {
         let selectedID = model.launcherActions.indices.contains(model.launcherSelection)
             ? model.launcherActions[model.launcherSelection].id : nil
-        launcherActionSnapshot = LauncherAction.apps(apps) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot
+        launcherActionSnapshot = LauncherAction.apps(apps) + LauncherAction.folders(folderSnapshot) + LauncherAction.chromeTabs(chromeTabSnapshot) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot
         model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot)
         model.launcherResults = model.launcherActions.compactMap { if case .app(let app) = $0.target { return app }; return nil }
         model.launcherSelection = selectedID.flatMap { id in model.launcherActions.firstIndex { $0.id == id } } ?? 0
@@ -494,6 +508,14 @@ extension AppExplorerPresenting {
         model.realtimeSession?.cancel(); model.realtimeSession = nil
         switch action.target {
         case .app(let app): launchSearchResult(app)
+        case .folder(let folder):
+            dismiss()
+            _ = NSWorkspace.shared.open(folder.url)
+        case .chromeTab(let tab):
+            dismiss()
+            Task.detached(priority: .userInitiated) {
+                _ = ChromeBookmarkTabs.activate(tab)
+            }
         case .rotaSettings: dismiss(); openSettings()
         case .registered(let id):
             guard let original = launcherRegisteredSnapshot.first(where: { $0.id == id }),
@@ -526,6 +548,9 @@ extension AppExplorerPresenting {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
         guard modifiers.isEmpty else { return false }
         let searching = !model.launcherQuery.isEmpty || model.realtimeSession != nil
+        if !searching, event.charactersIgnoringModifiers == "/" {
+            openSettings(); return true
+        }
         if searching {
             switch event.keyCode {
             case 53: dismiss(); return true
@@ -2092,7 +2117,7 @@ struct AppExplorerView: View {
         if model.showingMediaControls { return "Tap to play / pause · swipe to control · Esc to close" }
         if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
         if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
-        return model.groupNames.isEmpty ? "Type to search apps · swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
+        return model.groupNames.isEmpty ? "Type to search apps, Finder, folders, Chrome tabs, bookmarks, and actions · swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
     }
 
     var body: some View {
@@ -2111,24 +2136,37 @@ struct AppExplorerView: View {
     private var launcherSearchHUD: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(model.launcherQuery, systemImage: "magnifyingglass")
-                .font(.title2).accessibilityLabel("Search apps: " + model.launcherQuery)
+                .font(.title2).accessibilityLabel("Search: " + model.launcherQuery)
             Divider()
             if model.launcherActions.isEmpty {
-                Text("No matching apps · the index refreshes in the background").foregroundStyle(.secondary)
+                Text("No matching apps, folders, tabs, bookmarks, or actions · the app index refreshes in the background").foregroundStyle(.secondary)
             }
-            ForEach(Array(model.launcherActions.enumerated()), id: \.element.id) { index, app in
-                HStack {
-                    Image(systemName: "app.fill").font(.title2).frame(width: 28, height: 28)
-                    VStack(alignment: .leading) {
-                        Text(app.name).font(.headline)
-                        Text(app.detail).font(.caption).foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(model.launcherActions.enumerated()), id: \.element.id) { index, app in
+                            HStack {
+                                launcherIcon(app)
+                                    .font(.title2).frame(width: 28, height: 28)
+                                VStack(alignment: .leading) {
+                                    Text(app.name).font(.headline).lineLimit(1)
+                                    Text(app.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                if index == model.launcherSelection { Image(systemName: "return") }
+                            }.padding(8)
+                                .background(index == model.launcherSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .cornerRadius(8)
+                                .accessibilityAddTraits(index == model.launcherSelection ? .isSelected : [])
+                                .id(app.id)
+                        }
                     }
-                    Spacer()
-                    if index == model.launcherSelection { Image(systemName: "return") }
-                }.padding(8)
-                    .background(index == model.launcherSelection ? Color.accentColor.opacity(0.2) : Color.clear)
-                    .cornerRadius(8)
-                    .accessibilityAddTraits(index == model.launcherSelection ? .isSelected : [])
+                }
+                .frame(maxHeight: 620)
+                .onChange(of: model.launcherSelection) { index in
+                    guard model.launcherActions.indices.contains(index) else { return }
+                    proxy.scrollTo(model.launcherActions[index].id, anchor: .center)
+                }
             }
             if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary) }
             Text("↑↓ choose · Return launch · Backspace edit · Esc close")
@@ -2136,6 +2174,32 @@ struct AppExplorerView: View {
         }.padding(24).frame(width: 540)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
             .frame(width: 950, height: model.realtimeSession == nil ? 850 : nil)
+    }
+
+    @ViewBuilder private func launcherIcon(_ item: LauncherAction) -> some View {
+        switch item.target {
+        case .app(let app):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+                .resizable().aspectRatio(contentMode: .fit)
+        case .folder(let folder):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: folder.url.path))
+                .resizable().aspectRatio(contentMode: .fit)
+        case .chromeTab:
+            Image(systemName: "globe")
+        case .rotaSettings:
+            Image(systemName: "gearshape.fill")
+        case .menu:
+            Image(systemName: "menubar.rectangle")
+        case .registered:
+            let detail = item.detail.lowercased()
+            if detail.contains("macro") {
+                Image(systemName: "square.stack.3d.up.fill")
+            } else if detail.contains("website") || detail.contains("url") || item.name.lowercased().contains("website") {
+                Image(systemName: "safari.fill")
+            } else {
+                Image(systemName: "bolt.fill")
+            }
+        }
     }
 
     private var normalHUD: some View {
@@ -2344,7 +2408,7 @@ struct AppExplorerView: View {
                 Text("Click a HUD to switch · click a tile to edit")
             } else {
             Text("Press")
-            footerKey("S", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
+            footerKey("/", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
             Text("for settings")
             }
             if let position = model.carouselPosition {
@@ -2360,7 +2424,7 @@ struct AppExplorerView: View {
                 .overlay(Capsule().strokeBorder(accent.opacity(0.24), lineWidth: 0.7))
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Press S for settings")
+        .accessibilityLabel("Press slash for settings")
     }
 
     private var layerActionHotkeys: [ExplorerEntry] {

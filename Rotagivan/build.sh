@@ -32,6 +32,7 @@ xcrun swiftc -O -parse-as-library \
   -framework AppKit \
   -framework CoreServices \
   -framework AVFoundation \
+  -framework Speech \
   -framework SwiftUI \
   -framework Carbon \
   -framework IOKit \
@@ -83,6 +84,7 @@ xcrun swiftc -O -parse-as-library \
   "$script_dir/VoiceActions.swift" \
   "$script_dir/TemporaryIntention.swift" \
   "$script_dir/VoiceMicrophoneAdmission.swift" \
+  "$script_dir/LocalIntentionSpeech.swift" \
   "$script_dir/NoteDictationSession.swift" \
   "$script_dir/TemporaryIntentionView.swift" \
   "$script_dir/VoiceRecognition.swift" \

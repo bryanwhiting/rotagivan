@@ -52,7 +52,7 @@ import SwiftUI
             host.layoutSubtreeIfNeeded()
             check(host)
             if let directory = CommandLine.arguments.dropFirst().first,
-               ["Voice mode", "Actions"].contains(section),
+               ["Voice mode", "Actions", "Sync & backup"].contains(section),
                let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                 host.cacheDisplay(in: host.bounds, to: bitmap)
                 let destination = URL(fileURLWithPath: directory).appendingPathComponent("release-\(section)-\(Int(width))x\(Int(height)).png")
@@ -78,7 +78,15 @@ import SwiftUI
                 "The rendered toggle must update the selected profile")
             precondition(store.settings.appExplorer?.resolvedVoiceAutoStart == false)
         }
+        render("Sync & backup") { host in
+            precondition(find("settings-section-Sync & backup", in: host) != nil)
+            guard let button = find("sync-save", in: host) else {
+                preconditionFailure("All settings must expose the primary sync action")
+            }
+            precondition(button.accessibilityLabel?() == "Sync settings")
+        }
         render("General") { host in
+            precondition(find("sync-save", in: host) == nil, "Sync must have one home rather than duplicate controls")
             precondition(find("voice-auto-decide", in: host) == nil)
             precondition(find("voice-auto-start", in: host) == nil)
         }

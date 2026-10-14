@@ -27,7 +27,9 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Independent trackpad utility</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Voice Mode sends spoken commands to your selected provider: OpenAI for live speech-to-text search, or OpenRouter/xAI for transcription and text plus action descriptions to Jev for matching. Actions require confirmation unless you enable Auto-decide. Dictate note sends audio to OpenRouter/xAI for transcription only; the resulting temporary note stays on this Mac for 30 minutes and never affects action choices.</string>
+	<string>Voice Mode sends spoken commands to your selected provider: OpenAI for live speech-to-text search, or OpenRouter/xAI for transcription and text plus action descriptions to Jev for matching. Dictate note sends audio to OpenRouter/xAI for transcription only; the resulting temporary note stays on this Mac for 30 minutes and never affects action choices. Private intention dictation uses on-device recognition and keeps audio and recognized text on this Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Rotagivan uses Apple's on-device speech recognition to draft an editable temporary intention. Audio and recognized text stay on this Mac.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Rotagivan controls Chrome to reuse and focus an existing bookmark tab instead of opening duplicates.</string>
 	<key>NSInputMonitoringUsageDescription</key>

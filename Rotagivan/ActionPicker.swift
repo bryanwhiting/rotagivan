@@ -35,6 +35,7 @@ struct ActionPickerItem: Identifiable {
 /// Keep the action identity independent of this machine's installation path.
 struct ActionPickerItemIcon: View {
     let item: ActionPickerItem
+    var size: CGFloat = 34
     @State private var icon: NSImage?
     var body: some View {
         Group {
@@ -45,11 +46,12 @@ struct ActionPickerItemIcon: View {
                     .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
             }
         }
-        .frame(width: 34, height: 34)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
-        .task(id: item.applicationURL) {
+        .task(id: item.id + "|" + (item.applicationURL?.absoluteString ?? "")) {
             icon = nil
-            guard item.action.kind == .openApp, let url = item.applicationURL,
+            guard item.action.kind == .openApp,
+                  let url = item.applicationURL ?? item.action.bundleID.flatMap({ ExplorerApplicationCatalog.applicationURL(for: $0) }),
                   url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return }
             icon = NSWorkspace.shared.icon(forFile: url.path)
         }

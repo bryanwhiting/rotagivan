@@ -65,9 +65,10 @@ struct BindingActionPicker: View {
     var body: some View {
         Button { presenting = true } label: {
             HStack(spacing: 10) {
-                Image(systemName: action.pickerSymbol).foregroundStyle(Color.accentColor)
-                    .frame(width: 28, height: 28)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                ActionPickerItemIcon(item: ActionPickerItem(action: action,
+                    category: action.kind == .openApp ? .apps : .all,
+                    title: dictionary.title(for: action), detail: action.description), size: 28)
+                    .foregroundStyle(Color.accentColor)
                 Text(action.isValid ? dictionary.title(for: action) : "Choose action…")
                     .font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Spacer(minLength: 6)

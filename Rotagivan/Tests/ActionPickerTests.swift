@@ -24,6 +24,30 @@ import SwiftUI
         precondition(ActionPickerCatalog.search(items, query: "zzzz-no-match", category: .all).isEmpty)
         precondition(!ActionPickerCatalog.make(dictionary: [], layers: [], destinations: [], applications: [], allowPointer: false)
             .contains { $0.category == .pointer })
+        // Assignment dialogs have only a bundle ID, not a catalog row's URL.
+        // They must render the same real icon as the indexed picker and refresh
+        // when the selected action changes, without launching an application.
+        let finder = BindingAction.openApp(bundleID: "com.apple.finder", name: "Finder")
+        let iconHost = NSHostingView(rootView: ActionPickerItemIcon(item:
+            ActionPickerItem(action: finder, category: .apps, title: "Finder", detail: "", applicationURL: iconURL)))
+        let iconPanel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 34, height: 34), styleMask: [.titled], backing: .buffered, defer: false)
+        iconPanel.isReleasedWhenClosed = false; iconPanel.contentView = iconHost
+        iconPanel.makeKeyAndOrderFront(nil)
+        func iconPixels() -> Data {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            iconHost.layoutSubtreeIfNeeded()
+            let bitmap = iconHost.bitmapImageRepForCachingDisplay(in: iconHost.bounds)!
+            iconHost.cacheDisplay(in: iconHost.bounds, to: bitmap)
+            return Data(bytes: bitmap.bitmapData!, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        }
+        let indexedIcon = iconPixels()
+        iconHost.rootView = ActionPickerItemIcon(item:
+            ActionPickerItem(action: finder, category: .apps, title: "Finder", detail: ""))
+        precondition(iconPixels() == indexedIcon, "Selected app must resolve its real icon from its bundle ID")
+        iconHost.rootView = ActionPickerItemIcon(item:
+            ActionPickerItem(action: .media(.mute), category: .media, title: "Mute", detail: ""))
+        precondition(iconPixels() != indexedIcon, "Changing to a non-app action must clear the prior app icon")
+        iconPanel.orderOut(nil); iconPanel.close()
         for dark in [false, true] {
             var chosen: BindingAction?
             var cancelled = false

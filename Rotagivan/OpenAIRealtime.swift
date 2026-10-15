@@ -15,7 +15,9 @@ enum OpenAIRealtimeCredential {
     static func parse(_ text: String) -> String? { OpenRouterCredential.parse(text, variable: "OPENAI_ROTA_KEY") }
     static func load() async throws -> String {
         try await CredentialWorker.shared.run {
-            try OpenRouterCredential.loadEnvironment(variable: "OPENAI_ROTA_KEY")
+            if let key = try VaultKeychain.currentAPIKey(provider: .openAI) { return key }
+            do { return try OpenRouterCredential.loadEnvironment(variable: "OPENAI_ROTA_KEY") }
+            catch { throw VaultFailure.message("Add your OpenAI API key in General → Account & Sync → Encrypted API keys, then save or load your keys.") }
         }
     }
 }
@@ -200,7 +202,7 @@ struct RealtimeTranscriptAccumulator {
                     guard let self, token == self.generation else { return }
                     self.receive(event)
                 }
-            } catch { if token == generation { fail("OpenAI voice setup failed. Check OPENAI_ROTA_KEY, microphone access, and network; retry explicitly.") } }
+            } catch { if token == generation { fail("OpenAI voice setup failed. Check your OpenAI key in General → Account & Sync, microphone access, and connection; retry explicitly.") } }
         }
     }
     private func releaseLease() {

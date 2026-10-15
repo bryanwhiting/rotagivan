@@ -6,7 +6,56 @@ enum VaultFailure: Error, LocalizedError, Sendable {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
-struct VaultPayload: Codable, Equatable, Sendable { var openRouterAPIKey: String }
+enum VaultProvider: String, CaseIterable, Sendable {
+    case openRouter, openAI
+    var label: String { self == .openRouter ? "OpenRouter" : "OpenAI" }
+    func key(in payload: VaultPayload) -> String? {
+        let value = self == .openRouter ? payload.openRouterAPIKey : payload.openAIAPIKey
+        return value.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
+struct VaultPayload: Codable, Equatable, Sendable {
+    var openRouterAPIKey: String = ""
+    var openAIAPIKey: String? = nil
+    private enum CodingKeys: String, CodingKey { case openRouterAPIKey, openAIAPIKey, schemaVersion, providers }
+    init(openRouterAPIKey: String = "", openAIAPIKey: String? = nil) {
+        self.openRouterAPIKey = openRouterAPIKey; self.openAIAPIKey = openAIAPIKey
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) {
+            guard version == 2 else { throw VaultFailure.message("Update Rotagivan before changing keys saved by a newer version.") }
+            let providers = try values.decode([String: String].self, forKey: .providers)
+            guard Set(providers.keys).isSubset(of: Set(VaultProvider.allCases.map(\.rawValue))) else {
+                throw VaultFailure.message("Update Rotagivan to preserve all providers in this vault.")
+            }
+            openRouterAPIKey = providers[VaultProvider.openRouter.rawValue] ?? ""
+            openAIAPIKey = providers[VaultProvider.openAI.rawValue]
+        } else {
+            openRouterAPIKey = try values.decodeIfPresent(String.self, forKey: .openRouterAPIKey) ?? ""
+            openAIAPIKey = try values.decodeIfPresent(String.self, forKey: .openAIAPIKey)
+        }
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        if VaultProvider.openAI.key(in: self) != nil {
+            // Older clients require a top-level OpenRouter key. A versioned map
+            // makes them fail to load rather than silently strip the OpenAI key.
+            try values.encode(2, forKey: .schemaVersion)
+            let providers = Dictionary(uniqueKeysWithValues: VaultProvider.allCases.compactMap { provider in
+                provider.key(in: self).map { (provider.rawValue, $0) }
+            })
+            try values.encode(providers, forKey: .providers)
+        } else { try values.encode(openRouterAPIKey, forKey: .openRouterAPIKey) }
+    }
+    func updating(openRouter: String?, openAI: String?) -> Self {
+        var result = self
+        // Empty password fields mean keep the existing key, never delete it.
+        if let openRouter, !openRouter.isEmpty { result.openRouterAPIKey = openRouter }
+        if let openAI, !openAI.isEmpty { result.openAIAPIKey = openAI }
+        return result
+    }
+}
 struct VaultRecord: Codable, Sendable {
     var vaultID: String
     var publicKey: String
@@ -103,9 +152,13 @@ enum VaultCrypto {
         return payload
     }
     static func validate(_ payload: VaultPayload) throws {
-        guard !payload.openRouterAPIKey.isEmpty, payload.openRouterAPIKey.count <= 1024,
-              !payload.openRouterAPIKey.contains(where: { $0.isWhitespace || $0.isNewline }) else {
-            throw VaultFailure.message("Invalid OpenRouter API key.")
+        guard VaultProvider.allCases.contains(where: { $0.key(in: payload) != nil }) else {
+            throw VaultFailure.message("Enter an OpenRouter or OpenAI API key in Account & Sync.")
+        }
+        for provider in VaultProvider.allCases {
+            if let key = provider.key(in: payload), key.count > 1024 || key.contains(where: { $0.isWhitespace || $0.isNewline }) {
+                throw VaultFailure.message("Invalid \(provider.label) API key.")
+            }
         }
     }
     static func wrappingContext(userID: String, vaultID: String, device: VaultDevice, ephemeral: String) -> Data {
@@ -193,7 +246,7 @@ enum VaultKeychain {
         if status == errSecItemNotFound { status = SecItemAdd(query(account).merging(attributes) { _, new in new } as CFDictionary, nil) }
         guard status == errSecSuccess else { throw VaultFailure.message("Keychain could not save the vault (\(status)). Nothing was uploaded.") }
     }
-    static func currentAPIKey(readLocal: (@Sendable (String, String) throws -> VaultLocal?)? = nil) throws -> String? {
+    static func currentAPIKey(provider: VaultProvider = .openRouter, readLocal: (@Sendable (String, String) throws -> VaultLocal?)? = nil) throws -> String? {
         lock.lock(); let scope = active; let generation = activeGeneration
         let cached = cachedLocal, ready = cacheReady; lock.unlock()
         guard let (server, userID) = scope else { return nil }
@@ -205,7 +258,7 @@ enum VaultKeychain {
         }
         let key: String?
         if let local, let master = local.masterKey, let cached = local.cached {
-            key = try VaultCrypto.open(cached, master: master, userID: userID).openRouterAPIKey
+            key = provider.key(in: try VaultCrypto.open(cached, master: master, userID: userID))
         } else { key = nil }
         lock.lock(); defer { lock.unlock() }
         guard activeGeneration == generation, active?.0 == server, active?.1 == userID else {

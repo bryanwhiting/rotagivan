@@ -16,7 +16,7 @@ import SwiftUI
         vault.setAccount(VaultAccount(token: "fixture", userID: "fixture-user"))
         let host = NSHostingView(rootView: CredentialVaultView(vault: vault).padding()
             .frame(width: 720).background(Color(nsColor: .windowBackgroundColor)))
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
                             styleMask: [.titled], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host
         panel.makeKeyAndOrderFront(nil); NSApp.activate()
@@ -34,7 +34,7 @@ import SwiftUI
             return item
         }
         func keyEditorIsHidden() -> Bool {
-            !controls().contains { $0.accessibilityLabel?() == "Save encrypted key" || $0.accessibilityLabel?() == "Load saved key" }
+            !controls().contains { $0.accessibilityLabel?() == "Save & sync keys" || $0.accessibilityLabel?() == "Load synced keys" }
         }
         func capture(_ state: String) throws {
             host.layoutSubtreeIfNeeded(); panel.display(); host.displayIfNeeded()
@@ -57,7 +57,9 @@ import SwiftUI
         try capture("error")
         precondition(retry.accessibilityPerformPress?() == true); settle()
         precondition(vault.localReady && attempts == 2 && vault.error == nil)
-        precondition(button("Save encrypted key").isAccessibilityEnabled?() == true)
+        precondition(button("Save & sync keys").isAccessibilityEnabled?() == true)
+        precondition(controls().contains { $0.accessibilityIdentifier?() == "vault-openrouter-key" }, "OpenRouter secure entry must be visible")
+        precondition(controls().contains { $0.accessibilityIdentifier?() == "vault-openai-key" }, "OpenAI secure entry must be visible")
         try capture("ready")
         vault.shutdown(); panel.close()
         print("Vault restore UI PASS: native loading/error gates, explicit recovery, AX retry, ready controls; no Security or network")

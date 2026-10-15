@@ -14,6 +14,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     @Published private(set) var restoringLocal = false
     @Published private(set) var localReady = true
     @Published private(set) var hasKey = false
+    @Published private(set) var hasOpenAIKey = false
     @Published private(set) var unlocked = false
     @Published private(set) var ownCode: String?
     @Published private(set) var pending: [VaultDevice] = []
@@ -61,7 +62,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         generation = UUID()
         operationID = nil; busy = false; restoringLocal = false; localReady = account == nil
         self.account = account; local = nil; remote = nil; recoveryCode = nil
-        hasKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
+        hasKey = false; hasOpenAIKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
         VaultKeychain.setActive(server: server, userID: account?.userID)
         status = account == nil ? "Sign in to use encrypted API keys." : "Load the vault, or import your key to create it."
         if account != nil { beginLocalRestore() }
@@ -78,8 +79,9 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
                 let value = try await read(self.server, account.userID)
                 try self.checked(token, account)
                 if let value, let record = value.cached, let master = value.masterKey {
-                    _ = try VaultCrypto.open(record, master: master, userID: account.userID)
-                    self.remote = record; self.hasRemote = true; self.hasKey = true; self.unlocked = true
+                    let payload = try VaultCrypto.open(record, master: master, userID: account.userID)
+                    self.remote = record; self.hasRemote = true; self.hasKey = !payload.openRouterAPIKey.isEmpty
+                    self.hasOpenAIKey = VaultProvider.openAI.key(in: payload) != nil; self.unlocked = true
                     self.savedAt = Date(timeIntervalSince1970: record.updatedAt)
                     self.status = "Encrypted remotely · Decrypted locally"
                 } else {
@@ -104,7 +106,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         stopped = true; restoreTask?.cancel(); restoreTask = nil
         generation = UUID(); taskSession.invalidateAndCancel()
         operationID = nil; busy = false; restoringLocal = false; localReady = false
-        account = nil; hasKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
+        account = nil; hasKey = false; hasOpenAIKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
         recoveryCode = nil; local = nil; remote = nil
         VaultKeychain.setActive(server: server, userID: nil)
     }
@@ -177,12 +179,13 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     }
     private func accept(_ record: VaultRecord, master: Data, account: VaultAccount, token: UUID) async throws {
         try checked(token, account)
-        _ = try VaultCrypto.open(record, master: master, userID: account.userID)
+        let payload = try VaultCrypto.open(record, master: master, userID: account.userID)
         var value = local ?? .fresh()
         value.masterKey = master; value.vaultID = record.vaultID; value.vaultPublicKey = record.publicKey
         value.highestRevision = max(value.highestRevision, record.revision); value.cached = record
         try await persist(value, account: account, token: token)
-        remote = record; hasRemote = true; hasKey = true; unlocked = true; ownCode = nil
+        remote = record; hasRemote = true; hasKey = !payload.openRouterAPIKey.isEmpty
+        hasOpenAIKey = VaultProvider.openAI.key(in: payload) != nil; unlocked = true; ownCode = nil
         savedAt = Date(timeIntervalSince1970: record.updatedAt)
         status = "Encrypted remotely · Decrypted locally"
     }
@@ -202,19 +205,24 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             }
         }
     }
-    func save(apiKey: String? = nil, importEnvironment: Bool = false) async {
+    func save(apiKey: String? = nil, openAIKey: String? = nil, importEnvironment: Bool = false, importOpenAIEnvironment: Bool = false) async {
         await run { account, token in
             let snapshot = try await self.fetch(account: account, token: token)
             var value = self.local ?? .fresh()
             if snapshot.vault != nil && value.masterKey == nil { throw VaultFailure.message("Approve this Mac or enter a recovery code before saving.") }
-            let key: String
-            if importEnvironment { key = try OpenRouterCredential.loadEnvironment() }
-            else if let apiKey, !apiKey.isEmpty { key = apiKey }
-            else if let record = value.cached, let master = value.masterKey { key = try VaultCrypto.open(record, master: master, userID: account.userID).openRouterAPIKey }
-            else { throw VaultFailure.message("Enter an OpenRouter API key or import it from ~/.env.") }
             if let existing = snapshot.vault, value.cached != nil, value.highestRevision != existing.revision {
-                throw VaultFailure.message("Another Mac saved a newer API key. Load it before overwriting.")
+                throw VaultFailure.message("Another Mac saved newer API keys. Load them before saving.")
             }
+            // Merge against the authenticated latest payload; replacing one
+            // provider must preserve the other, including after a lost reply.
+            let previous: VaultPayload
+            if let record = snapshot.vault, let master = value.masterKey {
+                previous = try VaultCrypto.open(record, master: master, userID: account.userID)
+            } else { previous = VaultPayload() }
+            let router = importEnvironment ? try OpenRouterCredential.loadEnvironment() : apiKey
+            let openAI = importOpenAIEnvironment ? try OpenRouterCredential.loadEnvironment(variable: "OPENAI_ROTA_KEY") : openAIKey
+            let payload = previous.updating(openRouter: router, openAI: openAI)
+            try VaultCrypto.validate(payload)
             let vaultID = snapshot.vault?.vaultID ?? value.vaultID ?? UUID().uuidString.lowercased()
             let master = value.masterKey ?? VaultCrypto.randomMaster()
             value.masterKey = master; value.vaultID = vaultID; value.vaultPublicKey = try VaultCrypto.signing(master, userID: account.userID, vaultID: vaultID).publicKey.rawRepresentation.base64EncodedString()
@@ -222,7 +230,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             // can be recovered with Load instead of generating a different key.
             try await self.persist(value, account: account, token: token)
             let baseRevision = snapshot.vault?.revision ?? 0
-            let record = try VaultCrypto.seal(VaultPayload(openRouterAPIKey: key), master: master, userID: account.userID, vaultID: vaultID, revision: baseRevision + 1)
+            let record = try VaultCrypto.seal(payload, master: master, userID: account.userID, vaultID: vaultID, revision: baseRevision + 1)
             let saved: VaultRecord = try await self.request("", method: "PUT", body: [
                 "vaultID": record.vaultID, "publicKey": record.publicKey, "ciphertext": record.ciphertext,
                 "signature": record.signature, "baseRevision": baseRevision], account: account, token: token)

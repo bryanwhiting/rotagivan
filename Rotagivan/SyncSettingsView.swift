@@ -111,9 +111,8 @@ struct SyncSettingsView: View {
            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
           }
             if sync.credentialsReady {
-                DisclosureGroup("Encrypted API keys (separate)") {
-                    CredentialVaultView(vault: sync.vault).padding(.top, 8)
-                }.accessibilityIdentifier("sync-separate-vault")
+                CredentialVaultView(vault: sync.vault)
+                    .accessibilityIdentifier("sync-separate-vault")
             } else {
                 Label("Encrypted API keys will appear after your saved account is restored.", systemImage: "lock.shield")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

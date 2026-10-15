@@ -87,7 +87,7 @@ import CryptoKit
         let work = client(read: { workStorage }, write: { workStorage = $0 })
         await work.awaitLocalRestore()
         precondition(server.puts == 0, "Sign in/start must not upload")
-        await work.save(apiKey: "fixture-api-key-first")
+        await work.save(apiKey: "fixture-api-key-first", openAIKey: "fixture-api-key-openai-first")
         precondition(work.error == nil && work.unlocked && server.puts == 1 && workStorage?.masterKey != nil)
         let first = server.record!
         let home = client(read: { homeStorage }, write: { homeStorage = $0 })
@@ -108,6 +108,8 @@ import CryptoKit
         precondition(home.unlocked && homeStorage?.masterKey == workStorage?.masterKey)
         let decrypted = try VaultCrypto.open(homeStorage!.cached!, master: homeStorage!.masterKey!, userID: account.userID)
         precondition(decrypted.openRouterAPIKey == "fixture-api-key-first")
+        precondition(decrypted.openAIAPIKey == "fixture-api-key-openai-first" && home.hasOpenAIKey,
+                     "Approved second Mac loads the OpenAI key alongside OpenRouter")
         work.setAccount(account)
         await work.awaitLocalRestore()
         work.showRecoveryCode()
@@ -119,6 +121,8 @@ import CryptoKit
         precondition(recovery.unlocked && recoveryStorage?.masterKey == workStorage?.masterKey)
         await work.save(apiKey: "fixture-api-key-next")
         precondition(work.error == nil && server.record?.revision == 2)
+        let changedRouter = try VaultCrypto.open(workStorage!.cached!, master: workStorage!.masterKey!, userID: account.userID)
+        precondition(changedRouter.openAIAPIKey == "fixture-api-key-openai-first", "Replacing OpenRouter preserves OpenAI")
         await home.save(apiKey: "fixture-api-key-stale")
         precondition(home.error != nil && server.puts == 2)
         await home.load()
@@ -204,10 +208,33 @@ import CryptoKit
         await shutdownRestore.value
         precondition(!quitting.localReady && !quitting.restoringLocal && !quitting.unlocked && quitting.account == nil)
 
+        let providerServer = VaultServerFixture()
+        var providerStorage: VaultLocal?
+        let providers = CredentialVault(server: "https://providers.fixture.test", transport: { try await providerServer.call($0) },
+            read: { _, _ in providerStorage }, write: { value, _, _ in providerStorage = value })
+        providers.setAccount(account); await providers.awaitLocalRestore()
+        await providers.save(openAIKey: "fixture-api-key-openai-only")
+        precondition(providers.error == nil && providers.hasOpenAIKey && !providers.hasKey && providers.unlocked,
+                     "OpenAI can be configured without OpenRouter")
+        await providers.save(apiKey: "fixture-api-key-router-added")
+        let addedRouter = try VaultCrypto.open(providerStorage!.cached!, master: providerStorage!.masterKey!, userID: account.userID)
+        precondition(addedRouter.openAIAPIKey == "fixture-api-key-openai-only" && providers.hasKey)
+        await providers.save(openAIKey: "fixture-api-key-openai-replaced")
+        let replacedOpenAI = try VaultCrypto.open(providerStorage!.cached!, master: providerStorage!.masterKey!, userID: account.userID)
+        precondition(replacedOpenAI.openRouterAPIKey == "fixture-api-key-router-added", "Replacing OpenAI preserves OpenRouter")
+        let routedOpenAI = try VaultKeychain.currentAPIKey(provider: .openAI)
+        let routedRouter = try VaultKeychain.currentAPIKey()
+        precondition(routedOpenAI == "fixture-api-key-openai-replaced" && routedRouter == "fixture-api-key-router-added")
+        providers.setAccount(account); await providers.awaitLocalRestore()
+        precondition(providers.hasKey && providers.hasOpenAIKey, "Restart restores both provider statuses from encrypted cache")
+        providers.setAccount(nil)
+        precondition(!providers.hasKey && !providers.hasOpenAIKey && !providers.unlocked, "Sign-out clears both provider statuses")
+        providers.shutdown()
+
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         let host = NSHostingView(rootView: CredentialVaultView(vault: work).padding().frame(width: 680).background(Color(NSColor.windowBackgroundColor)).environment(\.colorScheme, .light))
-        host.frame = NSRect(x: 0, y: 0, width: 680, height: 420)
+        host.frame = NSRect(x: 0, y: 0, width: 680, height: 650)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
         try await Task.sleep(nanoseconds: 100_000_000)

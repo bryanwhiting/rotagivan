@@ -3,6 +3,7 @@ import SwiftUI
 struct CredentialVaultView: View {
     @ObservedObject var vault: CredentialVault
     @State private var apiKey = ""
+    @State private var openAIKey = ""
     @State private var recoveryInput = ""
     @State private var recoveryOpen = false
     @State private var approval: VaultDevice?
@@ -14,20 +15,25 @@ struct CredentialVaultView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Voice API key", systemImage: "lock.shield").font(.headline)
+                    Label("Encrypted API keys", systemImage: "lock.shield").font(.headline)
                     Spacer()
                     if vault.busy || vault.restoringLocal { ProgressView().controlSize(.small).accessibilityLabel("Restoring or updating encrypted keys") }
                 }
                 HStack {
                     Text("OpenRouter")
                     Spacer()
-                    Text(vault.account == nil ? "Sign in first" : (!vault.localReady ? "Locked on this Mac" : (vault.hasKey ? "Ready" : (vault.hasRemote ? "Saved in cloud" : "Not set up"))))
+                    Text(providerStatus(ready: vault.hasKey))
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("OpenRouter powers voice recognition. Your key is encrypted before upload and unlocked only on trusted Macs.")
+                HStack {
+                    Text("OpenAI · GPT Live")
+                    Spacer()
+                    Text(providerStatus(ready: vault.hasOpenAIKey)).font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Add either or both providers here. Keys sync through your end-to-end encrypted vault and unlock only on trusted Macs. OpenAI powers GPT Live; OpenRouter powers Jev action matching.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if vault.localReady || vault.restoringLocal {
-                Label(vault.localReady && !vault.hasKey && !vault.hasRemote && vault.account != nil
+                Label(vault.localReady && !vault.hasKey && !vault.hasOpenAIKey && !vault.hasRemote && vault.account != nil
                       ? "Paste a key to get started, or load one saved on another Mac." : vault.status,
                       systemImage: vault.unlocked ? "lock.shield.fill" : "lock")
                     .font(.caption).foregroundStyle(vault.unlocked ? Color.green : Color.secondary)
@@ -46,12 +52,22 @@ struct CredentialVaultView: View {
                 if vault.localReady && vault.account != nil {
                 SecureField(vault.hasKey ? "Replace OpenRouter API key" : "Paste OpenRouter API key", text: $apiKey).textContentType(.password)
                     .disabled(unavailable)
+                    .accessibilityIdentifier("vault-openrouter-key")
+                SecureField(vault.hasOpenAIKey ? "Replace OpenAI API key" : "Paste OpenAI API key", text: $openAIKey).textContentType(.password)
+                    .disabled(unavailable)
+                    .accessibilityIdentifier("vault-openai-key")
+                Text("Leave a field blank to keep its saved key. Saving one provider never removes the other.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Update Rotagivan on your other Macs before loading a vault with OpenAI keys.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    Button("Save encrypted key") {
-                        let key = apiKey; apiKey = ""
-                        Task { await vault.save(apiKey: key.isEmpty ? nil : key) }
+                    Button("Save & sync keys") {
+                        let router = apiKey, openAI = openAIKey; apiKey = ""; openAIKey = ""
+                        Task { await vault.save(apiKey: router.isEmpty ? nil : router, openAIKey: openAI.isEmpty ? nil : openAI) }
                     }
-                    Button("Load saved key") { Task { await vault.load() } }
+                    Button("Load synced keys") { Task { await vault.load() } }
+                        .disabled(!apiKey.isEmpty || !openAIKey.isEmpty)
+                        .help("Load both providers from your encrypted vault. Save edits first.")
                 }.disabled(unavailable)
                 }
                 if !vault.unlocked && vault.account != nil && !vault.localReady {
@@ -75,7 +91,9 @@ struct CredentialVaultView: View {
                             Button("Use recovery code…") { recoveryOpen = true }.disabled(recoveryUnavailable)
                         }
                     }
-                    Button("Import key from ~/.env") { Task { await vault.save(importEnvironment: true) } }
+                    Button("Import OpenRouter from ~/.env") { Task { await vault.save(importEnvironment: true) } }
+                        .disabled(unavailable)
+                    Button("Import OpenAI from ~/.env") { Task { await vault.save(importOpenAIEnvironment: true) } }
                         .disabled(unavailable)
                     if vault.unlocked {
                       Button("Show recovery code…") { vault.showRecoveryCode(); showRecovery = vault.recoveryCode != nil }
@@ -98,9 +116,9 @@ struct CredentialVaultView: View {
                 if let error = vault.error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onDisappear { apiKey = ""; recoveryInput = ""; approvalCode = ""; vault.recoveryCode = nil }
+        .onDisappear { apiKey = ""; openAIKey = ""; recoveryInput = ""; approvalCode = ""; vault.recoveryCode = nil }
         .onChange(of: vault.account) { _ in
-            apiKey = ""; recoveryInput = ""; approvalCode = ""
+            apiKey = ""; openAIKey = ""; recoveryInput = ""; approvalCode = ""
             approval = nil; recoveryOpen = false; showRecovery = false
         }
         .sheet(item: $approval) { device in
@@ -150,5 +168,12 @@ struct CredentialVaultView: View {
                 Button("Done") { vault.recoveryCode = nil; showRecovery = false }
             }.padding(24).frame(width: 470)
         }
+    }
+    private func providerStatus(ready: Bool) -> String {
+        if vault.account == nil { return "Sign in first" }
+        if vault.restoringLocal { return "Restoring…" }
+        if !vault.localReady { return "Locked on this Mac" }
+        if vault.unlocked { return ready ? "Saved · unlocked locally" : "Not saved" }
+        return vault.hasRemote ? "Load or unlock to check" : "Not saved"
     }
 }

@@ -2,7 +2,26 @@ import Foundation
 
 @main struct ReservedGroupTests {
     static func main() throws {
-        precondition(ExplorerReservedGroup.allCases.count == 3)
+        precondition(ExplorerReservedGroup.allCases.count == 4)
+        precondition(ExplorerReservedGroup.chromeTabs.tile(at: .up).isChromeTabsGroup)
+        var customized = AppExplorerSettings()
+        customized.builtInDefaults = ["actions": HUDDefaultLayout(favorites: [AppExplorerFavorite(direction: .up, name: "Lock", action: .lockScreen)], slotCount: 4),
+            "chromeTabs": HUDDefaultLayout(slotCount: 12)]
+        precondition(customized.hasValidFavorites)
+        precondition(customized.builtInTile(.actions, at: .left).children?.first?.action == .lockScreen)
+        let assigned = customized.assignBuiltIn(.actions, at: .right)!
+        precondition(customized.holdLayers?.first { $0.id == assigned }?.slotCount == 4)
+        precondition(customized.assignBuiltIn(.chromeTabs, at: .left) != nil)
+        precondition(customized.holdLayers?.last?.slotCount == 12)
+        let template = customized.assignTemplate(.editingActions, at: .bottom)!
+        precondition(customized.holdLayers?.first { $0.id == template }?.favorites.first?.action == .lockScreen)
+        let roundTrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(customized))
+        precondition(roundTrip == customized)
+        customized.builtInDefaults?["actions"] = nil
+        precondition(customized.defaultLayout(for: .actions).favorites.count == 8)
+        precondition(customized.holdLayers?.first?.favorites.first?.action == .lockScreen, "Restore default must preserve placed copies")
+        customized.builtInDefaults?["chromeTabs"] = HUDDefaultLayout(slotCount: 17)
+        precondition(!customized.hasValidFavorites)
         for group in ExplorerReservedGroup.allCases {
             for inWindow in [false, true] {
                 let tile = group.tile(at: .right, insideWindowManager: inWindow)

@@ -36,6 +36,10 @@ extension AppExplorerPresenting {
     private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
     private var launcherActionSnapshot: [LauncherAction] = []
     private var chromeTabSnapshot: [ChromeRecentTab] = []
+    private var chromeTabsLoaded = false
+    private var chromeTabsPage = 0
+    private var chromeSnapshotSession = UUID()
+    var chromeTabsProvider: @Sendable () -> [ChromeRecentTab] = { ChromeBookmarkTabs.snapshot() }
     private var folderSnapshot: [ExplorerFolder] = []
     private var pendingMenuAction: LauncherAction?
     private var searchObservation: AnyCancellable?
@@ -335,16 +339,19 @@ extension AppExplorerPresenting {
             tilingTarget = sourcePID.flatMap(captureWindow)
             model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
         }
+        chromeTabsLoaded = false; chromeTabsPage = 0; chromeTabSnapshot = []; chromeSnapshotSession = UUID()
         loadEntries()
         model.selected = nil
         model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
         pendingMenuAction = nil; launcherMenuSnapshot = []; chromeTabSnapshot = []; folderSnapshot = []
         launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
         let menuGeneration = selectionGeneration
+        let tabProvider = chromeTabsProvider
+        let tabSession = chromeSnapshotSession
         Task.detached(priority: .utility) { [weak self] in
-            let tabs = ChromeBookmarkTabs.snapshot()
+            let tabs = tabProvider()
             let folders = ExplorerFolderCatalog.scan()
-            await self?.acceptLauncherSnapshots(tabs: tabs, folders: folders, generation: menuGeneration)
+            await self?.acceptLauncherSnapshots(tabs: tabs, folders: folders, session: tabSession)
         }
         if let pid = sourcePID {
             launcherMenuRefresh = Task { [weak self] in
@@ -486,10 +493,12 @@ extension AppExplorerPresenting {
         }
     }
 
-    private func acceptLauncherSnapshots(tabs: [ChromeRecentTab], folders: [ExplorerFolder], generation: UInt64) {
-        guard isVisible, selectionGeneration == generation else { return }
+    private func acceptLauncherSnapshots(tabs: [ChromeRecentTab], folders: [ExplorerFolder], session: UUID) {
+        guard isVisible, chromeSnapshotSession == session else { return }
         chromeTabSnapshot = tabs
+        chromeTabsLoaded = true
         folderSnapshot = folders
+        if model.showingChromeTabs { refreshGroup() }
         if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
     }
 
@@ -715,6 +724,10 @@ extension AppExplorerPresenting {
         }
         model.carouselPreviews = HUDCarouselPreview.makeMap(map, activeLayerID: heldKeys.activeID) { makeEntry($0, depth: 0) }
         model.carouselPreviews = model.carouselPreviews.map { preview in
+            if map.first(where: { $0.id == preview.id })?.builtIn == .chromeTabs {
+                return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                    slotCount: preview.slotCount, entries: chromeEntries(count: preview.slotCount, page: 0))
+            }
             guard map.first(where: { $0.id == preview.id })?.builtIn == .recentApps else { return preview }
             return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
                 slotCount: preview.slotCount, entries: recentEntries(slotCount: preview.slotCount))
@@ -772,9 +785,26 @@ extension AppExplorerPresenting {
             model.groupSlotCounts.append(settings.count(at: groupPath))
         }
         let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true || mappedBuiltIn == .recentApps
+        model.showingChromeTabs = model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isChromeTabsGroup == true
+            : settings.favorite(at: groupPath)?.isChromeTabsGroup == true || mappedBuiltIn == .chromeTabs
+        model.page = 0; model.pageCount = 1
         model.showingRecents = model.mode == .recent || recentGroup
         model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingMediaControls && layer == nil
         model.slotCount = settings.count(at: groupPath)
+        if model.showingChromeTabs {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            model.pageCount = max(1, (chromeTabSnapshot.count + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = chromeEntries(count: count, page: chromeTabsPage)
+            model.message = !chromeTabsLoaded ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
+                ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation."
+                : "Swipe to a tab and lift to focus it · use Previous / Next for more tabs"
+            return
+        }
         if model.showingAppWindows {
             model.slotCount = 16
             model.groupNames.append("App windows")
@@ -829,6 +859,16 @@ extension AppExplorerPresenting {
             return
         }
         loadRecentEntries()
+    }
+
+    private func chromeEntries(count: Int, page: Int) -> [ExplorerEntry] {
+        let icon = applicationURL("com.google.Chrome").map { workspace.icon(forFile: $0.path) }
+        return chromeTabSnapshot.dropFirst(page * count).prefix(count).enumerated().map { offset, tab in
+            var entry = ExplorerEntry(direction: ExplorerSlot.slots(count)[offset], bundleID: "com.google.Chrome",
+                name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
+            entry.chromeTab = tab
+            return entry
+        }
     }
 
     private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
@@ -1320,6 +1360,15 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing, model.launcherQuery.isEmpty else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if let tab = entry?.chromeTab {
+            dismiss()
+            Task.detached(priority: .userInitiated) {
+                if !ChromeBookmarkTabs.activate(tab) {
+                    await MainActor.run { Self.showWindowError("That tab moved or closed. Reopen the HUD to refresh Chrome tabs.", title: "Chrome tab unavailable") }
+                }
+            }
+            return
+        }
         if model.showingWindowManager && model.windowFullScreen && entry?.command != .exitFullScreen {
             input = makeSelection(waitingForLift: contactIsDown)
             model.selected = nil; return
@@ -1503,7 +1552,11 @@ extension AppExplorerPresenting {
         alert.addButton(withTitle: "OK"); alert.runModal()
     }
 
-    private func changeWindowPage(_ delta: Int) {
+    func changeWindowPage(_ delta: Int) {
+        if model.showingChromeTabs {
+            chromeTabsPage = max(0, min(model.pageCount - 1, chromeTabsPage + delta))
+            refreshGroup(); return
+        }
         guard model.showingAppWindows else { return }
         windowPage = max(0, min(max(0, (windowList.count - 1) / 16), windowPage + delta))
         refreshGroup()
@@ -1864,6 +1917,7 @@ final class ExplorerPanel: NSPanel {
 }
 
 struct ExplorerEntry: Equatable {
+    var chromeTab: ChromeRecentTab? = nil
     var isActiveApp = false
     var direction: ExplorerSlot
     var bundleID: String?
@@ -2072,6 +2126,7 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var slotCount = 8
     @Published var windowFullScreen = false
     @Published var showingAppWindows = false
+    @Published var showingChromeTabs = false
     @Published var page = 0
     @Published var pageCount = 1
 }
@@ -2323,7 +2378,7 @@ struct AppExplorerView: View {
                 Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).lineLimit(3)
             }
-            if model.showingAppWindows {
+            if model.showingAppWindows || model.showingChromeTabs {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
                     Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)

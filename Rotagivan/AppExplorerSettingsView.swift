@@ -3,6 +3,7 @@ import SwiftUI
 struct HUDSettingsView: View {
     @ObservedObject var store: SettingsStore
     @State private var selectedGroup: ExplorerReservedGroup?
+    @State private var restoringWindow = false
     private let onEditDefaultTaps: () -> Void
 
     init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil, onEditDefaultTaps: @escaping () -> Void = {}) {
@@ -33,45 +34,104 @@ struct HUDSettingsView: View {
                 HStack {
                     Label(group.title, systemImage: group.symbol).font(.title2.weight(.semibold))
                     Spacer()
+                    if group == .windowManager {
+                        Button("Restore original…") { restoringWindow = true }
+                    }
                     Button("Done") { selectedGroup = nil }.keyboardShortcut(.cancelAction)
                 }
                 Text("Built-in HUD layer · \(group.summary)").font(.callout).foregroundStyle(.secondary)
                 ScrollView {
                     if group == .windowManager { WindowManagerSettingsView(store: store) }
-                    else { ReservedGroupPreview(group: group) }
+                    else { BuiltInHUDDefaultEditor(store: store, group: group) }
                 }
-            }.padding(24).frame(width: 660, height: 640)
+            }.padding(24).frame(width: 720, height: 680)
+                .confirmationDialog("Restore the original Window Manager?", isPresented: $restoringWindow) {
+                    Button("Restore original", role: .destructive) {
+                        var next = store.settings.appExplorer ?? AppExplorerSettings()
+                        next.windowManager = nil; store.settings.appExplorer = next
+                    }
+                } message: { Text("This resets the shared Window Manager layout and its custom bindings.") }
         }
         .padding(16)
     }
 }
 
-struct ReservedGroupPreview: View {
+struct BuiltInHUDDefaultEditor: View {
+    @ObservedObject var store: SettingsStore
     let group: ExplorerReservedGroup
+    @State private var selection: ExplorerSlot = .up
+    @State private var editing: ExplorerSlot?
+    @State private var restoring = false
+    @State private var error: String?
+    private var settings: AppExplorerSettings { store.settings.appExplorer ?? AppExplorerSettings() }
+    private var layout: HUDDefaultLayout { settings.defaultLayout(for: group) }
+    private var preview: AppExplorerSettings {
+        var result = AppExplorerSettings()
+        result.slotCount = layout.slotCount
+        result.favorites = layout.favorites
+        if group != .actions {
+            let slots = group == .recentApps ? ExplorerSlot.slots(layout.slotCount).sorted {
+                ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+            } : ExplorerSlot.slots(layout.slotCount)
+            result.favorites = slots.enumerated().map { index, slot in
+                AppExplorerFavorite(direction: slot, name: group == .chromeTabs ? "Chrome tab \(index + 1)" : index == 0 ? "Active app" : "Recent app \(index)",
+                    action: .appWindows)
+            }
+        }
+        return result
+    }
+    private func save(_ layout: HUDDefaultLayout) {
+        var next = settings
+        if next.builtInDefaults == nil { next.builtInDefaults = [:] }
+        next.builtInDefaults?[group.rawValue] = layout
+        guard next.hasValidFavorites else { error = "Remove occupied tiles before reducing the number of slots."; return }
+        store.settings.appExplorer = next; error = nil
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Assign this HUD layer to a tile using HUD Layers → \(group.title).")
-            if group == .actions {
-                Text("Each Actions layer starts with these shortcuts. Edit or rearrange its tiles independently. Commands go to the app you were using before opening the HUD; support varies by app.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
-                    ForEach(group.tile(at: .up).children ?? [], id: \.direction) { tile in
-                        GridRow {
-                            Text(tile.direction.title).foregroundStyle(.secondary)
-                            Text(tile.name)
-                            if let key = tile.shortcut {
-                                Text("\(key.modifiers & (1 << 17) != 0 ? "⇧" : "")⌘\(key.keyLabel)")
-                                    .monospaced().foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-            } else {
-                Text("This HUD layer fills itself with running apps. The active app is outlined on the left. Other recent apps start at top-left and continue clockwise. Tap the center to return to the previous layer.")
-                Text("Its contents update on this Mac. Assign it from any tile, then edit that HUD layer to change its capacity or name.")
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Picker("Tiles", selection: Binding(get: { layout.slotCount }, set: { count in
+                    var next = layout; next.slotCount = count; save(next)
+                })) { ForEach(2...16, id: \.self) { Text("\($0)").tag($0) } }.frame(width: 130)
+                Spacer()
+                Button("Restore original…") { restoring = true }.accessibilityIdentifier("builtin-hud-restore")
             }
+            Text(group == .actions ? "Click a tile to edit the default. New Actions HUDs use this layout; existing copies stay unchanged."
+                : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
+                .font(.callout).foregroundStyle(.secondary)
+            ExplorerHUDSettingsPreview(settings: preview, theme: settings.resolvedTheme,
+                dictionary: store.settings.resolvedHotkeyDictionary, groupPath: [], layerName: group.title,
+                selection: $selection, onBack: {}, onDrag: { _, _ in }, onDrop: { source, target in
+                    guard group == .actions, let target else { return }
+                    var next = preview
+                    if next.swapFavorites(from: source, to: target) { save(HUDDefaultLayout(favorites: next.favorites, slotCount: layout.slotCount)) }
+                }, editingTile: $editing, editor: group == .actions ? { slot in AnyView(tileEditor(slot)) } : nil,
+                workspace: true)
+                .frame(height: 410).accessibilityIdentifier("builtin-hud-preview")
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            Text("Add this layer from Add HUD or choose it in a tile’s Built-in HUD layers menu.").font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
+        .confirmationDialog("Restore the original \(group.title) default?", isPresented: $restoring) {
+            Button("Restore original", role: .destructive) {
+                var next = settings; next.builtInDefaults?[group.rawValue] = nil
+                store.settings.appExplorer = next; error = nil; editing = nil
+            }
+        } message: { Text("Only this default is reset. Your existing HUD layers are kept.") }
+    }
+    private func tileEditor(_ slot: ExplorerSlot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(slot.title).font(.headline)
+            BindingActionPicker(action: Binding(get: {
+                layout.favorites.first { $0.direction == slot }.flatMap(BindingAction.from(favorite:)) ?? .tap(.none)
+            }, set: { action in
+                guard let tile = action.favorite(at: slot) else { return }
+                var next = layout; next.favorites.removeAll { $0.direction == slot }; next.favorites.append(tile)
+                save(next); editing = nil
+            }))
+            Button("Clear tile") {
+                var next = layout; next.favorites.removeAll { $0.direction == slot }; save(next); editing = nil
+            }
+        }.padding(16).frame(width: 360)
     }
 }
 
@@ -239,7 +299,7 @@ struct AppExplorerSettingsView: View {
         guard let builtIn = selectedBuiltIn, builtIn != .actions, builtIn != .mediaControls else { return nil }
         return builtIn
     }
-    private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isRecentGroup == true }
+    private var isRecentGroup: Bool { settings.favorite(at: groupPath)?.isDynamicGroup == true }
     private var availableBookmarkSlots: [ExplorerSlot] {
         let occupied = Set(favorites.map(\.direction))
         return ExplorerSlot.slots(settings.count(at: groupPath)).filter { !occupied.contains($0) }
@@ -465,7 +525,7 @@ struct AppExplorerSettingsView: View {
                     }
 
                     if scopeTitle == nil && !windowManagerOnly {
-                        ForEach([HUDLayerBuiltIn.recentApps, .windowManager]) { builtIn in
+                        ForEach([HUDLayerBuiltIn.recentApps, .windowManager, .chromeTabs]) { builtIn in
                             Menu(builtIn.title) {
                                 ForEach(HUDLayerPosition.allCases.filter { layerAt($0) == nil }) { position in
                                     Button(position.title) {
@@ -650,6 +710,8 @@ struct AppExplorerSettingsView: View {
                             WindowManagerSettingsView(store: store, workspace: workspace)
                         } else if builtIn == .recentApps {
                             Text("The active app is outlined on the left. Other recent apps start at top-left and continue clockwise.")
+                        } else if builtIn == .chromeTabs {
+                            Text("Open Chrome tabs fill this HUD. Swipe to a tab and lift to focus it. Allow Google Chrome under Privacy & Security → Automation if requested.")
                         } else {
                             Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
                         }
@@ -690,6 +752,7 @@ struct AppExplorerSettingsView: View {
                 })) {
                     Text("Assigned favorites").tag(AppExplorerMode.favorites)
                     Text("Recent apps").tag(AppExplorerMode.recent)
+                    Text("Chrome tabs").tag(AppExplorerMode.chromeTabs)
                 }.pickerStyle(.segmented)
             }
             if !compact {
@@ -1050,7 +1113,7 @@ struct AppExplorerSettingsView: View {
                 Menu("Groups & nested HUDs") {
                     ForEach(ExplorerReservedGroup.allCases) { group in
                         Button(group.title, systemImage: group.symbol) {
-                            let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
+                            let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
                                 at: groupPath + [direction])
                             edit { $0.setFavorite(tile, at: direction, in: groupPath) }
                             previewEditing = nil
@@ -1289,7 +1352,7 @@ struct AppExplorerSettingsView: View {
         Menu {
             ForEach(ExplorerReservedGroup.allCases) { group in
                 Button(group.title, systemImage: group.symbol) {
-                    let tile = preservingHotkey(group.tile(at: direction, insideWindowManager: windowManagerOnly),
+                    let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
                         at: groupPath + [direction])
                     edit { $0.setFavorite(tile, at: direction, in: groupPath) }
                 }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth && (group != .windowManager || windowManagerOnly))
@@ -1818,7 +1881,9 @@ struct ExplorerHUDSettingsPreview: View {
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         model.groupDirections = groupPath
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
-        model.showingRecents = settings.favorite(at: groupPath)?.isRecentGroup == true || (groupPath.isEmpty && rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn == .recentApps)
+        let builtIn = groupPath.isEmpty ? rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn : nil
+        let chrome = settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs
+        model.showingRecents = settings.favorite(at: groupPath)?.isDynamicGroup == true || builtIn == .recentApps || chrome
         model.selected = model.showingRecents ? nil : selection
         if model.showingRecents {
             let order = ExplorerSlot.slots(model.slotCount).sorted {
@@ -1826,12 +1891,12 @@ struct ExplorerHUDSettingsPreview: View {
             }
             model.entries = order.enumerated().map { index, slot in
                 var entry = ExplorerEntry(direction: slot, bundleID: nil,
-                    name: index == 0 ? "Active app" : "Recent app \(index)",
+                    name: chrome ? "Chrome tab \(index + 1)" : index == 0 ? "Active app" : "Recent app \(index)",
                     icon: NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil), url: nil)
-                entry.isActiveApp = index == 0
+                entry.isActiveApp = !chrome && index == 0
                 return entry
             }
-            model.message = "Recent apps fill these positions at runtime · center goes back"
+            model.message = chrome ? "Open Chrome tabs fill these positions · swipe and lift to focus" : "Recent apps fill these positions at runtime · center goes back"
         } else {
             model.entries = (settings.favorites(at: groupPath) ?? []).map {
                 AppExplorerController.makeEntry($0, depth: groupPath.count, dictionary: dictionary)

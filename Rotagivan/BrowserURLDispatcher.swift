@@ -94,6 +94,7 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
 
     static func snapshot() -> [ChromeRecentTab] {
         let source = """
+        if application "Google Chrome" is not running then return ""
         set output to ""
         try
             tell application "Google Chrome"

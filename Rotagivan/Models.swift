@@ -569,21 +569,22 @@ struct ConfigurationLibrary: Codable {
 }
 
 enum AppExplorerMode: String, Codable, CaseIterable {
-    case favorites, recent
-    var title: String { self == .favorites ? "Favorites" : "Recent apps" }
+    case favorites, recent, chromeTabs
+    var title: String { self == .favorites ? "Favorites" : self == .recent ? "Recent apps" : "Google Chrome Tabs" }
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
 /// Reserved catalog entries are always available. Assigned instances use the
 /// existing group/shortcut schema, so exports and older saved groups stay intact.
 enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
-    case windowManager, recentApps, actions
+    case windowManager, recentApps, actions, chromeTabs
     var id: Self { self }
     var title: String {
         switch self {
         case .windowManager: return "Window Manager"
         case .recentApps: return "Recent Apps"
         case .actions: return "Actions"
+        case .chromeTabs: return "Google Chrome Tabs"
         }
     }
     var symbol: String {
@@ -591,6 +592,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .windowManager: return "rectangle.split.2x2"
         case .recentApps: return "clock.arrow.circlepath"
         case .actions: return "command"
+        case .chromeTabs: return "rectangle.on.rectangle"
         }
     }
     var summary: String {
@@ -598,6 +600,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .windowManager: return "Window positions, full screen, minimize and close."
         case .recentApps: return "Running apps, ordered by most recently used."
         case .actions: return "Copy, Paste, Cut, Undo, Redo, Select All, Find and Save."
+        case .chromeTabs: return "Open tabs from Google Chrome. Choose a tile to focus that existing tab."
         }
     }
     func tile(at slot: ExplorerSlot, insideWindowManager: Bool = false) -> AppExplorerFavorite {
@@ -608,6 +611,8 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
                 : AppExplorerFavorite(direction: slot, name: title, action: .windowManager)
         case .recentApps:
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recent)
+        case .chromeTabs:
+            return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .chromeTabs, slotCount: 8)
         case .actions:
             let keys: [(ExplorerSlot, String, UInt16, String, Bool)] = [
                 (.up, "Copy", 8, "C", false), (.topRight, "Paste", 9, "V", false),
@@ -928,7 +933,7 @@ enum HUDLayerTemplate: String, CaseIterable, Identifiable {
 }
 
 enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
-    case recentApps, actions, windowManager, mediaControls
+    case recentApps, actions, windowManager, mediaControls, chromeTabs
     var id: Self { self }
     var title: String {
         switch self {
@@ -936,6 +941,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .actions: return "Actions"
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
+        case .chromeTabs: return "Google Chrome Tabs"
         }
     }
     var symbol: String {
@@ -944,6 +950,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .actions: return "command"
         case .windowManager: return "rectangle.split.2x2"
         case .mediaControls: return "playpause.fill"
+        case .chromeTabs: return "rectangle.on.rectangle"
         }
     }
 }
@@ -1035,6 +1042,8 @@ struct AppExplorerFavorite: Codable, Equatable {
     var hasDeepChoices: Bool { hasPrimaryDestination && children != nil && children?.isEmpty == false }
     var isPureGroup: Bool { isGroup && !hasPrimaryDestination }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
+    var isChromeTabsGroup: Bool { isGroup && groupMode == .chromeTabs }
+    var isDynamicGroup: Bool { isRecentGroup || isChromeTabsGroup }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {
@@ -1071,7 +1080,25 @@ struct AppExplorerFavorite: Codable, Equatable {
     }
 }
 
+struct HUDDefaultLayout: Codable, Equatable {
+    var favorites: [AppExplorerFavorite] = []
+    var slotCount: Int = 8
+}
+
 struct AppExplorerSettings: Codable, Equatable {
+    var builtInDefaults: [String: HUDDefaultLayout]? = nil
+    func defaultLayout(for group: ExplorerReservedGroup) -> HUDDefaultLayout {
+        builtInDefaults?[group.rawValue] ?? HUDDefaultLayout(favorites: group.tile(at: .up).children ?? [])
+    }
+    func builtInTile(_ group: ExplorerReservedGroup, at slot: ExplorerSlot, insideWindowManager: Bool = false) -> AppExplorerFavorite {
+        var tile = group.tile(at: slot, insideWindowManager: insideWindowManager)
+        if group != .windowManager {
+            let layout = defaultLayout(for: group)
+            tile.slotCount = layout.slotCount
+            if group == .actions { tile.children = layout.favorites }
+        }
+        return tile
+    }
     var actionBindings: [ActionBinding]? = nil
     static let recentDirections: [ExplorerSlot] = [.left, .topLeft, .up, .topRight, .right, .bottomRight, .down, .bottomLeft]
     static let maximumGroupDepth = 4
@@ -1134,7 +1161,10 @@ struct AppExplorerSettings: Codable, Equatable {
         for index in layers.indices { layers[index].position = positions[layers[index].id] }
         var layer = ExplorerHoldLayer.empty(name: template.title)
         layer.position = position
-        layer.favorites = template.favorites
+        if template == .editingActions {
+            let layout = defaultLayout(for: .actions)
+            layer.favorites = layout.favorites; layer.slotCount = layout.slotCount
+        } else { layer.favorites = template.favorites }
         layers.append(layer)
         next.holdLayers = layers
         guard next.hasValidFavorites else { return nil }
@@ -1152,7 +1182,11 @@ struct AppExplorerSettings: Codable, Equatable {
         var layer = ExplorerHoldLayer.empty(name: builtIn.title)
         layer.builtIn = builtIn
         layer.position = position
-        if builtIn == .actions { layer.favorites = ExplorerReservedGroup.actions.tile(at: .up).children ?? [] }
+        if let group = ExplorerReservedGroup(rawValue: builtIn.rawValue), group != .windowManager {
+            let layout = defaultLayout(for: group)
+            layer.slotCount = layout.slotCount
+            if group == .actions { layer.favorites = layout.favorites }
+        }
         layers.append(layer)
         next.holdLayers = layers
         guard next.hasValidFavorites else { return nil }
@@ -1251,7 +1285,7 @@ struct AppExplorerSettings: Codable, Equatable {
         for (index, direction) in path.enumerated() {
             guard let group = current.first(where: { $0.direction == direction }),
                   let children = group.children else { return nil }
-            if group.isRecentGroup { return index == path.count - 1 ? [] : nil }
+            if group.isDynamicGroup { return index == path.count - 1 ? [] : nil }
             current = children
         }
         return current
@@ -1316,6 +1350,13 @@ struct AppExplorerSettings: Codable, Equatable {
     }
     var hasValidFavorites: Bool {
         guard slotCount == nil || (2...16).contains(slotCount!) else { return false }
+        for (name, layout) in builtInDefaults ?? [:] {
+            guard let group = ExplorerReservedGroup(rawValue: name), group != .windowManager,
+                  (2...16).contains(layout.slotCount) else { return false }
+            var sample = AppExplorerSettings()
+            sample.slotCount = layout.slotCount; sample.favorites = layout.favorites
+            guard sample.hasValidFavorites, group == .actions || layout.favorites.isEmpty else { return false }
+        }
         var remaining = Self.maximumFavorites
         var remainingLayers = 128
         let windowCommandKeys = windowManager?.shortcuts.map(\.shortcut) ?? []

@@ -11,7 +11,7 @@ import SwiftUI
         let store = SettingsStore(defaults: defaults)
         store.settings.enabled = false
         store.settings.appExplorer = AppExplorerSettings()
-        for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps] {
+        for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps, .mediaControls] {
             let host = NSHostingView(rootView: BuiltInHUDDefaultEditor(store: store, group: group)
                 .padding(24).frame(width: 720, height: 620).background(Color(nsColor: .windowBackgroundColor)))
             let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),

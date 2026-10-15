@@ -69,7 +69,7 @@ struct BuiltInHUDDefaultEditor: View {
         var result = AppExplorerSettings()
         result.slotCount = layout.slotCount
         result.favorites = layout.favorites
-        if group != .actions {
+        if !group.hasEditableDefaults {
             let slots = group == .recentApps ? ExplorerSlot.slots(layout.slotCount).sorted {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             } : ExplorerSlot.slots(layout.slotCount)
@@ -96,16 +96,16 @@ struct BuiltInHUDDefaultEditor: View {
                 Spacer()
                 Button("Restore original…") { restoring = true }.accessibilityIdentifier("builtin-hud-restore")
             }
-            Text(group == .actions ? "Click a tile to edit the default. New Actions HUDs use this layout; existing copies stay unchanged."
+            Text(group.hasEditableDefaults ? "Click a tile to edit the default. New \(group.title) HUDs use this layout; existing copies stay unchanged."
                 : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
                 .font(.callout).foregroundStyle(.secondary)
             ExplorerHUDSettingsPreview(settings: preview, theme: settings.resolvedTheme,
                 dictionary: store.settings.resolvedHotkeyDictionary, groupPath: [], layerName: group.title,
                 selection: $selection, onBack: {}, onDrag: { _, _ in }, onDrop: { source, target in
-                    guard group == .actions, let target else { return }
+                    guard group.hasEditableDefaults, let target else { return }
                     var next = preview
                     if next.swapFavorites(from: source, to: target) { save(HUDDefaultLayout(favorites: next.favorites, slotCount: layout.slotCount)) }
-                }, editingTile: $editing, editor: group == .actions ? { slot in AnyView(tileEditor(slot)) } : nil,
+                }, editingTile: $editing, editor: group.hasEditableDefaults ? { slot in AnyView(tileEditor(slot)) } : nil,
                 workspace: true)
                 .frame(height: 410).accessibilityIdentifier("builtin-hud-preview")
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
@@ -525,7 +525,7 @@ struct AppExplorerSettingsView: View {
                     }
 
                     if scopeTitle == nil && !windowManagerOnly {
-                        ForEach([HUDLayerBuiltIn.recentApps, .windowManager, .chromeTabs]) { builtIn in
+                        ForEach(HUDLayerBuiltIn.allCases) { builtIn in
                             Menu(builtIn.title) {
                                 ForEach(HUDLayerPosition.allCases.filter { layerAt($0) == nil }) { position in
                                     Button(position.title) {

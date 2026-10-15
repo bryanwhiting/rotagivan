@@ -2,7 +2,20 @@ import Foundation
 
 @main struct ReservedGroupTests {
     static func main() throws {
-        precondition(ExplorerReservedGroup.allCases.count == 4)
+        precondition(Set(ExplorerReservedGroup.allCases.map(\.rawValue)) == Set(HUDLayerBuiltIn.allCases.map(\.rawValue)), "Setup must expose every built-in")
+        let media = ExplorerReservedGroup.mediaControls.tile(at: .up)
+        precondition(media.children?.count == ExplorerMediaAction.allCases.count)
+        var mediaSettings = AppExplorerSettings()
+        mediaSettings.builtInDefaults = ["mediaControls": HUDDefaultLayout(favorites: [], slotCount: 4)]
+        precondition(mediaSettings.hasValidFavorites)
+        precondition(mediaSettings.builtInTile(.mediaControls, at: .up).children == [])
+        let emptyMedia = mediaSettings.assignBuiltIn(.mediaControls, at: .right)!
+        precondition(mediaSettings.holdLayers?.first { $0.id == emptyMedia }?.editableFavorites == [], "An intentionally empty media default stays empty")
+        let mediaTemplate = mediaSettings.assignTemplate(.mediaControls, at: .left)!
+        precondition(mediaSettings.holdLayers?.first { $0.id == mediaTemplate }?.slotCount == 4)
+        mediaSettings.builtInDefaults?["mediaControls"] = nil
+        precondition(mediaSettings.defaultLayout(for: .mediaControls).favorites.count == ExplorerMediaAction.allCases.count)
+        precondition(mediaSettings.holdLayers?.first?.editableFavorites == [])
         precondition(ExplorerReservedGroup.chromeTabs.tile(at: .up).isChromeTabsGroup)
         var customized = AppExplorerSettings()
         customized.builtInDefaults = ["actions": HUDDefaultLayout(favorites: [AppExplorerFavorite(direction: .up, name: "Lock", action: .lockScreen)], slotCount: 4),

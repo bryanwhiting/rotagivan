@@ -577,14 +577,16 @@ enum AppExplorerMode: String, Codable, CaseIterable {
 /// Reserved catalog entries are always available. Assigned instances use the
 /// existing group/shortcut schema, so exports and older saved groups stay intact.
 enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
-    case windowManager, recentApps, actions, chromeTabs
+    case windowManager, recentApps, actions, chromeTabs, mediaControls
     var id: Self { self }
+    var hasEditableDefaults: Bool { self == .actions || self == .mediaControls }
     var title: String {
         switch self {
         case .windowManager: return "Window Manager"
         case .recentApps: return "Recent Apps"
         case .actions: return "Actions"
         case .chromeTabs: return "Google Chrome Tabs"
+        case .mediaControls: return "Media Controls"
         }
     }
     var symbol: String {
@@ -593,6 +595,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .recentApps: return "clock.arrow.circlepath"
         case .actions: return "command"
         case .chromeTabs: return "rectangle.on.rectangle"
+        case .mediaControls: return "playpause.fill"
         }
     }
     var summary: String {
@@ -601,6 +604,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .recentApps: return "Running apps, ordered by most recently used."
         case .actions: return "Copy, Paste, Cut, Undo, Redo, Select All, Find and Save."
         case .chromeTabs: return "Open tabs from Google Chrome. Choose a tile to focus that existing tab."
+        case .mediaControls: return "Play/pause, previous and next track, volume and mute."
         }
     }
     func tile(at slot: ExplorerSlot, insideWindowManager: Bool = false) -> AppExplorerFavorite {
@@ -613,6 +617,8 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recent)
         case .chromeTabs:
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .chromeTabs, slotCount: 8)
+        case .mediaControls:
+            return AppExplorerFavorite(direction: slot, name: title, children: HUDLayerTemplate.mediaControls.favorites, slotCount: 8)
         case .actions:
             let keys: [(ExplorerSlot, String, UInt16, String, Bool)] = [
                 (.up, "Copy", 8, "C", false), (.topRight, "Paste", 9, "V", false),
@@ -1095,7 +1101,7 @@ struct AppExplorerSettings: Codable, Equatable {
         if group != .windowManager {
             let layout = defaultLayout(for: group)
             tile.slotCount = layout.slotCount
-            if group == .actions { tile.children = layout.favorites }
+            if group.hasEditableDefaults { tile.children = layout.favorites }
         }
         return tile
     }
@@ -1161,8 +1167,8 @@ struct AppExplorerSettings: Codable, Equatable {
         for index in layers.indices { layers[index].position = positions[layers[index].id] }
         var layer = ExplorerHoldLayer.empty(name: template.title)
         layer.position = position
-        if template == .editingActions {
-            let layout = defaultLayout(for: .actions)
+        if template == .editingActions || template == .mediaControls {
+            let layout = defaultLayout(for: template == .mediaControls ? .mediaControls : .actions)
             layer.favorites = layout.favorites; layer.slotCount = layout.slotCount
         } else { layer.favorites = template.favorites }
         layers.append(layer)
@@ -1185,7 +1191,10 @@ struct AppExplorerSettings: Codable, Equatable {
         if let group = ExplorerReservedGroup(rawValue: builtIn.rawValue), group != .windowManager {
             let layout = defaultLayout(for: group)
             layer.slotCount = layout.slotCount
-            if group == .actions { layer.favorites = layout.favorites }
+            if group.hasEditableDefaults { layer.favorites = layout.favorites }
+            // Newly placed media is a normal editable copy. Legacy empty media
+            // applets still synthesize defaults, but an edited empty copy must not.
+            if group == .mediaControls { layer.builtIn = nil }
         }
         layers.append(layer)
         next.holdLayers = layers
@@ -1355,7 +1364,7 @@ struct AppExplorerSettings: Codable, Equatable {
                   (2...16).contains(layout.slotCount) else { return false }
             var sample = AppExplorerSettings()
             sample.slotCount = layout.slotCount; sample.favorites = layout.favorites
-            guard sample.hasValidFavorites, group == .actions || layout.favorites.isEmpty else { return false }
+            guard sample.hasValidFavorites, group.hasEditableDefaults || layout.favorites.isEmpty else { return false }
         }
         var remaining = Self.maximumFavorites
         var remainingLayers = 128

@@ -80,10 +80,10 @@ import SwiftUI
         }
         render("Sync & backup") { host in
             precondition(find("settings-section-Sync & backup", in: host) != nil)
-            guard let button = find("sync-save", in: host) else {
-                preconditionFailure("All settings must expose the primary sync action")
-            }
-            precondition(button.accessibilityLabel?() == "Sync settings")
+            precondition(find("sync-restore-retry", in: host) != nil,
+                "Locked accounts must expose a clear unlock action")
+            precondition(find("sync-load", in: host) == nil,
+                "Automatic sync must not expose a competing manual Load operation")
         }
         render("General") { host in
             precondition(find("sync-save", in: host) == nil, "Sync must have one home rather than duplicate controls")

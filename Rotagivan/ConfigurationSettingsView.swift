@@ -13,7 +13,7 @@ struct ConfigurationSettingsView: View {
     @State private var status = ""
     @State private var confirmImport = false
     @State private var confirmDefaults = false
-    @State private var hasBackup = UserDefaults.standard.data(forKey: backupKey) != nil
+    @State private var hasBackup = SettingsPersistence.defaults.data(forKey: backupKey) != nil
     private static let backupKey = "configuration.previous.v1"
 
     var body: some View {
@@ -36,7 +36,7 @@ struct ConfigurationSettingsView: View {
             HStack {
                 Button("Restore defaults…") { confirmDefaults = true }
                 Button("Undo last import") { perform {
-                    guard let data = UserDefaults.standard.data(forKey: Self.backupKey) else { return }
+                    guard let data = SettingsPersistence.defaults.data(forKey: Self.backupKey) else { return }
                     let previous = try JSONDecoder().decode(AppConfiguration.self, from: data)
                     try apply(previous)
                     status = "Previous configuration restored."
@@ -152,7 +152,7 @@ struct ConfigurationSettingsView: View {
             if config.settings.launchAtLogin { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
         }
-        UserDefaults.standard.set(previous, forKey: Self.backupKey)
+        SettingsPersistence.defaults.set(previous, forKey: Self.backupKey)
         hasBackup = true
         NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
         hid.stop() // Release held drags and stop momentum before replacing state.

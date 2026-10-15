@@ -310,7 +310,7 @@ struct ContentView: View {
                         if selection != "Pointer & scrolling" {
                             Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
                                 .accessibilityIdentifier("settings-page-heading")
-                            Text(selection == "Sync & backup" ? "One configuration includes all profiles. Choose when to sync or restore." : selection == "General" ? "Permissions and startup belong to this Mac." : "Settings for \(store.activeConfigurationName)")
+                            Text(selection == "Sync & backup" ? "Settings and API keys, automatically synced and encrypted." : selection == "General" ? "Permissions and startup belong to this Mac." : "Settings for \(store.activeConfigurationName)")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         pageContent

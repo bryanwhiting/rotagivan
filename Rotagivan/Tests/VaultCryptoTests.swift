@@ -52,7 +52,10 @@ import Security
         }
         struct OldClientPayload: Decodable { let openRouterAPIKey: String }
         rejects { _ = try JSONDecoder().decode(OldClientPayload.self, from: JSONEncoder().encode(both)) }
-        rejects { _ = try JSONDecoder().decode(VaultPayload.self, from: Data("{\"schemaVersion\":3,\"providers\":{}}".utf8)) }
+        rejects { _ = try JSONDecoder().decode(VaultPayload.self, from: Data("{\"schemaVersion\":4,\"providers\":{}}".utf8)) }
+        var settingsOnly = VaultPayload(); settingsOnly.settingsEnabled = true
+        check(try VaultCrypto.open(VaultCrypto.seal(settingsOnly, master: master, userID: user, vaultID: id, revision: 4), master: master, userID: user) == settingsOnly)
+        rejects { _ = try JSONDecoder().decode(OldClientPayload.self, from: JSONEncoder().encode(settingsOnly)) }
         rejects { _ = try JSONDecoder().decode(VaultPayload.self, from: Data("{\"schemaVersion\":2,\"providers\":{\"futureProvider\":\"fixture\"}}".utf8)) }
         rejects { try VaultCrypto.validate(VaultPayload()) }
         rejects { try VaultCrypto.validate(VaultPayload(openAIAPIKey: "invalid whitespace")) }

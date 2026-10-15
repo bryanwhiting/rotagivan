@@ -13,9 +13,11 @@ struct RotagivanApp: App {
 
     init() {
         AppleTrackpadInput.preserveLegacySettings()
+        SettingsPersistence.bootstrap()
         let factory = try? AppConfiguration.factory()
-        try? factory?.seedIfNeeded()
-        let store = SettingsStore(factorySettings: factory?.settings)
+        try? factory?.seedIfNeeded(SettingsPersistence.defaults)
+        ShortcutSettings.shared = ShortcutSettings(defaults: SettingsPersistence.defaults)
+        let store = SettingsStore(defaults: SettingsPersistence.defaults, factorySettings: factory?.settings)
         store.captureShortcuts = { ShortcutConfiguration(.shared) }
         store.restoreShortcuts = { keys in
             ShortcutSettings.shared.replaceConfiguration(normal: keys.normal, precision: keys.precision,
@@ -26,7 +28,7 @@ struct RotagivanApp: App {
         _store = StateObject(wrappedValue: store)
         let hid = NavigatorHIDManager(store: store)
         _hid = StateObject(wrappedValue: hid)
-        let sync = SettingsSync(store: store, hid: hid)
+        let sync = SettingsSync(store: store, hid: hid, defaults: SettingsPersistence.defaults, automatic: true)
         _sync = StateObject(wrappedValue: sync)
         // Defer until SwiftUI has installed and retained its state objects, but
         // do not depend on either the settings window or menu being presented.

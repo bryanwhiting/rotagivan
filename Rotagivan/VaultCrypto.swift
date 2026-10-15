@@ -17,14 +17,16 @@ enum VaultProvider: String, CaseIterable, Sendable {
 struct VaultPayload: Codable, Equatable, Sendable {
     var openRouterAPIKey: String = ""
     var openAIAPIKey: String? = nil
-    private enum CodingKeys: String, CodingKey { case openRouterAPIKey, openAIAPIKey, schemaVersion, providers }
+    var settingsEnabled = false
+    private enum CodingKeys: String, CodingKey { case openRouterAPIKey, openAIAPIKey, schemaVersion, providers, settingsEnabled }
     init(openRouterAPIKey: String = "", openAIAPIKey: String? = nil) {
         self.openRouterAPIKey = openRouterAPIKey; self.openAIAPIKey = openAIAPIKey
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) {
-            guard version == 2 else { throw VaultFailure.message("Update Rotagivan before changing keys saved by a newer version.") }
+            guard version == 2 || version == 3 else { throw VaultFailure.message("Update Rotagivan before changing keys saved by a newer version.") }
+            settingsEnabled = try values.decodeIfPresent(Bool.self, forKey: .settingsEnabled) ?? false
             let providers = try values.decode([String: String].self, forKey: .providers)
             guard Set(providers.keys).isSubset(of: Set(VaultProvider.allCases.map(\.rawValue))) else {
                 throw VaultFailure.message("Update Rotagivan to preserve all providers in this vault.")
@@ -38,10 +40,11 @@ struct VaultPayload: Codable, Equatable, Sendable {
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        if VaultProvider.openAI.key(in: self) != nil {
+        if settingsEnabled || VaultProvider.openAI.key(in: self) != nil {
             // Older clients require a top-level OpenRouter key. A versioned map
             // makes them fail to load rather than silently strip the OpenAI key.
-            try values.encode(2, forKey: .schemaVersion)
+            try values.encode(settingsEnabled ? 3 : 2, forKey: .schemaVersion)
+            if settingsEnabled { try values.encode(true, forKey: .settingsEnabled) }
             let providers = Dictionary(uniqueKeysWithValues: VaultProvider.allCases.compactMap { provider in
                 provider.key(in: self).map { (provider.rawValue, $0) }
             })
@@ -152,7 +155,7 @@ enum VaultCrypto {
         return payload
     }
     static func validate(_ payload: VaultPayload) throws {
-        guard VaultProvider.allCases.contains(where: { $0.key(in: payload) != nil }) else {
+        guard payload.settingsEnabled || VaultProvider.allCases.contains(where: { $0.key(in: payload) != nil }) else {
             throw VaultFailure.message("Enter an OpenRouter or OpenAI API key in Account & Sync.")
         }
         for provider in VaultProvider.allCases {

@@ -18,6 +18,7 @@ import Foundation
     var puts = 0
     var losePutReply = false
     var delay: UInt64 = 0
+    var beforeNextPut: (() throws -> Void)?
     let userID = "fixture-account"
     func call(_ request: URLRequest) async throws -> (Data, URLResponse) {
         if delay > 0 { try await Task.sleep(nanoseconds: delay) }
@@ -32,6 +33,11 @@ import Foundation
             output = try JSONEncoder().encode(VaultRemote(vault: record, devices: devices))
         } else if request.httpMethod == "PUT" {
             puts += 1
+            let hook = beforeNextPut; beforeNextPut = nil
+            try hook?()
+            if body["baseRevision"] as? Int != (record?.revision ?? 0) {
+                return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: nil)!)
+            }
             let value = VaultRecord(vaultID: body["vaultID"] as! String, publicKey: body["publicKey"] as! String,
                 ciphertext: body["ciphertext"] as! String, signature: body["signature"] as! String,
                 revision: (body["baseRevision"] as! Int) + 1, updatedAt: Date().timeIntervalSince1970)
@@ -60,6 +66,23 @@ import CryptoKit
 
 @main struct CredentialVaultTests {
     @MainActor static func main() async throws {
+        let racingServer = VaultServerFixture()
+        var racingStorage: VaultLocal?
+        let racing = CredentialVault(server: "https://fixture.test", transport: { try await racingServer.call($0) },
+            read: { _, _ in racingStorage }, write: { value, _, _ in racingStorage = value })
+        racing.setAccount(VaultAccount(token: "fixture", userID: racingServer.userID))
+        await racing.awaitLocalRestore()
+        await racing.save(apiKey: "fixture-api-key-before-race")
+        racingServer.beforeNextPut = {
+            racingServer.record = try VaultCrypto.seal(VaultPayload(openRouterAPIKey: "fixture-api-key-other-mac"),
+                master: racingStorage!.masterKey!, userID: racingServer.userID,
+                vaultID: racingServer.record!.vaultID, revision: 2)
+        }
+        let savedAfterRace = await racing.save(openAIKey: "fixture-api-key-new-openai")
+        precondition(savedAfterRace && racing.error == nil && racingServer.record!.revision == 3)
+        let raceMerged = try VaultCrypto.open(racingServer.record!, master: racingStorage!.masterKey!, userID: racingServer.userID)
+        precondition(raceMerged.openRouterAPIKey == "fixture-api-key-other-mac" && raceMerged.openAIAPIKey == "fixture-api-key-new-openai")
+        racing.shutdown()
         let server = VaultServerFixture()
         let account = VaultAccount(token: "fixture-token", userID: server.userID)
         var silentReads = 0, explicitReads = 0
@@ -123,14 +146,17 @@ import CryptoKit
         precondition(work.error == nil && server.record?.revision == 2)
         let changedRouter = try VaultCrypto.open(workStorage!.cached!, master: workStorage!.masterKey!, userID: account.userID)
         precondition(changedRouter.openAIAPIKey == "fixture-api-key-openai-first", "Replacing OpenRouter preserves OpenAI")
-        await home.save(apiKey: "fixture-api-key-stale")
-        precondition(home.error != nil && server.puts == 2)
+        await home.save(openAIKey: "fixture-api-key-updated-openai")
+        precondition(home.error == nil && server.puts == 3)
+        let merged = try VaultCrypto.open(homeStorage!.cached!, master: homeStorage!.masterKey!, userID: account.userID)
+        precondition(merged.openRouterAPIKey == "fixture-api-key-next", "Stale Mac automatically preserves latest other-provider key")
+        precondition(merged.openAIAPIKey == "fixture-api-key-updated-openai")
         await home.load()
-        precondition(homeStorage?.highestRevision == 2)
+        precondition(homeStorage?.highestRevision == 3)
         server.record = first
         await home.load()
-        precondition(home.error != nil && homeStorage?.highestRevision == 2, "Rollback is rejected")
-        server.record = workStorage!.cached
+        precondition(home.error != nil && homeStorage?.highestRevision == 3, "Rollback is rejected")
+        server.record = homeStorage!.cached
         let before = homeStorage?.highestRevision
         server.delay = 50_000_000
         let inFlight = Task { await home.load() }

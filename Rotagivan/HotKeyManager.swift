@@ -10,7 +10,7 @@ extension Notification.Name {
 
 @MainActor
 final class ShortcutSettings: ObservableObject {
-    static let shared = ShortcutSettings()
+    static var shared = ShortcutSettings()
     private let defaults: UserDefaults
     @Published var normal: ProfileShortcut { didSet { save() } }
     @Published var precision: ProfileShortcut { didSet { save() } }

@@ -3,6 +3,7 @@ import Combine
 import Foundation
 
 struct VaultAccount: Equatable { let token: String; let userID: String }
+private struct VaultRace: Error {}
 private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
@@ -22,6 +23,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     @Published private(set) var savedAt: Date?
     @Published var recoveryCode: String?
     @Published private(set) var account: VaultAccount?
+    private(set) var authenticationExpired = false
     private let server: String
     private var local: VaultLocal?
     private var remote: VaultRecord?
@@ -62,6 +64,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         generation = UUID()
         operationID = nil; busy = false; restoringLocal = false; localReady = account == nil
         self.account = account; local = nil; remote = nil; recoveryCode = nil
+        authenticationExpired = false
         hasKey = false; hasOpenAIKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
         VaultKeychain.setActive(server: server, userID: account?.userID)
         status = account == nil ? "Sign in to use encrypted API keys." : "Load the vault, or import your key to create it."
@@ -135,9 +138,9 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         guard (200..<300).contains(response.statusCode) else {
             let message: String
             switch response.statusCode {
-            case 401: message = "Sign in again to use the vault."
+            case 401: authenticationExpired = true; message = "Sign in again to resume sync."
             case 403: message = "A trusted Mac or recovery code is required."
-            case 409: message = "The vault changed on another Mac. Load it before saving again."
+            case 409: throw VaultRace()
             case 404: message = "Vault or request not found. Refresh and try again."
             default: message = "Vault request failed (HTTP \(response.statusCode)). Nothing was decrypted on the server."
             }
@@ -183,7 +186,9 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         var value = local ?? .fresh()
         value.masterKey = master; value.vaultID = record.vaultID; value.vaultPublicKey = record.publicKey
         value.highestRevision = max(value.highestRevision, record.revision); value.cached = record
-        try await persist(value, account: account, token: token)
+        if local?.cached?.revision != record.revision || local?.cached?.ciphertext != record.ciphertext {
+            try await persist(value, account: account, token: token)
+        }
         remote = record; hasRemote = true; hasKey = !payload.openRouterAPIKey.isEmpty
         hasOpenAIKey = VaultProvider.openAI.key(in: payload) != nil; unlocked = true; ownCode = nil
         savedAt = Date(timeIntervalSince1970: record.updatedAt)
@@ -205,14 +210,21 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             }
         }
     }
-    func save(apiKey: String? = nil, openAIKey: String? = nil, importEnvironment: Bool = false, importOpenAIEnvironment: Bool = false) async {
+    var settingsKey: Data? { localReady ? local?.masterKey : nil }
+    var settingsScope: String? { local?.vaultID }
+    var settingsConfigured: Bool {
+        guard let account, let record = local?.cached, let master = local?.masterKey,
+              let payload = try? VaultCrypto.open(record, master: master, userID: account.userID) else { return false }
+        return payload.settingsEnabled
+    }
+    @discardableResult func save(apiKey: String? = nil, openAIKey: String? = nil, importEnvironment: Bool = false, importOpenAIEnvironment: Bool = false, enableSettings: Bool = false) async -> Bool {
+        var completed = false
         await run { account, token in
+          for attempt in 0..<4 {
+           do {
             let snapshot = try await self.fetch(account: account, token: token)
             var value = self.local ?? .fresh()
             if snapshot.vault != nil && value.masterKey == nil { throw VaultFailure.message("Approve this Mac or enter a recovery code before saving.") }
-            if let existing = snapshot.vault, value.cached != nil, value.highestRevision != existing.revision {
-                throw VaultFailure.message("Another Mac saved newer API keys. Load them before saving.")
-            }
             // Merge against the authenticated latest payload; replacing one
             // provider must preserve the other, including after a lost reply.
             let previous: VaultPayload
@@ -221,7 +233,8 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             } else { previous = VaultPayload() }
             let router = importEnvironment ? try OpenRouterCredential.loadEnvironment() : apiKey
             let openAI = importOpenAIEnvironment ? try OpenRouterCredential.loadEnvironment(variable: "OPENAI_ROTA_KEY") : openAIKey
-            let payload = previous.updating(openRouter: router, openAI: openAI)
+            var payload = previous.updating(openRouter: router, openAI: openAI)
+            if enableSettings { payload.settingsEnabled = true }
             try VaultCrypto.validate(payload)
             let vaultID = snapshot.vault?.vaultID ?? value.vaultID ?? UUID().uuidString.lowercased()
             let master = value.masterKey ?? VaultCrypto.randomMaster()
@@ -236,7 +249,14 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
                 "signature": record.signature, "baseRevision": baseRevision], account: account, token: token)
             guard saved.vaultID == record.vaultID, saved.ciphertext == record.ciphertext, saved.revision == record.revision else { throw VaultFailure.message("Vault save could not be confirmed. Press Load to check.") }
             try await self.accept(saved, master: master, account: account, token: token)
+            completed = true
+            return
+           } catch is VaultRace {
+               if attempt == 3 { throw VaultFailure.message("Sync is busy on another Mac. Your entries are kept; try again shortly.") }
+           }
+          }
         }
+        return completed
     }
     func requestAccess() async {
         await run { account, token in

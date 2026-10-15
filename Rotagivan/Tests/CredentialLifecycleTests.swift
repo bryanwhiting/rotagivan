@@ -93,9 +93,9 @@ private final class BlockingCredentialProbe: @unchecked Sendable {
                 URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent(name + ".png"))
         }
         try await Task.sleep(for: .milliseconds(200))
-        precondition(find("sync-save")?.isAccessibilityEnabled?() == false && find("sync-load")?.isAccessibilityEnabled?() == false)
+        precondition(find("sync-save") == nil && find("sync-load") == nil)
         precondition(find("sync-restore-retry") == nil, "Pending reads must not expose a retry that spawns another call")
-        precondition(find("sync-vault-awaiting-account") != nil,
+        precondition(find("sync-separate-vault") == nil,
             "Pending account restore must explain that encrypted-key status is unknown")
         precondition(!allElements().contains { $0.accessibilityLabel?() == "Not saved" },
             "Unknown account must not imply that its encrypted keys are missing")
@@ -111,9 +111,9 @@ private final class BlockingCredentialProbe: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(150))
         guard let retry = find("sync-restore-retry") else { preconditionFailure("Terminal errors need a native Retry button") }
         precondition(retry.isAccessibilityEnabled?() == true)
-        precondition(find("sync-vault-awaiting-account") != nil)
+        precondition(find("sync-separate-vault") == nil)
         precondition(!allElements().contains { $0.accessibilityLabel?() == "Not saved" })
-        precondition(find("sync-save")?.isAccessibilityEnabled?() == false && find("sync-load")?.isAccessibilityEnabled?() == false)
+        precondition(find("sync-save") == nil && find("sync-load") == nil)
         try capture("sync-restore-error")
         precondition(retry.accessibilityPerformPress?() == true)
         await gate.awaitEntered()
@@ -125,7 +125,7 @@ private final class BlockingCredentialProbe: @unchecked Sendable {
         await sync.awaitLoginRestore(); await vault.awaitLocalRestore()
         try await Task.sleep(for: .milliseconds(150))
         precondition(sync.credentialsReady && !sync.restoringLogin)
-        precondition(find("sync-save")?.isAccessibilityEnabled?() == true && find("sync-load")?.isAccessibilityEnabled?() == true)
+        precondition(find("sync-save")?.isAccessibilityEnabled?() == true && find("sync-load") == nil)
         precondition(find("sync-restore-retry") == nil)
         try capture("sync-restore-ready")
         precondition(find("sync-vault-awaiting-account") == nil,

@@ -2,146 +2,97 @@ import SwiftUI
 
 struct SyncSettingsView: View {
     @ObservedObject var sync: SettingsSync
-    @State private var accountExpanded = false
     @State private var email = ""
     @State private var password = ""
-    @State private var confirmPassword = ""
+    @State private var confirmation = ""
     @State private var creating = false
     @State private var changingPassword = false
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmNewPassword = ""
-    @State private var confirmLoad = false
-    @State private var cloudLoadPreview: CloudLoadPreview?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-          GroupBox {
-           VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Sync settings", systemImage: "arrow.triangle.2.circlepath").font(.headline)
-                Spacer()
-                if sync.busy || sync.restoringLogin { ProgressView().controlSize(.small).accessibilityLabel("Restoring or updating account") }
-            }
-            Text("Sync all profiles, HUD layouts, actions, shortcuts, voice options, and pointer settings with one click. Sync is manual.")
-                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            LabeledContent("Destination", value: !sync.credentialsReady ? (sync.restoringLogin ? "Restoring account…" : "Account unavailable") : sync.account == nil ? "settings.yaml on this Mac" : "Your existing cloud account + this Mac")
-                .font(.caption).foregroundStyle(.secondary)
-            Button(sync.busy ? "Syncing…" : "Sync settings") { Task { await sync.save() } }
-                .accessibilityIdentifier("sync-save")
-                .buttonStyle(.borderedProminent)
-                .disabled(sync.busy || !sync.credentialsReady || sync.restoringLogin)
-                .help("Save the current complete configuration to the displayed destination.")
-            LabeledContent("Last successful save", value: !sync.credentialsReady ? "Unavailable until account restore" : sync.lastSave?.formatted(date: .abbreviated, time: .shortened) ?? "Not saved yet")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(!sync.credentialsReady ? "Sync stays unavailable until your saved account is restored." : sync.account == nil ? "Saves locally. Sign in below to also save to your existing cloud service." : "Saves this Mac’s current configuration to the cloud. On another Mac, use Restore saved settings below.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("API keys are excluded; encrypted-vault transfers stay separate. Permissions, launch-at-login, the enable switch, and the local voice-provider choice stay on this Mac when restoring cloud settings.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let error = sync.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
-            DisclosureGroup("Account & restore", isExpanded: $accountExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-            if !sync.credentialsReady {
-                Text(sync.restoringLogin ? "Restoring your saved account…" : "Your saved account is unavailable. Retry before saving or loading settings.")
-                    .fixedSize(horizontal: false, vertical: true)
-                if !sync.restoringLogin {
-                    Button("Retry account restore") { sync.retryLoginRestore() }
-                        .accessibilityIdentifier("sync-restore-retry")
-                    Text("Retry may ask for your login Keychain password. Background startup never opens that prompt.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            } else if let account = sync.account {
-                HStack {
-                Text(account.email).textSelection(.enabled)
-                Spacer()
-                Menu("Account") {
-                    Button("Change password…") { changingPassword = true }
-                    Button("Sign out") { Task { await sync.signOut() } }
-                }.fixedSize().disabled(sync.busy)
-                }
-            } else {
-                TextField("Email", text: $email).textContentType(.username)
-                SecureField("Password (12+ characters)", text: $password)
-                    .textContentType(creating ? .newPassword : .password)
-                if creating { SecureField("Confirm password", text: $confirmPassword).textContentType(.newPassword) }
-                HStack {
-                    Button(creating ? "Create account" : "Sign in") {
-                        let submitted = password
-                        password = ""; confirmPassword = ""
-                        Task { await sync.authenticate(email: email, password: submitted, create: creating) }
-                    }.disabled(sync.busy || email.isEmpty || password.count < 12 || (creating && password != confirmPassword))
-                    Button(creating ? "Already have an account?" : "Create an account") {
-                        creating.toggle(); password = ""; confirmPassword = ""
-                    }.disabled(sync.busy)
-                }
-                Text("Email is your login name. Verification and password-reset emails aren't available yet; save your password in a password manager. Signing in does not save or load settings.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-                Button("Restore saved settings…") {
-                    guard sync.credentialsReady else { return }
-                    cloudLoadPreview = nil
-                    if sync.account == nil { confirmLoad = true }
-                    else {
-                        Task {
-                            if let preview = await sync.prepareCloudLoad() {
-                                cloudLoadPreview = preview
-                                confirmLoad = true
-                            }
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Label("Account & Sync", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+                        Spacer()
+                        if let account = sync.account {
+                            Menu("Account") {
+                                Text(account.email)
+                                Button("Change password…") { changingPassword = true }
+                                Button("Sign out") { Task { await sync.signOut() } }
+                            }.fixedSize().disabled(sync.busy)
                         }
                     }
-                }
-                    .accessibilityIdentifier("sync-load")
-                    .help(sync.account == nil ? "Load settings.yaml into this app." : "Load your saved cloud settings into this app.")
-            .disabled(sync.busy || !sync.credentialsReady || sync.restoringLogin)
-            Text("Restore replaces the current configuration after confirmation and keeps a backup. It does not transfer API keys.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }.padding(.top, 8)
-            }
-            DisclosureGroup("Storage & privacy") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(sync.localURL.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        Spacer()
-                        Button("Reveal file") { NSWorkspace.shared.activateFileViewerSelecting([sync.localURL]) }
+                    if !sync.credentialsReady {
+                        Text(sync.restoringLogin ? "Restoring your account…" : "Unlock your saved account to resume sync.")
+                        if !sync.restoringLogin {
+                            Button("Unlock account") { sync.retryLoginRestore() }
+                                .accessibilityIdentifier("sync-restore-retry")
+                        }
+                    } else if sync.account != nil {
+                        Label(sync.syncStatus, systemImage: sync.error == nil ? "checkmark.icloud" : "icloud.slash")
+                            .font(.title3.weight(.medium)).accessibilityIdentifier("sync-status")
+                        Text("Your settings and API keys sync automatically across your trusted Macs. Everything is encrypted before it leaves this Mac.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            if let date = sync.lastSave {
+                                Text("Last synced " + date.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Sync now") { Task { await sync.save() } }
+                                .accessibilityIdentifier("sync-save").disabled(sync.busy)
+                        }
+                    } else {
+                        Text("Sign in to keep settings and API keys in sync on your Macs.").foregroundStyle(.secondary)
+                        TextField("Email", text: $email).textContentType(.username)
+                        SecureField("Password", text: $password).textContentType(creating ? .newPassword : .password)
+                        if creating { SecureField("Confirm password", text: $confirmation) }
+                        HStack {
+                            Button(creating ? "Create account" : "Sign in") {
+                                let submitted = password; password = ""; confirmation = ""
+                                Task {
+                                    await sync.authenticate(email: email, password: submitted, create: creating)
+                                    await sync.synchronizeAutomatically()
+                                }
+                            }.buttonStyle(.borderedProminent)
+                                .disabled(sync.busy || email.isEmpty || password.count < 12 || (creating && confirmation != password))
+                            Button(creating ? "I already have an account" : "Create an account") { creating.toggle() }
+                        }
+                        Text("Use at least 12 characters. Keep your password in a password manager; email password reset is not available yet.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("Passwords and login tokens never go in YAML. Cloud sync doesn't change Accessibility, Input Monitoring, launch-at-login, or this Mac's enable switch.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }.padding(.top, 8)
-            }.font(.caption)
-           }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-          }
-            if sync.credentialsReady {
-                CredentialVaultView(vault: sync.vault)
-                    .accessibilityIdentifier("sync-separate-vault")
-            } else {
-                Label("Encrypted API keys will appear after your saved account is restored.", systemImage: "lock.shield")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("sync-vault-awaiting-account")
+                    if let error = sync.error {
+                        Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    }
+                    DisclosureGroup("Privacy & recovery") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Settings are encrypted in local storage and in the cloud. Your account password alone cannot decrypt them.")
+                            Text("On a new Mac, sign in and use your recovery code or approve it from a trusted Mac below. Update your other Macs before using automatic sync.")
+                            Text("Usage history, permissions, and device-only options stay on this Mac. Files you explicitly export are readable; keep them private.")
+                        }.font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                    }
+                }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if sync.credentialsReady, sync.account != nil {
+                CredentialVaultView(vault: sync.vault, onUnlocked: {
+                    Task { await sync.synchronizeAutomatically() }
+                }).accessibilityIdentifier("sync-separate-vault")
             }
         }
         .textFieldStyle(.roundedBorder)
-        .onAppear { if !sync.credentialsReady { accountExpanded = true } }
-        .onChange(of: sync.credentialsReady) { ready in
-            if !ready { accountExpanded = true; confirmLoad = false; cloudLoadPreview = nil; changingPassword = false; clearPasswords() }
-        }
-        .confirmationDialog(sync.account == nil ? "Load settings.yaml?" : "Load your saved cloud settings?", isPresented: $confirmLoad) {
-            Button("Back up current settings and load") {
-                guard sync.credentialsReady else { return }
-                let preview = cloudLoadPreview
-                Task { await sync.load(expectedCloudSave: preview) }
-            }
-        } message: {
-            Text(cloudLoadPreview?.confirmationMessage ?? "This replaces this Mac's current settings. A backup will be kept.")
-        }
-        .sheet(isPresented: $changingPassword) {
+        .sheet(isPresented: $changingPassword, onDismiss: clearPasswords) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Change password").font(.headline)
-                SecureField("Current password", text: $currentPassword).textContentType(.password)
-                SecureField("New password (12+ characters)", text: $newPassword).textContentType(.newPassword)
-                SecureField("Confirm new password", text: $confirmNewPassword).textContentType(.newPassword)
-                Text("This signs out your other Macs. They can sign in again with the new password.").font(.caption)
+                SecureField("Current password", text: $currentPassword)
+                SecureField("New password (12+ characters)", text: $newPassword)
+                SecureField("Confirm new password", text: $confirmNewPassword)
+                Text("Your other Macs will need to sign in again.").font(.caption)
                 HStack {
-                    Button("Cancel") { clearPasswords(); changingPassword = false }
+                    Button("Cancel") { changingPassword = false }
                     Spacer()
                     Button("Change password") {
                         let current = currentPassword, next = newPassword

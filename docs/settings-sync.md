@@ -1,5 +1,8 @@
 # Settings and manual sync — 1.1.198 (200)
 
+Historical behavior. Superseded by [automatic encrypted sync](automatic-encrypted-sync.md)
+in 1.1.207 (209). The document below records the earlier manual implementation.
+
 The menu-bar entry is **Settings…**, opening the existing unified settings window. The **Sync & backup** section contains one primary **Sync settings** button, its destination, last successful save time, errors, and progress. It saves the entire current `AppConfiguration` snapshot: all configuration profiles, HUD layouts/layers, actions/macros/shortcuts, ordinary voice settings, device overrides, and pointer/scroll settings. No settings transfer happens on startup, edits, sign-in, or quit.
 
 Without a restored cloud account, the destination is the existing local `settings.yaml`; signed in, it also publishes to the existing configured cloud service using the existing revision check. This is explicit publication, not a bidirectional merge. **Account & restore** contains sign-in/account controls and **Restore saved settings…**, which still previews the cloud revision and confirms replacement with a backup. Local file export/import/default restore are together in this same section. Cloud restore keeps enable, launch-at-login, permissions, and the explicitly local voice-provider preference on the receiving Mac.

@@ -63,7 +63,12 @@ struct SyncCredentials {
 
 @MainActor final class SettingsSync: ObservableObject {
     @Published private(set) var account: SyncAccount? {
-        didSet { vault.setAccount(account.map { VaultAccount(token: $0.token, userID: $0.userID) }) }
+        didSet {
+            let old = reconciler
+            reconciler = nil; reconciliationAccount = nil; observedFields = nil
+            Task { await old?.stop() }
+            vault.setAccount(account.map { VaultAccount(token: $0.token, userID: $0.userID) })
+        }
     }
     private let suppliedVault: CredentialVault?
     lazy var vault = suppliedVault ?? CredentialVault(server: server)
@@ -72,6 +77,15 @@ struct SyncCredentials {
     @Published private(set) var lastSave: Date?
     @Published private(set) var error: String?
     @Published private(set) var busy = false
+    @Published private(set) var syncStatus = "Sign in to sync your settings and API keys."
+    let automatic: Bool
+    private var autoLoop: Task<Void, Never>?
+    private var reconciler: EncryptedAutoSync?
+    private var reconciliationAccount: String?
+    private var observedFields: [String: Data]?
+    private var observedStorageKey: String?
+    private var autoRunning = false
+    private var autoObservers = Set<AnyCancellable>()
     var localURL: URL { files.file }
     private let store: SettingsStore
     private let hid: NavigatorHIDManager
@@ -90,13 +104,14 @@ struct SyncCredentials {
     private var restoreTask: Task<Void, Never>?
 
     init(store: SettingsStore, hid: NavigatorHIDManager, files: SyncFiles = SyncFiles(),
-         defaults: UserDefaults = .standard, server: String? = nil,
+         defaults: UserDefaults = .standard, automatic: Bool = false, server: String? = nil,
          credentials: SyncCredentials = .keychain,
          vault: CredentialVault? = nil,
          transport: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
          snapshot: (() -> AppConfiguration)? = nil, apply: ((AppConfiguration) -> Void)? = nil,
          computerName: @escaping () -> String = { Host.current().localizedName ?? ProcessInfo.processInfo.hostName }) {
         self.store = store; self.hid = hid; self.files = files
+        self.automatic = automatic
         self.defaults = defaults; self.credentials = credentials
         suppliedVault = vault
         self.server = server ?? Bundle.main.object(forInfoDictionaryKey: "RotagivanSyncURL") as? String ?? ""
@@ -108,11 +123,23 @@ struct SyncCredentials {
         self.computerName = computerName
     }
 
-    /// Startup restores only the login and cached timestamp. No settings file
-    /// imports, exports, observers, timers, polling, or network checks.
+    /// Production starts encrypted automatic reconciliation. The explicit
+    /// manual mode remains available to legacy migration/test callers only.
     func start() {
         guard !started, !shuttingDown else { return }; started = true
         restoreLogin()
+        if automatic {
+            Publishers.Merge(store.objectWillChange, ShortcutSettings.shared.objectWillChange)
+                .debounce(for: .milliseconds(750), scheduler: RunLoop.main)
+                .sink { [weak self] _ in Task { await self?.synchronizeAutomatically() } }
+                .store(in: &autoObservers)
+            autoLoop = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.synchronizeAutomatically()
+                    do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
+                }
+            }
+        }
     }
     func retryLoginRestore() {
         guard started, !shuttingDown, !restoringLogin, !credentialsReady else { return }
@@ -132,6 +159,7 @@ struct SyncCredentials {
                 guard let self, self.isCurrent(token) else { return }
                 self.account = restored; self.restoreLastSave()
                 self.credentialsReady = true; self.restoringLogin = false
+                if self.automatic { Task { await self.synchronizeAutomatically() } }
             } catch {
                 guard let self, self.isCurrent(token) else { return }
                 self.restoringLogin = false; self.error = error.localizedDescription
@@ -166,6 +194,7 @@ struct SyncCredentials {
     /// An explicit Save captures exactly this moment. Later edits stay local
     /// until the next button press; an error never schedules a retry.
     func save() async {
+        if automatic { await synchronizeAutomatically(); return }
         guard let token = beginOperation() else { return }
         defer { finishOperation(token) }
         var savedLocally = false
@@ -259,6 +288,11 @@ struct SyncCredentials {
         }
     }
     private func apply(_ config: AppConfiguration) {
+        if let encrypted = defaults as? EncryptedPreferences {
+            encrypted.transaction { applyUnbatched(config) }
+        } else { applyUnbatched(config) }
+    }
+    private func applyUnbatched(_ config: AppConfiguration) {
         if let applyOverride { applyOverride(config); return }
         var portable = config.settings
         portable.enabled = store.settings.enabled
@@ -340,6 +374,9 @@ struct SyncCredentials {
     }
 
     func prepareToQuit() async {
+        autoLoop?.cancel(); autoLoop = nil
+        await reconciler?.stop()
+        try? await (defaults as? EncryptedPreferences)?.flush()
         shuttingDown = true
         generation = UUID()
         restoreTask?.cancel(); restoreTask = nil
@@ -347,6 +384,153 @@ struct SyncCredentials {
         vault.shutdown()
         session.invalidateAndCancel()
         // No final save, upload, or import on quit.
+    }
+    /// A single coordinator serializes settings transfers and key refreshes.
+    /// The account vault supplies the shared key; no settings plaintext is sent.
+    func synchronizeAutomatically() async {
+        guard automatic, !autoRunning, !shuttingDown, credentialsReady, !busy else { return }
+        guard let signed = account else { syncStatus = "Sign in to sync your settings and API keys."; return }
+        autoRunning = true
+        defer { autoRunning = false }
+        let accountID = signed.userID
+        do {
+            await vault.awaitLocalRestore()
+            guard account == signed, !shuttingDown else { return }
+            guard vault.localReady else { syncStatus = "Unlock this Mac to resume sync."; return }
+            guard !vault.busy else { return }
+            // Refresh keys without an extra Load button. New Macs discover the
+            // approval requirement before they can create or overwrite anything.
+            await vault.load()
+            guard account == signed, !shuttingDown else { return }
+            if vault.authenticationExpired { try await expireAccount(signed); return }
+            if let failure = vault.error { throw ConfigurationError(failure) }
+            if !vault.hasRemote || (vault.unlocked && !vault.settingsConfigured) {
+                await vault.save(enableSettings: true)
+                if let failure = vault.error { throw ConfigurationError(failure) }
+            }
+            guard let key = vault.settingsKey, let vaultID = vault.settingsScope else {
+                syncStatus = "Unlock this Mac to download your settings and API keys."
+                return
+            }
+            syncStatus = "Syncing…"
+            let initial = try SyncConfigurationCodec.fields(snapshot())
+            if reconciler == nil || reconciliationAccount != accountID {
+                await reconciler?.stop()
+                let stateKey = "encrypted.sync." + SyncFiles.digest(Data((server + "/" + accountID + "/" + vaultID).utf8))
+                var localState: EncryptedSyncState
+                if let data = defaults.data(forKey: stateKey) { localState = try JSONDecoder().decode(EncryptedSyncState.self, from: data) }
+                else { localState = EncryptedSyncState() }
+                let deviceKey = "encrypted.deviceID"
+                let device = defaults.string(forKey: deviceKey) ?? UUID().uuidString
+                defaults.set(device, forKey: deviceKey)
+                if localState.journal.fields.isEmpty {
+                    let firstCloud = try await fetchEncrypted(signed)
+                    if let yaml = firstCloud.ciphertext, !yaml.hasPrefix("rota-e2ee-settings-v1:") {
+                        let legacyConfig = try AppConfiguration.parse(yaml)
+                        defaults.set(try JSONEncoder().encode(legacyConfig), forKey: "encrypted.legacyCloud." + accountID)
+                        let legacyFields = try SyncConfigurationCodec.fields(legacyConfig)
+                        for (name, value) in legacyFields.sorted(by: { $0.key < $1.key }) {
+                            try localState.journal.set(value, for: name, deviceID: "legacy")
+                        }
+                        // The first upgraded Mac keeps its live edits while
+                        // upgrading the manual cloud snapshot to encryption.
+                        for (name, value) in SyncConfigurationCodec.changes(from: legacyFields, to: initial).sorted(by: { $0.key < $1.key }) {
+                            try localState.journal.set(value, for: name, deviceID: device)
+                        }
+                    }
+                }
+                let preferences = SyncPreferenceWriter(defaults)
+                let engine = try EncryptedAutoSync(key: key, scope: accountID + "/" + vaultID,
+                    deviceID: device, state: localState,
+                    transport: EncryptedSyncTransport(fetch: { [weak self] in
+                        guard let self else { throw EncryptedSyncFailure.inactive }
+                        return try await self.fetchEncrypted(signed)
+                    }, compareAndSwap: { [weak self] wire, revision in
+                        guard let self else { throw EncryptedSyncFailure.inactive }
+                        return try await self.putEncrypted(wire, revision: revision, account: signed)
+                    }), persist: { state in
+                        preferences.defaults.set(try JSONEncoder().encode(state), forKey: stateKey)
+                    }, validate: { journal in _ = try SyncConfigurationCodec.configuration(journal) }, legacy: { yaml in
+                        var journal = EncryptedSettingsJournal()
+                        for (name, value) in try SyncConfigurationCodec.fields(AppConfiguration.parse(yaml)).sorted(by: { $0.key < $1.key }) {
+                            try journal.set(value, for: name, deviceID: "legacy")
+                        }
+                        return journal
+                    }, schedulesItself: false)
+                reconciler = engine; reconciliationAccount = accountID
+                observedStorageKey = stateKey + ".observed"
+                if let baseline = defaults.data(forKey: stateKey + ".observed") {
+                    observedFields = try JSONDecoder().decode([String: Data].self, from: baseline)
+                } else {
+                    // Keep an encrypted recovery snapshot before first download.
+                    defaults.set(try JSONEncoder().encode(snapshot()), forKey: "encrypted.beforeFirstSync." + accountID)
+                    observedFields = initial
+                }
+            }
+            guard let reconciler else { return }
+            let edits = SyncConfigurationCodec.changes(from: observedFields ?? initial, to: initial)
+            if !edits.isEmpty { try await reconciler.edit(edits) }
+            observedFields = initial
+            if let observedStorageKey { defaults.set(try JSONEncoder().encode(initial), forKey: observedStorageKey) }
+            _ = try await reconciler.syncNow()
+            guard account == signed, !shuttingDown else { return }
+            var state = await reconciler.snapshot()
+            if state.journal.fields.isEmpty {
+                try await reconciler.edit(SyncConfigurationCodec.changes(from: [:], to: initial))
+                _ = try await reconciler.syncNow()
+                state = await reconciler.snapshot()
+            }
+            // Preserve edits made while a request was in flight.
+            let current = try SyncConfigurationCodec.fields(snapshot())
+            let duringRequest = SyncConfigurationCodec.changes(from: initial, to: current)
+            if !duringRequest.isEmpty {
+                try await reconciler.edit(duringRequest)
+                state = await reconciler.snapshot()
+            }
+            if let merged = try SyncConfigurationCodec.configuration(state.journal) {
+                if try merged.syncFingerprint() != snapshot().syncFingerprint() {
+                    defaults.set(try JSONEncoder().encode(snapshot()), forKey: "encrypted.beforeMerge." + accountID)
+                    apply(merged)
+                }
+                observedFields = try SyncConfigurationCodec.fields(merged)
+                if let observedStorageKey { defaults.set(try JSONEncoder().encode(observedFields), forKey: observedStorageKey) }
+            }
+            try await (defaults as? EncryptedPreferences)?.flush()
+            error = nil; lastSave = Date()
+            syncStatus = duringRequest.isEmpty ? "Up to date" : "Saving changes…"
+        } catch {
+            guard account == signed, !shuttingDown else { return }
+            if let api = error as? SyncAPIError, api.status == 401 {
+                try? await expireAccount(signed)
+                return
+            }
+            self.error = "Sync paused. Your local settings are safe. " + error.localizedDescription
+            syncStatus = "Waiting to sync · retrying automatically"
+        }
+    }
+    private func expireAccount(_ signed: SyncAccount) async throws {
+        try await credentials.remove(server)
+        guard account == signed, !shuttingDown else { return }
+        account = nil
+        error = "Your session expired. Sign in again to resume automatic sync."
+        syncStatus = "Sign in to resume sync"
+    }
+    private func fetchEncrypted(_ signed: SyncAccount) async throws -> EncryptedCloudSnapshot {
+        guard account == signed, !shuttingDown else { throw EncryptedSyncFailure.inactive }
+        try await (defaults as? EncryptedPreferences)?.flush()
+        let remote: CloudSettings = try await request("settings", method: "GET", token: signed.token)
+        guard account == signed, !shuttingDown else { throw EncryptedSyncFailure.inactive }
+        return EncryptedCloudSnapshot(ciphertext: remote.yaml, revision: Int64(remote.revision))
+    }
+    private func putEncrypted(_ wire: String, revision: Int64, account signed: SyncAccount) async throws -> EncryptedCloudSnapshot {
+        guard account == signed, !shuttingDown else { throw EncryptedSyncFailure.inactive }
+        try await (defaults as? EncryptedPreferences)?.flush()
+        do {
+            let saved: CloudSettings = try await request("settings", method: "PUT",
+                payload: ["yaml": wire, "baseRevision": revision], token: signed.token)
+            guard account == signed, !shuttingDown else { throw EncryptedSyncFailure.inactive }
+            return EncryptedCloudSnapshot(ciphertext: wire, revision: Int64(saved.revision))
+        } catch let api as SyncAPIError where api.status == 409 { throw EncryptedSyncFailure.raced }
     }
     private func request<T: Decodable>(_ path: String, method: String,
                                       payload: [String: Any]? = nil, token: String?) async throws -> T {

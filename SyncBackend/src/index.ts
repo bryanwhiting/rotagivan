@@ -147,8 +147,10 @@ async function route(request: Request, env: Env): Promise<Response> {
     const updatedAt = seconds();
     const result = input.baseRevision === 0
       ? await env.DB.prepare('INSERT INTO settings(user_id,yaml,revision,updated_at) VALUES (?,?,1,?) ON CONFLICT(user_id) DO NOTHING').bind(user.id,input.yaml,updatedAt).run()
-      : await env.DB.prepare('UPDATE settings SET yaml=?,revision=revision+1,updated_at=? WHERE user_id=? AND revision=?').bind(input.yaml,updatedAt,user.id,input.baseRevision).run();
-    if (!result.meta.changes) throw new HTTPError(409, 'Settings changed on another Mac. Choose which version to keep.');
+      : await env.DB.prepare(`UPDATE settings SET yaml=?,revision=revision+1,updated_at=?
+          WHERE user_id=? AND revision=? AND (yaml NOT GLOB 'rota-e2ee-settings-v1:*' OR ? GLOB 'rota-e2ee-settings-v1:*')`)
+          .bind(input.yaml,updatedAt,user.id,input.baseRevision,input.yaml).run();
+    if (!result.meta.changes) throw new HTTPError(409, 'Settings changed or require encrypted sync. Update Rotagivan and retry.');
     return json({ revision: input.baseRevision + 1, updatedAt });
   }
   throw new HTTPError(404, 'Not found.');

@@ -217,7 +217,9 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
 for test in ManualSyncTests CredentialLifecycleTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \
-  Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift "Rotagivan/Tests/$test.swift" \
+  Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift \
+  Rotagivan/EncryptedSettingsCore.swift Rotagivan/EncryptedPreferences.swift Rotagivan/EncryptedAutoSync.swift \
+  Rotagivan/SyncConfigurationCodec.swift Rotagivan/SyncPreferenceWriter.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -framework Security \
   -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
@@ -226,7 +228,7 @@ done
 settings_sources=()
 while IFS= read -r source; do
   settings_sources+=("Rotagivan/$source")
-done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)" \\/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
+done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)".*/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
 for test in ReleaseSettingsTests TemporaryIntentionUISmoke HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \

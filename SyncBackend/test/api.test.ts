@@ -60,6 +60,15 @@ it('rejects stale or racing writes without overwriting data', async () => {
   expect((await (await call('settings','GET',undefined,a.token)).json()).yaml).toBe(value.yaml);
   expect((await call('settings','PUT',{yaml:'next',baseRevision:1},a.token)).status).toBe(200);
 });
+it('prevents old clients from downgrading encrypted settings to plaintext', async () => {
+  const a = await register();
+  const first = 'rota-e2ee-settings-v1:opaque-first';
+  expect((await call('settings','PUT',{yaml:'legacy settings',baseRevision:0},a.token)).status).toBe(200);
+  expect((await call('settings','PUT',{yaml:first,baseRevision:1},a.token)).status).toBe(200);
+  expect((await call('settings','PUT',{yaml:'plaintext downgrade',baseRevision:2},a.token)).status).toBe(409);
+  expect(await (await call('settings','GET',undefined,a.token)).json()).toMatchObject({yaml:first,revision:2});
+  expect((await call('settings','PUT',{yaml:'rota-e2ee-settings-v1:opaque-next',baseRevision:2},a.token)).status).toBe(200);
+});
 it('revokes sessions at logout and expiry', async () => {
   const a = await register();
   expect((await call('logout','POST',{},a.token)).status).toBe(200);

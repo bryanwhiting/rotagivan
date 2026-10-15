@@ -1690,9 +1690,44 @@ struct ExplorerSlotDrag {
 }
 
 enum AppVersion {
-    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
-    static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—" }
-    static var display: String { "v\(version) (\(build))" }
+    struct Metadata {
+        let version: String
+        let build: String
+        let commit: String?
+        let dirty: Bool?
+        let inputSHA256: String?
+        let builtAtUTC: String?
+
+        init(info: [String: Any]) {
+            version = info["CFBundleShortVersionString"] as? String ?? "Development"
+            build = info["CFBundleVersion"] as? String ?? "—"
+            let hash = (info["RotagivanGitCommit"] as? String ?? "").lowercased()
+            commit = [40, 64].contains(hash.count) && hash.allSatisfy { "0123456789abcdef".contains($0) } ? hash : nil
+            dirty = info["RotagivanGitDirty"] as? Bool
+            inputSHA256 = info["RotagivanSourceInputSHA256"] as? String
+            builtAtUTC = info["RotagivanBuildDateUTC"] as? String
+        }
+
+        var versionLabel: String {
+            let suffix = dirty == true ? "-dirty" : (commit != nil && dirty == nil ? "-unknown" : "")
+            return "v\(version)-\(commit.map { String($0.prefix(4)) } ?? "unknown")\(suffix)"
+        }
+        var display: String { "\(versionLabel) (\(build))" }
+        var buildDetails: String {
+            let state: String
+            if commit == nil || dirty == nil { state = "Unknown source state" }
+            else if dirty == true { state = "Dirty: uncommitted build inputs; commit identifies the base revision" }
+            else { state = "Clean: build inputs match the commit" }
+            return "Git commit: \(commit ?? "unknown")\n\(state)\nBuild inputs SHA-256: \(inputSHA256 ?? "unknown")\nBuilt at UTC: \(builtAtUTC ?? "unknown")"
+        }
+    }
+
+    static let metadata = Metadata(info: Bundle.main.infoDictionary ?? [:])
+    static var version: String { metadata.version }
+    static var build: String { metadata.build }
+    static var versionLabel: String { metadata.versionLabel }
+    static var display: String { metadata.display }
+    static var buildDetails: String { metadata.buildDetails }
 }
 
 /// User-facing settings are always 0...100. MotionProfile keeps the values

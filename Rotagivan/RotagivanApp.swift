@@ -70,6 +70,11 @@ struct RotagivanApp: App {
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 940, height: 740)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Rotagivan") { showRotaAboutPanel() }
+            }
+        }
 
         MenuBarExtra {
             NavigatorPanel(store: store, hid: hid)
@@ -149,6 +154,9 @@ struct NavigatorPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Rotagivan").font(.system(size: 14, weight: .semibold, design: .rounded))
                     Text(AppVersion.display).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .help(AppVersion.buildDetails)
+                        .accessibilityIdentifier("rota-version")
                 }
                 Spacer()
                 HStack(spacing: 5) {
@@ -230,6 +238,7 @@ struct NavigatorPanel: View {
                     openWindow(id: "settings")
                     NSApp.activate(ignoringOtherApps: true)
                 }.buttonStyle(.link)
+                Button("About…") { showRotaAboutPanel() }.buttonStyle(.link)
                 Spacer()
                 if store.settings.enabled {
                     Button("Reconnect") { trusted = AXIsProcessTrusted(); hid.stop(); hid.start() }
@@ -286,7 +295,9 @@ struct RotagivanMenuBarLabel: View {
         HStack(spacing: 4) {
             Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
                 .accessibilityLabel("Rotagivan — \(store.activeProfileName) layer")
-            Text(AppVersion.version)
+            Text(AppVersion.versionLabel)
+                .help(AppVersion.buildDetails)
+                .accessibilityIdentifier("rota-menu-version")
         }
         .onReceive(NotificationCenter.default.publisher(for: .openHUDSettingsRequested)) { _ in
             openWindow(id: "settings")
@@ -320,4 +331,14 @@ final class CloneDelegate: NSObject, NSApplicationDelegate {
         VoiceApplicationIndex.shared.stop()
         onQuit?()
     }
+}
+
+@MainActor
+func showRotaAboutPanel() {
+    NSApp.orderFrontStandardAboutPanel(options: [
+        .applicationVersion: AppVersion.versionLabel,
+        .version: AppVersion.build,
+        .credits: NSAttributedString(string: AppVersion.buildDetails)
+    ])
+    NSApp.activate(ignoringOtherApps: true)
 }

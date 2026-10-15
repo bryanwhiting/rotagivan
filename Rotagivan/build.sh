@@ -13,9 +13,87 @@ security find-identity -v -p codesigning | grep -Fq "$signing_identity" || {
   exit 1
 }
 
+sources=(
+  "$script_dir/Models.swift"
+  "$script_dir/HotkeyOrganizer.swift"
+  "$script_dir/ActionTableRow.swift"
+  "$script_dir/ActionCatalogSnapshot.swift"
+  "$script_dir/HotkeyOrganizerView.swift"
+  "$script_dir/ApplicationCommandEditor.swift"
+  "$script_dir/AppOverrides.swift"
+  "$script_dir/AppOverridesView.swift"
+  "$script_dir/AppConfiguration.swift"
+  "$script_dir/ConfigurationSettingsView.swift"
+  "$script_dir/CredentialWorker.swift"
+  "$script_dir/VaultCrypto.swift"
+  "$script_dir/CredentialVault.swift"
+  "$script_dir/CredentialVaultView.swift"
+  "$script_dir/SyncStorage.swift"
+  "$script_dir/SettingsSync.swift"
+  "$script_dir/SyncSettingsView.swift"
+  "$script_dir/CursorResponse.swift"
+  "$script_dir/ScrollResponse.swift"
+  "$script_dir/ScrollCurveEditor.swift"
+  "$script_dir/MotionCurveEditor.swift"
+  "$script_dir/TrackpadReport.swift"
+  "$script_dir/TrackpadInputRouting.swift"
+  "$script_dir/ExplorerPointerLock.swift"
+  "$script_dir/AppleTrackpadInput.swift"
+  "$script_dir/TrackpadDistance.swift"
+  "$script_dir/TrackpadDistanceControl.swift"
+  "$script_dir/EventPoster.swift"
+  "$script_dir/MacroPlayback.swift"
+  "$script_dir/AppExplorerSelection.swift"
+  "$script_dir/ExplorerApplicationCatalog.swift"
+  "$script_dir/ApplicationIndex.swift"
+  "$script_dir/ApplicationIndexObservation.swift"
+  "$script_dir/BrowserBookmarks.swift"
+  "$script_dir/BrowserURLDispatcher.swift"
+  "$script_dir/ExplorerDestinationPicker.swift"
+  "$script_dir/WebsiteFavicon.swift"
+  "$script_dir/WindowTiling.swift"
+  "$script_dir/ExplorerAppearance.swift"
+  "$script_dir/MediaControls.swift"
+  "$script_dir/ActionPicker.swift"
+  "$script_dir/BindingEditor.swift"
+  "$script_dir/HUDLayerHotkeyEditor.swift"
+  "$script_dir/VoiceActions.swift"
+  "$script_dir/TemporaryIntention.swift"
+  "$script_dir/VoiceMicrophoneAdmission.swift"
+  "$script_dir/LocalIntentionSpeech.swift"
+  "$script_dir/NoteDictationSession.swift"
+  "$script_dir/TemporaryIntentionView.swift"
+  "$script_dir/VoiceRecognition.swift"
+  "$script_dir/OpenAIRealtime.swift"
+  "$script_dir/LauncherActions.swift"
+  "$script_dir/AppExplorer.swift"
+  "$script_dir/AppExplorerSettingsView.swift"
+  "$script_dir/GestureEngine.swift"
+  "$script_dir/DoubleTapSwipe.swift"
+  "$script_dir/SwipeDirectionClassification.swift"
+  "$script_dir/DoubleTapSwipeEditor.swift"
+  "$script_dir/LayerActionAssignmentsEditor.swift"
+  "$script_dir/GestureCalibration.swift"
+  "$script_dir/GestureCalibrationView.swift"
+  "$script_dir/HIDManager.swift"
+  "$script_dir/HotKeyManager.swift"
+  "$script_dir/CalibrationSettingsView.swift"
+  "$script_dir/AccessibilitySetup.swift"
+  "$script_dir/ContentView.swift"
+  "$script_dir/ShortcutRecorder.swift"
+  "$script_dir/RotagivanApp.swift"
+)
+
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 yaml_dir="$script_dir/../YAML"
+python3 "$script_dir/build-provenance.py" --repo "$script_dir/.." \
+  --template "$script_dir/Info.plist" --output "$app_dir/Contents/Info.plist" \
+  --manifest "$app_dir/Contents/Resources/BuildProvenance.json" -- \
+  "${sources[@]}" "$script_dir/build.sh" "$script_dir/build-provenance.py" \
+  "$script_dir/DrawIcon.swift" "$script_dir/DefaultConfiguration.yaml" \
+  "$script_dir/RustSearch/search.rs" "$yaml_dir/Package.swift" "$yaml_dir/Package.resolved" \
+  "$yaml_dir/Sources" "$yaml_dir/LibYAML-LICENSE.txt"
 swift build --package-path "$yaml_dir" -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path "$yaml_dir" -c release --show-bin-path)
 install -m 644 "$script_dir/DefaultConfiguration.yaml" "$app_dir/Contents/Resources/DefaultConfiguration.yaml"
@@ -25,7 +103,6 @@ xcrun swift "$script_dir/DrawIcon.swift" "$build_dir/Rotagivan.iconset"
 iconutil -c icns "$build_dir/Rotagivan.iconset" -o "$app_dir/Contents/Resources/Rotagivan.icns"
 rustc --edition 2021 -O --crate-type cdylib "$script_dir/RustSearch/search.rs" -o "$app_dir/Contents/Resources/librota_search.dylib"
 codesign --force --sign "$signing_identity" "$app_dir/Contents/Resources/librota_search.dylib"
-cp "$script_dir/Info.plist" "$app_dir/Contents/Info.plist"
 xcrun swiftc -O -parse-as-library \
   -I "$yaml_build/Modules" -I "$yaml_build" -L "$yaml_build" -lConfigurationYAML \
   -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
@@ -38,75 +115,10 @@ xcrun swiftc -O -parse-as-library \
   -framework IOKit \
   -framework ServiceManagement \
   -framework Security \
-  "$script_dir/Models.swift" \
-  "$script_dir/HotkeyOrganizer.swift" \
-  "$script_dir/ActionTableRow.swift" \
-  "$script_dir/ActionCatalogSnapshot.swift" \
-  "$script_dir/HotkeyOrganizerView.swift" \
-  "$script_dir/ApplicationCommandEditor.swift" \
-  "$script_dir/AppOverrides.swift" \
-  "$script_dir/AppOverridesView.swift" \
-  "$script_dir/AppConfiguration.swift" \
-  "$script_dir/ConfigurationSettingsView.swift" \
-  "$script_dir/CredentialWorker.swift" \
-  "$script_dir/VaultCrypto.swift" \
-  "$script_dir/CredentialVault.swift" \
-  "$script_dir/CredentialVaultView.swift" \
-  "$script_dir/SyncStorage.swift" \
-  "$script_dir/SettingsSync.swift" \
-  "$script_dir/SyncSettingsView.swift" \
-  "$script_dir/CursorResponse.swift" \
-  "$script_dir/ScrollResponse.swift" \
-  "$script_dir/ScrollCurveEditor.swift" \
-  "$script_dir/MotionCurveEditor.swift" \
-  "$script_dir/TrackpadReport.swift" \
-  "$script_dir/TrackpadInputRouting.swift" \
-  "$script_dir/ExplorerPointerLock.swift" \
-  "$script_dir/AppleTrackpadInput.swift" \
-  "$script_dir/TrackpadDistance.swift" \
-  "$script_dir/TrackpadDistanceControl.swift" \
-  "$script_dir/EventPoster.swift" \
-  "$script_dir/MacroPlayback.swift" \
-  "$script_dir/AppExplorerSelection.swift" \
-  "$script_dir/ExplorerApplicationCatalog.swift" \
-  "$script_dir/ApplicationIndex.swift" \
-  "$script_dir/ApplicationIndexObservation.swift" \
-  "$script_dir/BrowserBookmarks.swift" \
-  "$script_dir/BrowserURLDispatcher.swift" \
-  "$script_dir/ExplorerDestinationPicker.swift" \
-  "$script_dir/WebsiteFavicon.swift" \
-  "$script_dir/WindowTiling.swift" \
-  "$script_dir/ExplorerAppearance.swift" \
-  "$script_dir/MediaControls.swift" \
-  "$script_dir/ActionPicker.swift" \
-  "$script_dir/BindingEditor.swift" \
-  "$script_dir/HUDLayerHotkeyEditor.swift" \
-  "$script_dir/VoiceActions.swift" \
-  "$script_dir/TemporaryIntention.swift" \
-  "$script_dir/VoiceMicrophoneAdmission.swift" \
-  "$script_dir/LocalIntentionSpeech.swift" \
-  "$script_dir/NoteDictationSession.swift" \
-  "$script_dir/TemporaryIntentionView.swift" \
-  "$script_dir/VoiceRecognition.swift" \
-  "$script_dir/OpenAIRealtime.swift" \
-  "$script_dir/LauncherActions.swift" \
-  "$script_dir/AppExplorer.swift" \
-  "$script_dir/AppExplorerSettingsView.swift" \
-  "$script_dir/GestureEngine.swift" \
-  "$script_dir/DoubleTapSwipe.swift" \
-  "$script_dir/SwipeDirectionClassification.swift" \
-  "$script_dir/DoubleTapSwipeEditor.swift" \
-  "$script_dir/LayerActionAssignmentsEditor.swift" \
-  "$script_dir/GestureCalibration.swift" \
-  "$script_dir/GestureCalibrationView.swift" \
-  "$script_dir/HIDManager.swift" \
-  "$script_dir/HotKeyManager.swift" \
-  "$script_dir/CalibrationSettingsView.swift" \
-  "$script_dir/AccessibilitySetup.swift" \
-  "$script_dir/ContentView.swift" \
-  "$script_dir/ShortcutRecorder.swift" \
-  "$script_dir/RotagivanApp.swift" \
+  "${sources[@]}" \
   -o "$app_dir/Contents/MacOS/Rotagivan"
+python3 "$script_dir/build-provenance.py" --repo "$script_dir/.." \
+  --manifest "$app_dir/Contents/Resources/BuildProvenance.json" --verify
 codesign --force --sign "$signing_identity" \
   --requirements "=designated => identifier \"local.rotagivan\" and certificate leaf = H\"$signing_identity\"" "$app_dir"
 codesign --verify --deep --strict "$app_dir"

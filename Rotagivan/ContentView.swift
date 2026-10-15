@@ -391,6 +391,8 @@ struct ContentView: View {
             Text("\(store.activeConfigurationName)  /  \(store.activeProfileName)")
             Spacer()
             Text(AppVersion.display)
+                .help(AppVersion.buildDetails)
+                .accessibilityIdentifier("rota-settings-version")
             Text("Changes save automatically")
         }
         .font(.system(size: 11)).foregroundStyle(.secondary)

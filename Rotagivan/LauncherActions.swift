@@ -63,9 +63,22 @@ struct LauncherAction: Identifiable, Hashable, Sendable {
     static func search(_ text: String, actions: [Self], engine: RustApplicationSearch = .shared) -> [Self] {
         let query = query(text)
         guard !query.isEmpty else { return [] }
-        return index.search(query, actions: actions, engine: engine)
+        return LauncherUsageOrder.apply(index.search(query, actions: actions, engine: engine), query: query)
     }
 
+}
+
+/// Optional local-only personalization. Identity until the activity feature starts.
+enum LauncherUsageOrder {
+    private static let lock = NSLock()
+    private static var order: (([LauncherAction], String) -> [LauncherAction])?
+    static func install(_ value: @escaping ([LauncherAction], String) -> [LauncherAction]) {
+        lock.lock(); defer { lock.unlock() }; order = value
+    }
+    static func apply(_ matches: [LauncherAction], query: String) -> [LauncherAction] {
+        lock.lock(); let callback = order; lock.unlock()
+        return callback?(matches, query) ?? matches
+    }
 }
 
 /// Only public AX attributes/actions from the captured frontmost app. No permission

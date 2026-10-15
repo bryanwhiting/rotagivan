@@ -9,7 +9,7 @@ import AppKit
   try FileManager.default.createDirectory(at:projects, withIntermediateDirectories:true)
   defer { try? FileManager.default.removeItem(at:folderFixture) }
   let foundFolders = ExplorerFolderCatalog.scan(home:folderFixture)
-  precondition(foundFolders.contains { $0.url == projects }, "Visible child folders should be indexed")
+  precondition(foundFolders.contains { $0.url == projects.standardizedFileURL }, "Visible child folders should be indexed")
   let matchingFolders = LauncherAction.search("client projects", actions:LauncherAction.folders(foundFolders))
   precondition(matchingFolders.first?.name == "Client Projects", "Folder names should be searchable")
   let applicationFolders = LauncherAction.search("Applications", actions:LauncherAction.folders(foundFolders))

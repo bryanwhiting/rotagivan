@@ -1,6 +1,22 @@
 import AppKit
 import CoreGraphics
 
+/// Counts only commands Rota dispatches, never general typing. Collection is
+/// disabled until this Mac's Screen Time consent enables the listener.
+enum RotaActionUsage {
+    static var enabled = false
+    private static var depth: Int {
+        get { Thread.current.threadDictionary["rota.usage.dispatchDepth"] as? Int ?? 0 }
+        set { Thread.current.threadDictionary["rota.usage.dispatchDepth"] = newValue }
+    }
+    static func record(_ action: BindingAction) {
+        guard enabled, depth == 0, action.isValid else { return }
+        NotificationCenter.default.post(name: .init("local.rotagivan.action.invoked"), object: action)
+    }
+    static func begin(_ action: BindingAction) { record(action); depth += 1 }
+    static func end() { depth = max(0, depth - 1) }
+}
+
 protocol GestureEventPosting: AnyObject {
     var dragging: Bool { get }
     func performTap(_ action: TapAction, shortcut: RecordedShortcut?)
@@ -100,6 +116,7 @@ final class EventPoster: GestureEventPosting {
 
     func performMacro(_ macro: NamedHotkey) {
         guard !dragging, macro.isValid else { return }
+        RotaActionUsage.record(.macro(macro))
         clickSequence.reset()
         postSequence(macro.resolvedSequence, delay: Double(macro.resolvedDelay) / 1000)
     }
@@ -113,6 +130,8 @@ final class EventPoster: GestureEventPosting {
 
     func performTap(_ action: TapAction, shortcut: RecordedShortcut? = nil) {
         guard !dragging else { return }
+        if action == .shortcut, let shortcut, shortcut.isPhysicalShortcut { RotaActionUsage.record(.from(shortcut: shortcut)) }
+        else if action != .none && action != .shortcut { RotaActionUsage.record(.tap(action)) }
         if ![TapAction.leftClick, .doubleLeftClick, .tripleLeftClick, .rightClick].contains(action) {
             clickSequence.reset()
         }

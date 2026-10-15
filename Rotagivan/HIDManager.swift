@@ -224,6 +224,8 @@ final class NavigatorHIDManager: ObservableObject {
     /// accidentally being posted as physical keystrokes.
     func executeBindingAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard store.settings.enabled, action.isValid, !calibrationCapturing else { return }
+        RotaActionUsage.begin(action)
+        defer { RotaActionUsage.end() }
         switch action.kind {
         case .keystroke:
             guard let shortcut = action.shortcut else { return }

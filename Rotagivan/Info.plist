@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.204</string>
+	<string>1.1.205</string>
 	<key>CFBundleVersion</key>
-	<string>206</string>
+	<string>207</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
@@ -31,7 +31,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Rotagivan uses Apple's on-device speech recognition to draft an editable temporary intention. Audio and recognized text stay on this Mac.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Rotagivan controls Chrome to reuse and focus an existing bookmark tab instead of opening duplicates.</string>
+	<string>Rotagivan controls Chrome to reuse existing bookmark tabs and, only if you opt in to Screen Time website tracking, read the active public tab’s domain for local-only usage insights.</string>
 	<key>NSInputMonitoringUsageDescription</key>
 	<string>Rotagivan reads ZSA Navigator touch reports and, when enabled, Apple trackpad touches for gesture actions. Pointer movement pauses while an Apple-controlled App Explorer or Window Manager is open; normal movement resumes when it closes or enters editing.</string>
 	<key>RotagivanSyncURL</key>

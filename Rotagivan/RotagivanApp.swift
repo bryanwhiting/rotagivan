@@ -32,6 +32,13 @@ struct RotagivanApp: App {
         // do not depend on either the settings window or menu being presented.
         DispatchQueue.main.async {
             VoiceApplicationIndex.shared.start()
+            LocalUsageTracker.shared.actionCatalogue = {
+                VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications,
+                    includeInactiveApplications: true).map {
+                    UsageActionTotal(id: VoiceRegisteredAction.id(for: $0.action), name: LocalUsageTracker.actionName($0.action), count: 0, lastUsed: nil)
+                }
+            }
+            LocalUsageTracker.shared.start()
             sync.start()
             // Explicit local maintenance action, never a startup sync default.
             // Emits only a non-secret receipt; private material remains Keychain-only.
@@ -76,6 +83,12 @@ struct RotagivanApp: App {
             }
         }
 
+        WindowGroup("Activity", id: "activity") {
+            LocalUsageView()
+        }
+        .defaultSize(width: 740, height: 700)
+        .windowResizability(.contentMinSize)
+
         MenuBarExtra {
             NavigatorPanel(store: store, hid: hid)
         } label: {
@@ -90,7 +103,10 @@ struct RotagivanApp: App {
 
     private func start() {
         delegate.onQuit = { hid.stop() }
-        delegate.beforeQuit = { await sync.prepareToQuit() }
+        delegate.beforeQuit = {
+            await LocalUsageTracker.shared.prepareToQuit()
+            await sync.prepareToQuit()
+        }
         sync.start()
         hotKeys.onProfileChanged = { id in store.setActiveProfile(id) }
         hotKeys.profileName = { id in store.profiles.first { $0.id == id }?.name }
@@ -164,6 +180,8 @@ struct NavigatorPanel: View {
                     Text(status).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                 }.padding(7).background(.quaternary.opacity(0.4), in: Capsule())
             }
+            Divider()
+            LocalUsageMenuSection()
             Divider()
             if !trusted {
                 HStack(spacing: 8) {

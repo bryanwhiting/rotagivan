@@ -458,10 +458,12 @@ extension AppExplorerPresenting {
     private func performBoundAction(_ action: BindingAction, fromKeyboard: Bool = false) {
         guard action.isValid, contextIsValid?() != false else { return }
         if action.kind == .command, action.command == .activateVoiceMode {
+            RotaActionUsage.record(action)
             activateVoiceMode()
             return
         }
         if action.kind == .hudNavigation, let direction = action.hudNavigation {
+            RotaActionUsage.record(action)
             _ = navigateHUD(direction)
             return
         }
@@ -591,6 +593,7 @@ extension AppExplorerPresenting {
             Task { await VoiceApplicationIndex.shared.refresh(force: true) }
             return
         }
+        RotaActionUsage.record(.openApp(bundleID: app.bundleID, name: app.name))
         dismiss()
         let generation = selectionGeneration
         DispatchQueue.main.async { [weak self] in
@@ -1353,6 +1356,8 @@ extension AppExplorerPresenting {
                 MainActor.assumeIsolated {
                     guard let self, self.selectionGeneration == generation,
                           self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
+                    RotaActionUsage.begin(.command(command))
+                    defer { RotaActionUsage.end() }
                     self.performMacCommand(command)
                 }
             }
@@ -1360,6 +1365,7 @@ extension AppExplorerPresenting {
         }
         if let command = entry?.command { performWindowCommand(command); return }
         if let media = entry?.mediaAction {
+            RotaActionUsage.record(.media(media))
             performMedia(media)
             model.selected = nil
             input = makeSelection(waitingForLift: contactIsDown)
@@ -1373,6 +1379,7 @@ extension AppExplorerPresenting {
             return
         }
         if let tile = entry?.tilingDirection {
+            RotaActionUsage.record(.windowPlacement(ExplorerWindowPlacement(direction: tile, layout: entry?.tilingLayout ?? model.windowLayout)))
             if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
             let error = tilingTarget.map { $0.apply(tile, entry?.tilingLayout ?? model.windowLayout) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
             if let error {
@@ -1432,10 +1439,14 @@ extension AppExplorerPresenting {
             return
         }
         if entry.isWebURL {
-            if let url = entry.url, AppExplorerFavorite.webURL(url.absoluteString) != nil { _ = openWebURL(url) }
+            if let url = entry.url, AppExplorerFavorite.webURL(url.absoluteString) != nil {
+                RotaActionUsage.record(.openURL(url.absoluteString))
+                _ = openWebURL(url)
+            }
             return
         }
         guard let identifier = entry.bundleID else { return }
+        RotaActionUsage.record(.openApp(bundleID: identifier, name: entry.name))
         // Prefer the actual running bundle when multiple installations exist.
         let running = workspace.runningApplications.first { $0.bundleIdentifier == identifier && !$0.isTerminated }
         guard let url = running?.bundleURL ?? entry.url ?? applicationURL(identifier) else { return }
@@ -1474,6 +1485,7 @@ extension AppExplorerPresenting {
 
     private func performWindowCommand(_ command: AppExplorerAction) {
         guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        RotaActionUsage.record(.command(command))
         if command == .activateVoiceMode { activateVoiceMode(); return }
         if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
         guard let target = tilingTarget else {
@@ -1514,6 +1526,7 @@ extension AppExplorerPresenting {
             beginVoiceMode(); return
         }
         guard model.showingMediaControls || mappedBuiltIn == .mediaControls else { goBack(); return }
+        RotaActionUsage.record(.media(.playPause))
         performMedia(.playPause)
         model.selected = nil
         input = makeSelection(waitingForLift: contactIsDown)

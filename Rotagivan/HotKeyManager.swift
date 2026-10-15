@@ -150,6 +150,16 @@ final class HotKeyManager {
     /// Gives a visible HUD first refusal on physical Carbon hotkeys.
     var onHUDKey: ((UInt16, UInt64, Bool) -> Bool)?
     private var registeredKeys: [String: (UInt16, UInt64)] = [:]
+    private var usagePressed = Set<String>()
+    private func recordUsageHotkey(signature: OSType, id: UInt32, down: Bool) {
+        let identity = hotkeyIdentity(signature, id)
+        if !down { usagePressed.remove(identity); return }
+        guard !recording, let key = registeredKeys[identity], usagePressed.insert(identity).inserted else { return }
+        let special: [UInt16: String] = [49: "Space", 36: "Return", 48: "Tab", 53: "Escape"]
+        let label = special[key.0] ?? ShortcutSettings.keys.first { $0.1 == UInt32(key.0) }?.0 ?? "Key \(key.0)"
+        NotificationCenter.default.post(name: .init("local.rotagivan.hotkey.invoked"),
+            object: RecordedShortcut(keyCode: key.0, modifiers: key.1, keyLabel: label))
+    }
     private var profileKeyIdentities = Set<String>()
     private var interceptedKeys: [String: (UInt16, UInt64)] = [:]
     private var cancelledReleases = Set<String>()
@@ -317,6 +327,7 @@ final class HotKeyManager {
             let owner = Unmanaged<HotKeyManager>.fromOpaque(context).takeUnretainedValue()
             let down = GetEventKind(event) == UInt32(kEventHotKeyPressed)
             DispatchQueue.main.async {
+                owner.recordUsageHotkey(signature: id.signature, id: id.id, down: down)
                 if owner.routeHUDHotkey(signature: id.signature, id: id.id, down: down) { return }
                 if id.signature == HotKeyManager.fourCC("RHUD") {
                     if down, !owner.recording, owner.hudPressed.insert(id.id).inserted,

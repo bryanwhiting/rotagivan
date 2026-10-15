@@ -8,27 +8,29 @@ enum WindowTile {
     }
 
     // Top-left origin, matching Accessibility's global desktop coordinates.
-    static func frame(_ direction: SwipeDirection, in area: CGRect, layout: ExplorerWindowLayout = .halves) -> CGRect {
-        if layout != .halves {
-            let width = floor(area.width * layout.fraction), height = floor(area.height * layout.fraction)
-            let left = [.left, .topLeft, .bottomLeft].contains(direction)
-            let right = [.right, .topRight, .bottomRight].contains(direction)
-            let top = [.up, .topLeft, .topRight].contains(direction)
-            let bottom = [.down, .bottomLeft, .bottomRight].contains(direction)
-            return CGRect(x: right ? area.maxX - width : area.minX, y: bottom ? area.maxY - height : area.minY,
-                width: left || right ? width : area.width, height: top || bottom ? height : area.height)
-        }
-        let halfWidth = floor(area.width / 2), halfHeight = floor(area.height / 2)
-        switch direction {
-        case .up: return CGRect(x: area.minX, y: area.minY, width: area.width, height: halfHeight)
-        case .left: return CGRect(x: area.minX, y: area.minY, width: halfWidth, height: area.height)
-        case .right: return CGRect(x: area.minX + halfWidth, y: area.minY, width: area.width - halfWidth, height: area.height)
-        case .down: return CGRect(x: area.minX, y: area.minY + halfHeight, width: area.width, height: area.height - halfHeight)
-        case .topLeft: return CGRect(x: area.minX, y: area.minY, width: halfWidth, height: halfHeight)
-        case .topRight: return CGRect(x: area.minX + halfWidth, y: area.minY, width: area.width - halfWidth, height: halfHeight)
-        case .bottomLeft: return CGRect(x: area.minX, y: area.minY + halfHeight, width: halfWidth, height: area.height - halfHeight)
-        case .bottomRight: return CGRect(x: area.minX + halfWidth, y: area.minY + halfHeight, width: area.width - halfWidth, height: area.height - halfHeight)
-        }
+    static func frame(_ direction: SwipeDirection, in area: CGRect, layout: ExplorerWindowLayout = .halves,
+                      backingScale: CGFloat = 1) -> CGRect {
+        guard valid(area) else { return .null }
+        let scale = backingScale.isFinite && backingScale > 0 ? backingScale : 1
+        let denominator: CGFloat = layout == .fourths ? 4 : (layout == .halves ? 2 : 3)
+        let numerator: CGFloat = layout == .twoThirds ? 2 : 1
+        func boundary(_ length: CGFloat, _ units: CGFloat) -> CGFloat { floor(length * scale * units / denominator) / scale }
+        let left = [.left, .topLeft, .bottomLeft].contains(direction)
+        let right = [.right, .topRight, .bottomRight].contains(direction)
+        let top = [.up, .topLeft, .topRight].contains(direction)
+        let bottom = [.down, .bottomLeft, .bottomRight].contains(direction)
+        // Derive both sides from the same partition boundaries. The trailing
+        // tile owns the remainder, so complementary fractions never leave gaps.
+        let x0 = right ? area.minX + boundary(area.width, denominator - numerator) : area.minX
+        let x1 = left ? area.minX + boundary(area.width, numerator) : area.maxX
+        let y0 = bottom ? area.minY + boundary(area.height, denominator - numerator) : area.minY
+        let y1 = top ? area.minY + boundary(area.height, numerator) : area.maxY
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    static func valid(_ rect: CGRect) -> Bool {
+        !rect.isNull && !rect.isInfinite && rect.minX.isFinite && rect.minY.isFinite &&
+        rect.maxX.isFinite && rect.maxY.isFinite && rect.width > 0 && rect.height > 0
     }
 
     static func accessibilityFrame(_ frame: CGRect, primaryTop: CGFloat) -> CGRect {
@@ -36,10 +38,131 @@ enum WindowTile {
     }
 
     static func screenIndex(for window: CGRect, frames: [CGRect]) -> Int? {
-        frames.indices.max { a, b in
-            let lhs = window.intersection(frames[a]), rhs = window.intersection(frames[b])
-            return (lhs.isNull ? 0 : lhs.width * lhs.height) < (rhs.isNull ? 0 : rhs.width * rhs.height)
+        guard valid(window) else { return nil }
+        var best: Int?, largest: CGFloat = -1, nearest: CGFloat = .infinity
+        for index in frames.indices where valid(frames[index]) {
+            let screen = frames[index], overlap = window.intersection(screen)
+            let area = overlap.isNull ? 0 : overlap.width * overlap.height
+            let dx = max(screen.minX - window.midX, 0, window.midX - screen.maxX)
+            let dy = max(screen.minY - window.midY, 0, window.midY - screen.maxY)
+            let distance = dx * dx + dy * dy
+            if area > largest || (area == largest && distance < nearest) {
+                best = index; largest = area; nearest = distance
+            }
         }
+        return best
+    }
+
+    /// Re-anchor the size the app actually accepts, not the size we hoped for.
+    /// Independent implementation informed by Rectangle's bounds/alignment ideas.
+    static func aligned(_ size: CGSize, requested: CGRect, in area: CGRect, direction: SwipeDirection?) -> CGRect {
+        guard valid(area), valid(requested), size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else { return .null }
+        var x = requested.midX - size.width / 2, y = requested.midY - size.height / 2
+        if let direction {
+            if [.left, .topLeft, .bottomLeft].contains(direction) { x = requested.minX }
+            if [.right, .topRight, .bottomRight].contains(direction) { x = requested.maxX - size.width }
+            if [.up, .topLeft, .topRight].contains(direction) { y = requested.minY }
+            if [.down, .bottomLeft, .bottomRight].contains(direction) { y = requested.maxY - size.height }
+        }
+        // An oversized window cannot fit both edges. Keep its title bar and
+        // left edge reachable instead of pushing the whole window off-screen.
+        x = size.width > area.width ? area.minX : min(max(x, area.minX), area.maxX - size.width)
+        y = size.height > area.height ? area.minY : min(max(y, area.minY), area.maxY - size.height)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+}
+
+/// A testable, bounded settling pipeline. All read/write closures refer to the
+/// original AX window; focus loss cancels further writes rather than moving a
+/// newly active app. Geometry is in global AX points, never physical pixels.
+enum WindowPlacement {
+    struct Access {
+        var read: () -> CGRect?
+        var resize: (CGSize) -> Bool
+        var move: (CGPoint) -> Bool
+        var minimum: () -> CGSize? = { nil }
+        var isCurrent: () -> Bool = { true }
+        var pause: () -> Void = { Thread.sleep(forTimeInterval: 0.025) }
+    }
+    enum Outcome: Equatable {
+        case exact, constrained, failed, unavailable, oversized, cancelled
+        var error: String? {
+            switch self {
+            case .exact, .constrained: return nil
+            case .failed: return "The app did not accept the window placement. Try another window or a larger tile."
+            case .unavailable: return "The original window is no longer available."
+            case .oversized: return "This window is larger than the display allows. Its title bar was kept on-screen."
+            case .cancelled: return "The original app is no longer active. Reopen the HUD over that window."
+            }
+        }
+    }
+    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat = 2) -> Bool {
+        abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance &&
+        abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+    }
+    static func resizeFirst(current: CGRect, target: CGRect, area: CGRect) -> Bool {
+        guard area.contains(current) else { return true }
+        func overflow(_ rect: CGRect) -> CGFloat {
+            max(0, area.minX - rect.minX) + max(0, rect.maxX - area.maxX) +
+            max(0, area.minY - rect.minY) + max(0, rect.maxY - area.maxY)
+        }
+        return overflow(CGRect(origin: current.origin, size: target.size)) <=
+            overflow(CGRect(origin: target.origin, size: current.size))
+    }
+    static func apply(requested: CGRect, area: CGRect, direction: SwipeDirection?, resizable: Bool, access: Access) -> Outcome {
+        guard WindowTile.valid(requested), WindowTile.valid(area),
+              let initial = access.read(), WindowTile.valid(initial) else { return .unavailable }
+        guard access.isCurrent() else { return .cancelled }
+        if close(initial, requested) { return .exact }
+        var targetSize = requested.size
+        if let minimum = access.minimum(), minimum.width.isFinite, minimum.height.isFinite,
+           minimum.width >= 0, minimum.height >= 0 {
+            targetSize.width = max(targetSize.width, min(minimum.width, area.width))
+            targetSize.height = max(targetSize.height, min(minimum.height, area.height))
+        }
+        // Fixed-size windows are still movable. Do not resize an app that has
+        // explicitly declared AXSize read-only.
+        if !resizable { targetSize = initial.size }
+        let target = WindowTile.aligned(targetSize, requested: requested, in: area, direction: direction)
+        var previous: CGRect?
+        var acceptedResize = false
+        for attempt in 0..<4 {
+            guard access.isCurrent() else { return .cancelled }
+            guard let before = access.read(), WindowTile.valid(before) else { return .unavailable }
+            let sizeFirst = resizeFirst(current: before, target: target, area: area)
+            if resizable, sizeFirst { acceptedResize = access.resize(targetSize) || acceptedResize }
+            guard access.isCurrent() else { return .cancelled }
+            // A move can release a size restriction imposed by an old screen
+            // edge; resize once more at the destination, then read back.
+            guard let interim = access.read(), WindowTile.valid(interim) else { return .unavailable }
+            let movingSize = resizable ? CGSize(width: max(interim.width, targetSize.width),
+                height: max(interim.height, targetSize.height)) : interim.size
+            let moveTo = WindowTile.aligned(movingSize, requested: requested, in: area, direction: direction)
+            _ = access.move(moveTo.origin)
+            if resizable {
+                guard access.isCurrent() else { return .cancelled }
+                acceptedResize = access.resize(targetSize) || acceptedResize
+            }
+            access.pause()
+            guard access.isCurrent() else { return .cancelled }
+            guard let actual = access.read(), WindowTile.valid(actual) else { return .unavailable }
+            if close(actual, requested) { return .exact }
+            let settled = WindowTile.aligned(actual.size, requested: requested, in: area, direction: direction)
+            if !close(actual, settled) { _ = access.move(settled.origin) }
+            access.pause()
+            guard access.isCurrent() else { return .cancelled }
+            guard let final = access.read(), WindowTile.valid(final) else { return .unavailable }
+            if close(final, requested) { return .exact }
+            // Do not mistake a toolkit's asynchronous, old size for a minimum.
+            // Allow all settling passes before accepting a constrained result.
+            if attempt == 3, close(final, settled), let previous, close(final, previous) {
+                if final.width > area.width + 2 || final.height > area.height + 2 { return .oversized }
+                if !resizable || acceptedResize || !close(final, initial) { return .constrained }
+            }
+            previous = final
+        }
+        return .failed
     }
 }
 
@@ -116,7 +239,8 @@ enum WindowTile {
         guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.05)
-        guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        guard let value = attribute(app, kAXFocusedWindowAttribute) ?? attribute(app, kAXMainWindowAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let window = unsafeBitCast(value, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(window, 0.05)
         guard (attribute(window, kAXMinimizedAttribute) as? Bool) != true else { return nil }
@@ -127,7 +251,8 @@ enum WindowTile {
         guard AXIsProcessTrusted(), pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.2)
-        guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        guard let value = attribute(app, kAXFocusedWindowAttribute) ?? attribute(app, kAXMainWindowAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let window = unsafeBitCast(value, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(window, 0.2)
         var target = WindowTilingTarget { direction, layout in
@@ -135,46 +260,13 @@ enum WindowTile {
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return "The original app is no longer active. Reopen Explorer over that window." }
             if (attribute(window, "AXFullScreen") as? Bool) == true { return "Exit full screen before tiling this window." }
             if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { return "Restore the minimized window first." }
-            var movable: DarwinBoolean = false, resizable: DarwinBoolean = false
-            guard AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &movable) == .success,
-                  AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &resizable) == .success,
-                  movable.boolValue, resizable.boolValue else { return "This window does not support moving and resizing." }
             guard let current = frame(window), let primary = NSScreen.screens.first else { return "The original window is no longer available." }
             let screens = NSScreen.screens
             let frames = screens.map { WindowTile.accessibilityFrame($0.frame, primaryTop: primary.frame.maxY) }
             guard let index = WindowTile.screenIndex(for: current, frames: frames) else { return "No display is available." }
-            let area = WindowTile.accessibilityFrame(screens[index].visibleFrame, primaryTop: primary.frame.maxY)
-            let desired = WindowTile.frame(direction, in: area, layout: layout)
-            // Resize first so a large window can move into an edge/corner. Some
-            // apps apply AX size changes asynchronously and discard a position
-            // written in the same turn, so finish with position, verify the
-            // complete frame, and retry briefly when only the resize stuck.
-            var size = desired.size, point = desired.origin
-            guard let sizeValue = AXValueCreate(.cgSize, &size), let pointValue = AXValueCreate(.cgPoint, &point) else { return "Could not calculate the window placement." }
-            var setPosition = false, setSize = false
-            var actual: CGRect?
-            for attempt in 0..<4 {
-                let firstSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-                let firstPosition = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, pointValue)
-                let finalSize = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-                let finalPosition = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, pointValue)
-                setSize = setSize || firstSize == .success || finalSize == .success
-                setPosition = setPosition || firstPosition == .success || finalPosition == .success
-                Thread.sleep(forTimeInterval: 0.018)
-                actual = frame(window)
-                if let actual,
-                   abs(actual.minX - desired.minX) <= 8, abs(actual.minY - desired.minY) <= 8,
-                   abs(actual.width - desired.width) <= 8, abs(actual.height - desired.height) <= 8 {
-                    return nil
-                }
-                if attempt < 3 { Thread.sleep(forTimeInterval: 0.018) }
-            }
-            guard setPosition, setSize else { return "The app could not apply this layout. Try a larger tile or another window." }
-            guard let actual else { return "The original window is no longer available." }
-            if abs(actual.width - desired.width) > 8 || abs(actual.height - desired.height) > 8 {
-                return "This app limits its window size. Try a larger tile."
-            }
-            return "This app did not move the window to the requested position. Try again or use another window."
+            let area = WindowTile.accessibilityFrame(screens[index].visibleFrame.intersection(screens[index].frame), primaryTop: primary.frame.maxY)
+            let desired = WindowTile.frame(direction, in: area, layout: layout, backingScale: screens[index].backingScaleFactor)
+            return place(window, pid: pid, requested: desired, area: area, direction: direction)
         }
         target.isFullScreen = { (attribute(window, "AXFullScreen") as? Bool) == true }
         target.command = { command in
@@ -199,21 +291,41 @@ enum WindowTile {
                 let screens = NSScreen.screens
                 let frames = screens.map { WindowTile.accessibilityFrame($0.frame, primaryTop: primary.frame.maxY) }
                 guard let index = WindowTile.screenIndex(for: current, frames: frames) else { return "No display is available." }
-                let desired = WindowTile.accessibilityFrame(screens[index].visibleFrame, primaryTop: primary.frame.maxY)
-                var size = desired.size, point = desired.origin
-                guard let s = AXValueCreate(.cgSize, &size), let p = AXValueCreate(.cgPoint, &point) else { return "Could not calculate desktop bounds." }
-                _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, s)
-                let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, p)
-                let resized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, s)
-                guard moved == .success && resized == .success else { return "This app limits its window size or position." }
-                if let actual = frame(window), abs(actual.width - desired.width) > 8 || abs(actual.height - desired.height) > 8 {
-                    return "This app limits its window size; it could not fill the desktop."
-                }
-                return nil
+                let desired = WindowTile.accessibilityFrame(screens[index].visibleFrame.intersection(screens[index].frame), primaryTop: primary.frame.maxY)
+                return place(window, pid: pid, requested: desired, area: desired, direction: nil)
             default: return "Unsupported window command."
             }
         }
         return target
+    }
+
+    private static func place(_ window: AXUIElement, pid: pid_t, requested: CGRect, area: CGRect, direction: SwipeDirection?) -> String? {
+        if (attribute(window, "AXFullScreen") as? Bool) == true { return "Exit full screen before tiling this window." }
+        if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { return "Restore the minimized window first." }
+        guard (attribute(window, kAXRoleAttribute) as? String) == kAXWindowRole else { return "Select an application window before tiling." }
+        var movable: DarwinBoolean = false, resizable: DarwinBoolean = false
+        let moveStatus = AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &movable)
+        let sizeStatus = AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &resizable)
+        if moveStatus == .success, !movable.boolValue { return "This window does not support moving." }
+        let access = WindowPlacement.Access(read: { frame(window) }, resize: { proposed in
+            var size = proposed
+            guard let value = AXValueCreate(.cgSize, &size) else { return false }
+            return AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value) == .success
+        }, move: { proposed in
+            var point = proposed
+            guard let value = AXValueCreate(.cgPoint, &point) else { return false }
+            return AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value) == .success
+        }, minimum: {
+            for name in ["AXMinSize", "AXMinimumSize"] {
+                guard let value = attribute(window, name), CFGetTypeID(value) == AXValueGetTypeID() else { continue }
+                var size = CGSize.zero
+                if AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgSize, &size),
+                   size.width.isFinite, size.height.isFinite, size.width >= 0, size.height >= 0 { return size }
+            }
+            return nil
+        }, isCurrent: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid })
+        return WindowPlacement.apply(requested: requested, area: area, direction: direction,
+            resizable: sizeStatus != .success || resizable.boolValue, access: access).error
     }
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {

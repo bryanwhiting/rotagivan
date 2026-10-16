@@ -88,8 +88,10 @@ import Foundation
         precondition(emptyRoundTrip == emptyMap, "Blank HUDs and positions survive saving")
         for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
             let id = builtIns.assignBuiltIn(kind, at: position)!
-            precondition(builtIns.holdLayers?.first { $0.id == id }?.builtIn == kind)
-            precondition(builtIns.hudMap().first { $0.layerID == id }?.builtIn == kind)
+            // Placed media becomes an ordinary editable copy rather than a built-in.
+            let expected: HUDLayerBuiltIn? = kind == .mediaControls ? nil : kind
+            precondition(builtIns.holdLayers?.first { $0.id == id }?.builtIn == expected)
+            precondition(builtIns.hudMap().first { $0.layerID == id }?.builtIn == expected)
             let before = builtIns
             precondition(builtIns.assignBuiltIn(.actions, at: position) == nil && builtIns == before,
                 "Occupied map assignments must never be overwritten")

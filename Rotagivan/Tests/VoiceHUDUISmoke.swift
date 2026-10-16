@@ -39,7 +39,7 @@ private final class HUDCloud: VoiceCloudServing {
             let session = VoiceSession()
             // Each rendered scenario is independent; production sessions share
             // admission so a retry cannot bypass an old transport still draining.
-            session.pipelineAdmission = VoicePipelineAdmission()
+            session.pipelineAdmission = VoicePipelineAdmission(); session.microphoneAdmission = VoiceMicrophoneAdmission()
             session.makeCloud = { HUDCloud(decision) }
             session.makeMicrophone = { HUDMicrophone() }
             session.requestPermission = { true }
@@ -68,6 +68,10 @@ private final class HUDCloud: VoiceCloudServing {
         precondition(matching.phase == .matching)
         let noMatch = fixture(VoiceDecision(matches: ready.matches, confidence: 0.8, noMatch: true))
         noMatch.receive(VoiceDecision(matches: ready.matches, confidence: 0.8, noMatch: true), final: true)
+        let automatic = fixture(); automatic.autoSelect = true
+        automatic.receive(ready, final: true)
+        precondition(automatic.autoSelecting && automatic.selected == .up && automatic.message.contains("Running"),
+            "Auto-select highlights the top match and says what will run")
         let preview = fixture()
         preview.receive(ready, final: false)
         precondition(preview.selectedMatch == nil && preview.message.contains("Preview"))
@@ -83,7 +87,7 @@ private final class HUDCloud: VoiceCloudServing {
         precondition(disconnected.message.contains("connection") && disconnected.message.contains("Nothing was run"))
         let cancelled = fixture(); cancelled.cancel()
         let states = [("preparing", preparing), ("listening", listening), ("matching", matching), ("ready", result),
-            ("preview", preview), ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout),
+            ("auto-select", automatic), ("preview", preview), ("no-match", noMatch), ("permission-error", failed), ("timeout", timeout),
             ("connection-error", disconnected), ("cancelled", cancelled)]
         defer { listening.cancel(); result.cancel(); matching.cancel(); disconnected.cancel() }
         func elements(_ object: Any) -> [AnyObject] {

@@ -67,14 +67,15 @@ import SwiftUI
             precondition(find("settings-section-Voice mode", in: host) != nil)
             precondition(find("settings-section-Calibration", in: host) == nil)
             precondition(find("settings-section-App overrides", in: host) == nil)
-            guard let autoDecide = find("voice-auto-decide", in: host) else {
+            guard let autoSelect = find("voice-auto-select", in: host) else {
                 preconditionFailure("Voice mode must render its confirmation setting")
             }
             precondition(find("voice-auto-start", in: host) != nil,
                 "Voice mode must render automatic listening without starting the microphone")
-            precondition(autoDecide.accessibilityPerformPress?() == true)
+            precondition(store.settings.appExplorer?.resolvedVoiceAutoSelect ?? true, "Auto-select defaults on")
+            precondition(autoSelect.accessibilityPerformPress?() == true)
             settle()
-            precondition(store.settings.appExplorer?.resolvedVoiceAutoDecide == true,
+            precondition(store.settings.appExplorer?.resolvedVoiceAutoSelect == false,
                 "The rendered toggle must update the selected profile")
             precondition(store.settings.appExplorer?.resolvedVoiceAutoStart == false)
         }
@@ -87,7 +88,7 @@ import SwiftUI
         }
         render("General") { host in
             precondition(find("sync-save", in: host) == nil, "Sync must have one home rather than duplicate controls")
-            precondition(find("voice-auto-decide", in: host) == nil)
+            precondition(find("voice-auto-select", in: host) == nil)
             precondition(find("voice-auto-start", in: host) == nil)
         }
         for section in ["Actions", "Calibration", "App overrides"] {

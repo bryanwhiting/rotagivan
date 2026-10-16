@@ -14,17 +14,17 @@ struct SyncSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            GroupBox {
+            RotaCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
                         Label("Account & Sync", systemImage: "arrow.triangle.2.circlepath").font(.headline)
                         Spacer()
                         if let account = sync.account {
-                            Menu("Account") {
+                            RotaMenuButton("Account", systemImage: "person.crop.circle", kind: .field) {
                                 Text(account.email)
                                 Button("Change password…") { changingPassword = true }
                                 Button("Sign out") { Task { await sync.signOut() } }
-                            }.fixedSize().disabled(sync.busy)
+                            }.disabled(sync.busy)
                         }
                     }
                     if !sync.credentialsReady {
@@ -72,7 +72,7 @@ struct SyncSettingsView: View {
                                     await sync.authenticate(email: email, password: submitted, create: creating)
                                     await sync.synchronizeAutomatically(trigger: .manual)
                                 }
-                            }.buttonStyle(.borderedProminent)
+                            }.buttonStyle(.rotaPrimary)
                                 .disabled(sync.busy || email.isEmpty || password.count < 12 || (creating && confirmation != password))
                             Button(creating ? "I already have an account" : "Create an account") { creating.toggle() }
                         }
@@ -82,7 +82,7 @@ struct SyncSettingsView: View {
                     if let error = sync.error {
                         Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                     }
-                    DisclosureGroup("Privacy & recovery") {
+                    RotaDisclosureSection("Privacy & recovery") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Settings are encrypted in local storage and in the cloud. Your account password alone cannot decrypt them; only Macs you approve (or your recovery code) hold the key.")
                             Text("On a new Mac, sign in: it shows a code to approve from a trusted Mac. Keep the recovery code from the API keys card in your password manager.")
@@ -100,7 +100,7 @@ struct SyncSettingsView: View {
                             }
                         }.font(.caption).foregroundStyle(.secondary).padding(.top, 8)
                     }
-                }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if sync.credentialsReady, sync.account != nil {
                 CredentialVaultView(vault: sync.vault, onUnlocked: {
@@ -124,7 +124,7 @@ struct SyncSettingsView: View {
                         let current = currentPassword, next = newPassword
                         clearPasswords(); changingPassword = false
                         Task { await sync.changePassword(current: current, new: next) }
-                    }.disabled(currentPassword.isEmpty || newPassword.count < 12 || newPassword != confirmNewPassword)
+                    }.buttonStyle(.rotaPrimary).disabled(currentPassword.isEmpty || newPassword.count < 12 || newPassword != confirmNewPassword)
                 }
             }.padding(24).frame(width: 400)
         }

@@ -96,5 +96,24 @@ import Foundation
         store.updateAppleGestures(nil, for: store.defaultProfileID)
         precondition(store.activeGestures(for: .apple).oneFingerTap == .enter)
         print("Profile hierarchy passed: legacy migration, full-copy creation, isolated settings/Explorer/shortcuts, device sharing/overrides, reload, invalid selection and override reset.")
+        // Deletion: never the last profile; deleting the active profile switches first and persists.
+        let deleteSuite = "Rotagivan.ProfileDelete.\(UUID().uuidString)"
+        let deleteDefaults = UserDefaults(suiteName: deleteSuite)!
+        defer { deleteDefaults.removePersistentDomain(forName: deleteSuite) }
+        deleteDefaults.set(true, forKey: "migration.rotagivan.v1")
+        let library = SettingsStore(defaults: deleteDefaults)
+        precondition(!library.deleteConfiguration("default"), "The only profile cannot be deleted")
+        precondition(!library.deleteConfiguration("missing"))
+        let second = library.addConfiguration()
+        precondition(library.activeConfigurationID == second && library.configurationProfiles.count == 2)
+        precondition(library.deleteConfiguration(second))
+        precondition(library.activeConfigurationID == "default" && library.configurationProfiles.map(\.id) == ["default"],
+                     "Deleting the active profile must switch to its neighbour")
+        let third = library.addConfiguration()
+        library.selectConfiguration("default")
+        precondition(library.deleteConfiguration(third) && library.activeConfigurationID == "default")
+        let reloaded = SettingsStore(defaults: deleteDefaults)
+        precondition(reloaded.configurationProfiles.map(\.id) == ["default"], "Deletion must persist")
+        print("Profile deletion passed: last-profile guard, active-profile neighbour switch, inactive deletion and persistence.")
     }
 }

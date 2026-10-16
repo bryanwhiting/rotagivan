@@ -34,6 +34,7 @@ struct LocalUsageView: View {
     @State private var confirmClear = false
     @State private var section = "Apps"
     @State private var includeUnused = false
+    @State private var choosingDay = false
     private var commandRows: [UsageActionTotal] {
         if section == "Hotkeys" { return activity.hotkeys }
         return includeUnused ? UsageDatabase.includingUnused(activity.actions, catalogue: activity.catalogue) : activity.actions
@@ -46,7 +47,7 @@ struct LocalUsageView: View {
                     Label("Private local history · never synced or uploaded", systemImage: "desktopcomputer").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Screen Time", isOn: Binding(get: { activity.enabled }, set: activity.setEnabled)).toggleStyle(.switch)
+                Toggle("Screen Time", isOn: Binding(get: { activity.enabled }, set: activity.setEnabled)).toggleStyle(.rotaSwitch)
                     .accessibilityIdentifier("activity-tracking-toggle")
             }.padding(24)
             Divider()
@@ -55,10 +56,20 @@ struct LocalUsageView: View {
                     .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.top, 16)
             }
             HStack(spacing: 12) {
-                Button { changeDay(-1) } label: { Image(systemName: "chevron.left") }.help("Previous day")
-                DatePicker("Day", selection: $activity.day, in: ...Date(), displayedComponents: .date).labelsHidden()
-                Button { changeDay(1) } label: { Image(systemName: "chevron.right") }
-                    .disabled(Calendar.current.isDateInToday(activity.day)).help("Next day")
+                Button { changeDay(-1) } label: { Label("Previous day", systemImage: "chevron.left") }
+                    .buttonStyle(.rotaIcon).help("Previous day")
+                Button { choosingDay = true } label: {
+                    Label(activity.day.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                }
+                .accessibilityLabel("Day")
+                .accessibilityValue(activity.day.formatted(date: .complete, time: .omitted))
+                .popover(isPresented: $choosingDay, arrowEdge: .bottom) {
+                    DatePicker("Day", selection: $activity.day, in: ...Date(), displayedComponents: .date)
+                        .datePickerStyle(.graphical).labelsHidden().padding(12)
+                        .onChange(of: activity.day) { _, _ in choosingDay = false }
+                }
+                Button { changeDay(1) } label: { Label("Next day", systemImage: "chevron.right") }
+                    .buttonStyle(.rotaIcon).disabled(Calendar.current.isDateInToday(activity.day)).help("Next day")
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
                     if section == "Apps" {
@@ -71,11 +82,9 @@ struct LocalUsageView: View {
                 }
             }.padding(.horizontal, 24).padding(.vertical, 16)
             HStack {
-                Picker("Usage", selection: $section) {
-                    Text("Apps").tag("Apps"); Text("Actions").tag("Actions"); Text("Hotkeys").tag("Hotkeys")
-                }.pickerStyle(.segmented).frame(maxWidth: 350)
+                RotaSegmented("Usage", selection: $section, values: ["Apps", "Actions", "Hotkeys"]) { $0 }
                 Spacer()
-                if section == "Actions" { Toggle("Include unused", isOn: $includeUnused).help("Include configured actions with no uses on this day") }
+                if section == "Actions" { Toggle("Include unused", isOn: $includeUnused).toggleStyle(.rotaCheckbox).help("Include configured actions with no uses on this day") }
             }.padding(.horizontal, 24).padding(.bottom, 12)
             if let error = activity.error {
                 Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange).padding(.horizontal, 24)

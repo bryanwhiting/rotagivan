@@ -23,7 +23,7 @@ struct DoubleTapSwipeEditor: View {
                 directionEditors("Horizontal & vertical", directions: [.left, .right, .up, .down])
                 directionEditors("Diagonal directions", directions: [.topLeft, .topRight, .bottomLeft, .bottomRight])
                 if showTimingControls {
-                Stepper(value: Binding(get: { settings.resolvedWindow * 1_000 }, set: {
+                RotaStepper(value: Binding(get: { settings.resolvedWindow * 1_000 }, set: {
                     settings.swipeWindow = $0 / 1_000
                 }), in: 100...800, step: 25) {
                     Text("Swipe window: \(Int(settings.resolvedWindow * 1_000)) ms").monospacedDigit()
@@ -33,7 +33,7 @@ struct DoubleTapSwipeEditor: View {
                     scale: distanceScale, range: 20...240,
                     explanation: "Minimum straight-line distance from the swipe's starting point to its ending point, independent of cursor speed.")
                 if singleTap && showTimingControls {
-                    Stepper(value: Binding(get: { settings.resolvedFastDuration * 1_000 }, set: {
+                    RotaStepper(value: Binding(get: { settings.resolvedFastDuration * 1_000 }, set: {
                         settings.fastSwipeDuration = $0 / 1_000
                     }), in: 60...300, step: 10) {
                         Text("Quick-swipe duration: \(Int((settings.resolvedFastDuration * 1_000).rounded())) ms").monospacedDigit()

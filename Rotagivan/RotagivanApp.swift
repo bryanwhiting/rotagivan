@@ -88,7 +88,7 @@ struct RotagivanApp: App {
         }
 
         WindowGroup("Activity", id: "activity") {
-            LocalUsageView()
+            LocalUsageView().buttonStyle(.rotaSecondary).toggleStyle(.rotaCheckbox)
         }
         .defaultSize(width: 740, height: 700)
         .windowResizability(.contentMinSize)
@@ -195,7 +195,7 @@ struct NavigatorPanel: View {
                     Spacer(minLength: 0)
                     Button("Grant") {
                         hid.presentOnboarding { trusted = true }
-                    }.buttonStyle(.borderedProminent).controlSize(.small)
+                    }.buttonStyle(.rotaPrimary).controlSize(.small)
                 }
                 .padding(8)
                 .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
@@ -212,9 +212,9 @@ struct NavigatorPanel: View {
                 store.settings.enabled = $0
                 $0 ? hid.start() : hid.stop()
             }))
-            .toggleStyle(.switch).controlSize(.small)
+            .toggleStyle(.rotaSwitch).controlSize(.small)
 
-            Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { id in
+            RotaSelect("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { id in
                 NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
                 hid.stop()
                 store.selectConfiguration(id)
@@ -223,27 +223,22 @@ struct NavigatorPanel: View {
                     NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
                     if store.settings.enabled { hid.start() }
                 }
-            })) {
-                ForEach(store.configurationProfiles) { Text($0.name).tag($0.id) }
-            }.pickerStyle(.menu)
+            }), options: store.configurationProfiles.map { RotaOption($0.name, value: $0.id) }, fill: true)
             Text("Pointer & scrolling · all layers").font(.caption).foregroundStyle(.secondary)
             speedSlider("Fine Speed", value: curveEndpoint(fast: false), scale: .cursorGain, fractionDigits: 1)
             speedSlider("Fast Speed", value: curveEndpoint(fast: true), scale: .cursorGain, fractionDigits: 1)
-            DisclosureGroup("Scrolling") {
+            RotaDisclosureSection("Scrolling") {
                 ScrollCurveEditor(profile:Binding(get:{store.activeProfile},set:{store.updatePointerMotion($0)}),showGraph:false)
                     .padding(.top,8)
             }
             Text("\(store.activeProfileName) layer active")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
-            Picker("Edit action layer", selection: $editingProfileID) {
-                ForEach(store.profiles, id: \.id) { profile in
-                    Text(profile.name).tag(profile.id)
-                }
-            }.pickerStyle(.menu)
+            RotaSelect("Edit action layer", selection: $editingProfileID,
+                options: store.profiles.map { RotaOption($0.name, value: $0.id) }, fill: true)
             ShortcutEditor(profile: store.profiles.first { $0.id == editingProfileID }?.name ?? "Normal", profileID: editingProfileID, isDefaultProfile: editingProfileID == store.defaultProfileID)
                 .controlSize(.small)
-            DisclosureGroup("Click & drag shortcuts") {
+            RotaDisclosureSection("Click & drag shortcuts") {
                 VStack(alignment: .leading, spacing: 10) {
                     if editingProfileID == store.defaultProfileID || (store.settings.customTapProfiles ?? []).contains(editingProfileID) {
                         ShortcutEditor(showBehavior: false, actionIndex: 0, profileID: editingProfileID)
@@ -260,21 +255,23 @@ struct NavigatorPanel: View {
                 Button("Settings…") {
                     openWindow(id: "settings")
                     NSApp.activate(ignoringOtherApps: true)
-                }.buttonStyle(.link)
-                Button("About…") { showRotaAboutPanel() }.buttonStyle(.link)
-                Button("Updates…") { UpdateChecker.shared.checkNow() }.buttonStyle(.link)
+                }.buttonStyle(.rotaLink)
+                Button("About…") { showRotaAboutPanel() }.buttonStyle(.rotaLink)
+                Button("Updates…") { UpdateChecker.shared.checkNow() }.buttonStyle(.rotaLink)
                     .help("Check for Updates")
                 Spacer()
                 if store.settings.enabled {
                     Button("Reconnect") { trusted = AXIsProcessTrusted(); hid.stop(); hid.start() }
-                        .buttonStyle(.link)
+                        .buttonStyle(.rotaLink)
                 }
-                Button("Quit") { hid.stop(); NSApp.terminate(nil) }.buttonStyle(.link)
+                Button("Quit") { hid.stop(); NSApp.terminate(nil) }.buttonStyle(.rotaLink)
             }.font(.caption)
         }
         .padding(16)
         .frame(width: 340)
         .tint(.primary)
+        .toggleStyle(.rotaCheckbox)
+        .buttonStyle(.rotaSecondary)
         .onAppear { trusted = AXIsProcessTrusted(); editingProfileID = store.activeProfileID }
         .onChange(of: store.profiles.count) { _, _ in
             if !store.profiles.contains(where: { $0.id == editingProfileID }) { editingProfileID = store.defaultProfileID }

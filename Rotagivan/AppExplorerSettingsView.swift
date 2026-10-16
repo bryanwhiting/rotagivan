@@ -79,9 +79,9 @@ struct BuiltInHUDDefaultEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Picker("Tiles", selection: Binding(get: { layout.slotCount }, set: { count in
+                RotaSelect("Tiles", selection: Binding(get: { layout.slotCount }, set: { count in
                     var next = layout; next.slotCount = count; save(next)
-                })) { ForEach(2...16, id: \.self) { Text("\($0)").tag($0) } }.frame(width: 130)
+                }), values: Array(2...16)) { "\($0)" }
                 Spacer()
                 if group.showsChromeTabs {
                     Button("Refresh tabs") { Task { await loadChromeTabs() } }
@@ -412,7 +412,8 @@ struct AppExplorerSettingsView: View {
         }
     }
     private var workspaceOptions: some View {
-        Menu {
+        RotaMenuButton("Options", systemImage: "slider.horizontal.3", help: "Theme and HUD options",
+                       accessibilityTitle: "Theme and HUD options") {
             Picker("Theme", selection: themeBinding) {
                 ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
             }
@@ -428,8 +429,7 @@ struct AppExplorerSettingsView: View {
                 Button("Layer settings…") { workspaceDetails = true }
                     .accessibilityIdentifier("hud-layer-settings")
                 manageHUDCommands
-        } label: { Label("Options", systemImage: "slider.horizontal.3") }
-        .fixedSize().help("Theme and HUD options").accessibilityLabel("Theme and HUD options")
+        }
     }
     private var windowWorkspace: some View {
         AppExplorerSettingsView(store: store, workspace: true, workspaceCanvasOnly: true,
@@ -449,17 +449,17 @@ struct AppExplorerSettingsView: View {
         HStack(spacing: 6) {
             if workspaceCanvasOnly || !groupPath.isEmpty {
                 Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle ?? "Main HUD") { groupPath = [] }
-                    .buttonStyle(.link).lineLimit(1)
+                    .buttonStyle(.rotaLink).lineLimit(1)
             }
             ForEach(groupPath.indices, id: \.self) { index in
                 Image(systemName: "chevron.right").font(.caption2)
                 Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD layer") {
                     groupPath = Array(groupPath.prefix(index + 1))
-                }.buttonStyle(.link).lineLimit(1)
+                }.buttonStyle(.rotaLink).lineLimit(1)
             }
             if workspaceCanvasOnly || !groupPath.isEmpty { Spacer(minLength: 4) }
             if generatedBuiltIn == nil {
-                Menu {
+                RotaMenuButton("\(settings.count(at: groupPath)) slots", kind: .field) {
                     Picker("Slots", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                         var next = settings
                         guard next.resize(to: count, at: groupPath) else {
@@ -478,8 +478,7 @@ struct AppExplorerSettingsView: View {
                         }
                         Button("Rename…") { editingGroupPath = groupPath }
                     }
-                } label: { Text("\(settings.count(at: groupPath)) slots") }
-                .fixedSize()
+                }
                 .accessibilityIdentifier("hud-workspace-slots")
             }
         }.font(.caption).accessibilityIdentifier("hud-workspace-location")
@@ -499,9 +498,8 @@ struct AppExplorerSettingsView: View {
     private var visualHUDControlRow: some View {
             HStack {
                 if workspaceCanvasOnly {
-                    hudLayerPicker.labelsHidden().frame(width: 160)
-                        .accessibilityLabel(workspaceCanvasOnly ? "Window layout" : "Editing HUD")
-                } else if !workspace { hudLayerPicker.frame(maxWidth: 260) }
+                    hudLayerPicker(showsTitle: false).frame(width: 160)
+                } else if !workspace { hudLayerPicker(showsTitle: true).frame(maxWidth: 260) }
                 Button("Actions & hotkeys…") {
                     if !groupPath.isEmpty { openGroupHotkeys() }
                     else if let layer = baseSettings.holdLayers?.first(where: { $0.id == selectedLayerID }) {
@@ -511,7 +509,7 @@ struct AppExplorerSettingsView: View {
                 .accessibilityIdentifier("hud-visual-actions")
                 .help("Actions and hotkeys for this HUD")
                 Spacer(minLength: 8)
-                Menu {
+                RotaMenuButton("Add HUD", systemImage: "plus") {
                     Button("Custom HUD…") { creatingLayer = true; editingLayer = .empty() }
                     if scopeTitle == nil && !windowManagerOnly {
                         Menu("Templates") {
@@ -542,16 +540,14 @@ struct AppExplorerSettingsView: View {
                             }
                         }
                     }
-                } label: { Label("Add HUD", systemImage: "plus") }
-                .fixedSize()
+                }
                 .disabled(baseSettings.resolvedHUDPositions.count >= HUDLayerPosition.allCases.count ||
                     (scopeTitle != nil && baseSettings.holdLayers == nil))
                 .accessibilityIdentifier("hud-visual-add")
                 if workspace && !workspaceCanvasOnly {
                     workspaceOptions
                 } else {
-                    Menu { manageHUDCommands } label: { Label("Manage", systemImage: "ellipsis.circle") }
-                        .fixedSize()
+                    RotaMenuButton("Manage", systemImage: "ellipsis.circle") { manageHUDCommands }
                 }
             }
     }
@@ -568,11 +564,14 @@ struct AppExplorerSettingsView: View {
             Button("Remove HUD…", role: .destructive) { removingLayer = true }
         }
     }
-    private var hudLayerPicker: some View {
-        Picker(workspaceCanvasOnly ? "Window layout" : "Editing HUD", selection: $selectedLayerID) {
-            Text(scopeTitle ?? "Main HUD").tag(nil as UUID?)
-            ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
-        }.accessibilityIdentifier("hud-layer-picker")
+    private var layerOptions: [RotaOption<UUID?>] {
+        [RotaOption(scopeTitle ?? "Main HUD", value: nil)] +
+            (baseSettings.holdLayers ?? []).map { RotaOption($0.name, value: Optional($0.id)) }
+    }
+    private func hudLayerPicker(showsTitle: Bool) -> some View {
+        RotaSelect(workspaceCanvasOnly ? "Window layout" : "Editing HUD", selection: $selectedLayerID,
+                   options: layerOptions, showsTitle: showsTitle, fill: true)
+            .accessibilityIdentifier("hud-layer-picker")
     }
 
     var compact = false
@@ -641,10 +640,9 @@ struct AppExplorerSettingsView: View {
                 HStack {
                     Label("HUD layout", systemImage: "safari").font(.headline)
                     Spacer()
-                    Picker("Theme", selection: themeBinding) {
-                        ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }.frame(width: 230)
-                    Menu {
+                    RotaSelect("Theme", selection: themeBinding, values: ExplorerTheme.allCases, fill: true) { $0.title }
+                        .frame(width: 230)
+                    RotaMenuButton("Options", systemImage: "slider.horizontal.3") {
                         Toggle("Invert picker direction", isOn: invertPickerBinding)
                             .help("Reverse one-finger tile selection, including voice, window, and deep choices.")
                         Picker("Two-finger HUD navigation", selection: swipeDirectionBinding) {
@@ -656,25 +654,22 @@ struct AppExplorerSettingsView: View {
                         Divider()
                         Toggle("Animate HUD feedback", isOn: animationBinding)
                         Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
-                    } label: { Label("Options", systemImage: "slider.horizontal.3") }.fixedSize()
+                    }
                 }
             }
             if compact {
                 HStack {
                     if scopeTitle == nil {
-                        Menu {
+                        RotaMenuButton("Explorer appearance", systemImage: "paintpalette", kind: .icon) {
                             Picker("Theme", selection: themeBinding) {
                                 ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
                             }
                             Toggle("Animate HUD feedback", isOn: animationBinding)
                             Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
-                        } label: { Image(systemName: "paintpalette") }
-                            .menuStyle(.borderlessButton).fixedSize().help("Explorer appearance")
+                        }
                     }
-                    Picker("HUD layer", selection: $selectedLayerID) {
-                        Text("Default").tag(nil as UUID?)
-                        ForEach(baseSettings.holdLayers ?? []) { layer in Text(layer.name).tag(Optional(layer.id)) }
-                    }
+                    RotaSelect("HUD layer", selection: $selectedLayerID, options: [RotaOption("Default", value: nil as UUID?)] +
+                        (baseSettings.holdLayers ?? []).map { RotaOption($0.name, value: Optional($0.id)) })
                     Button("Add HUD layer") {
                         creatingLayer = true
                         editingLayer = .empty()
@@ -710,7 +705,7 @@ struct AppExplorerSettingsView: View {
             }
             if let builtIn = generatedBuiltIn {
                 if !compact && !(workspace && builtIn == .windowManager) { visualHUDPreview }
-                GroupBox {
+                RotaCard {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(builtIn.title, systemImage: builtIn.symbol).font(.headline)
                         Text("This position opens the built-in HUD directly. Swipe to another position to leave it.")
@@ -726,26 +721,25 @@ struct AppExplorerSettingsView: View {
                         } else {
                             Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
                         }
-                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-            Picker(settings.favorite(at: groupPath)?.hasPrimaryDestination == true ? "Slots in this deep swipe" : "Slots in this HUD layer",
+            RotaSelect(settings.favorite(at: groupPath)?.hasPrimaryDestination == true ? "Slots in this deep swipe" : "Slots in this HUD layer",
                 selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                 var next = settings
                 guard next.resize(to: count, at: groupPath) else {
                     groupError = "Remove some tiles before choosing fewer slots. Your existing tiles have been kept."; return
                 }
                 _ = save(next)
-            })) { ForEach(Array(2...16), id: \.self) { Text("\($0) slots").tag($0) } }
-                .pickerStyle(.menu)
+            }), values: Array(2...16)) { "\($0) slots" }
             HStack(spacing: 5) {
                 Button(baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? "Default") { groupPath = [] }
-                    .buttonStyle(.link)
+                    .buttonStyle(.rotaLink)
                 ForEach(groupPath.indices, id: \.self) { index in
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD layer") {
                         groupPath = Array(groupPath.prefix(index + 1))
-                    }.buttonStyle(.link).lineLimit(1)
+                    }.buttonStyle(.rotaLink).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if !groupPath.isEmpty {
@@ -754,18 +748,17 @@ struct AppExplorerSettingsView: View {
                 }
             }.font(.subheadline.weight(.medium))
             if !groupPath.isEmpty, settings.favorite(at: groupPath)?.isPureGroup == true {
-                Picker("HUD layer contents", selection: Binding(get: {
+                RotaSegmented("HUD layer contents", selection: Binding(get: {
                     settings.favorite(at: groupPath)?.groupMode ?? .favorites
                 }, set: { mode in
                     guard let direction = groupPath.last, var group = settings.favorite(at: groupPath) else { return }
                     group.groupMode = mode
                     edit { $0.setFavorite(group, at: direction, in: Array(groupPath.dropLast())) }
-                })) {
-                    Text("Assigned favorites").tag(AppExplorerMode.favorites)
-                    Text("Recent apps").tag(AppExplorerMode.recent)
-                    Text("Chrome tabs").tag(AppExplorerMode.chromeTabs)
-                    Text("Apps & tabs").tag(AppExplorerMode.recentAppsAndTabs)
-                }.pickerStyle(.segmented)
+                }), options: [
+                    RotaOption("Assigned favorites", value: AppExplorerMode.favorites),
+                    RotaOption("Recent apps", value: AppExplorerMode.recent),
+                    RotaOption("Chrome tabs", value: AppExplorerMode.chromeTabs),
+                    RotaOption("Apps & tabs", value: AppExplorerMode.recentAppsAndTabs)])
             }
             if !compact {
                 visualHUDPreview
@@ -1123,7 +1116,7 @@ struct AppExplorerSettingsView: View {
                         edit { $0.setFavorite(updated, at: direction, in: groupPath) }
                     }))
                 }
-                Menu("Groups & nested HUDs") {
+                RotaMenuButton("Groups & nested HUDs", systemImage: "square.stack.3d.up", kind: .field) {
                     ForEach(ExplorerReservedGroup.allCases) { group in
                         Button(group.title, systemImage: group.symbol) {
                             let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
@@ -1178,7 +1171,7 @@ struct AppExplorerSettingsView: View {
                             Button("Send to HUD layer…") {
                                 tileTransfer = ExplorerTileTransfer(snapshot: transferSettings, source: transferPath, slot: direction)
                             }
-                            Menu("Move within this layer") {
+                            RotaMenuButton("Move within this layer", systemImage: "arrow.left.arrow.right", kind: .field) {
                                 ForEach(ExplorerSlot.slots(settings.count(at: groupPath)).filter { $0 != direction }, id: \.self) { target in
                                     Button(target.title) {
                                         edit { $0.swapFavorites(from: direction, to: target, in: groupPath) }
@@ -1237,7 +1230,7 @@ struct AppExplorerSettingsView: View {
             HStack {
                 Text(direction.title).font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Menu {
+                RotaMenuButton("Edit \(direction.title) slot", systemImage: "ellipsis", kind: .icon) {
                     if let favorite, favorite.supportsHoldLayers && !favorite.hasDeepChoices {
                         Button(favorite.isWindowManager ? "Edit Window Manager layer…" : "Edit HUD layers…") {
                             tileLayerSnapshot = favorite
@@ -1271,11 +1264,7 @@ struct AppExplorerSettingsView: View {
                             }
                         }
                     }
-                } label: {
-                    Image(systemName: "ellipsis").frame(width: 16, height: 16)
-                }.menuStyle(.borderlessButton).fixedSize()
-                    .help("Edit \(direction.title) slot")
-                    .accessibilityLabel("Edit \(direction.title) slot")
+                }
             }.padding(.horizontal, 10)
             if let favorite {
                 Label {
@@ -1334,7 +1323,7 @@ struct AppExplorerSettingsView: View {
                         if favorite?.isPureGroup == true { removingGroupPath = groupPath + [direction] }
                         else { edit { $0.setFavorite(nil, at: direction, in: groupPath) } }
                     }
-                }.font(.caption2).buttonStyle(.link)
+                }.font(.caption2).buttonStyle(.rotaLink)
             }
         }.frame(maxWidth: .infinity).frame(height: 88)
             .popover(isPresented: Binding(get: { compact && !editingPreview && previewEditing == direction }, set: { if !$0 { previewEditing = nil } })) {
@@ -1782,7 +1771,8 @@ extension AppExplorerSettingsView {
     }
 
     private var newHUDMenu: some View {
-        Menu {
+        RotaMenuButton("New HUD", systemImage: "plus",
+                       help: freeHUDPosition == nil ? "All eight positions around Main HUD are in use" : "Add a HUD next to Main HUD") {
             Button("Blank HUD", systemImage: "square.dashed") {
                 if let position = freeHUDPosition { addHUD(at: position) }
             }
@@ -1806,10 +1796,8 @@ extension AppExplorerSettingsView {
                     }
                 }
             }
-        } label: { Label("New HUD", systemImage: "plus") }
-        .menuStyle(.borderlessButton).fixedSize()
+        }
         .disabled(freeHUDPosition == nil || scopeTitle != nil)
-        .help(freeHUDPosition == nil ? "All eight positions around Main HUD are in use" : "Add a HUD next to Main HUD")
         .accessibilityIdentifier("hud-visual-add")
     }
 
@@ -1819,16 +1807,16 @@ extension AppExplorerSettingsView {
         VStack(spacing: 4) {
             HStack(spacing: 6) {
                 Button(selectedHoldLayer?.name ?? scopeTitle ?? "Main HUD") { groupPath = []; previewEditing = nil }
-                    .buttonStyle(.link).lineLimit(1).disabled(groupPath.isEmpty)
+                    .buttonStyle(.rotaLink).lineLimit(1).disabled(groupPath.isEmpty)
                 ForEach(groupPath.indices, id: \.self) { index in
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     Button(settings.favorite(at: Array(groupPath.prefix(index + 1)))?.name ?? "HUD") {
                         groupPath = Array(groupPath.prefix(index + 1)); previewEditing = nil
-                    }.buttonStyle(.link).lineLimit(1).disabled(index == groupPath.count - 1)
+                    }.buttonStyle(.rotaLink).lineLimit(1).disabled(index == groupPath.count - 1)
                 }
                 Spacer(minLength: 8)
-                Button { showingWorkspaceOptions.toggle() } label: { Image(systemName: "gearshape") }
-                    .buttonStyle(.borderless)
+                Button { showingWorkspaceOptions.toggle() } label: { Label("HUD options", systemImage: "gearshape") }
+                    .buttonStyle(.rotaIcon)
                     .help("HUD appearance and navigation")
                     .accessibilityLabel("HUD appearance and navigation")
                     .accessibilityIdentifier("hud-workspace-options")
@@ -1845,12 +1833,8 @@ extension AppExplorerSettingsView {
     private var workspaceOptionsForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("HUD options").font(.headline)
-            Picker("Theme", selection: themeBinding) {
-                ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            Picker("Two-finger navigation", selection: swipeDirectionBinding) {
-                ForEach(HUDSwipeDirection.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
+            RotaSelect("Theme", selection: themeBinding, values: ExplorerTheme.allCases) { $0.title }
+            RotaSelect("Two-finger navigation", selection: swipeDirectionBinding, values: HUDSwipeDirection.allCases) { $0.title }
             .help("Default navigation in every direction: inverted drags down to the HUD above; regular swipes down to the HUD below. Explicit gesture assignments keep their assigned actions.")
             Toggle("Invert picker direction", isOn: invertPickerBinding)
                 .help("Reverse one-finger tile selection, including voice, window, and deep choices.")
@@ -1905,10 +1889,10 @@ extension AppExplorerSettingsView {
                     }.id(layer.id)
                 }
                 inspectorField("Position") {
-                    Picker("Position", selection: Binding(get: { baseSettings.resolvedHUDPositions[layer.id] ?? .right },
-                        set: { placeHUDLayer(layer.id, at: $0) })) {
-                        ForEach(HUDLayerPosition.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
-                    }.labelsHidden()
+                    RotaSelect("Position", selection: Binding(get: { baseSettings.resolvedHUDPositions[layer.id] ?? .right },
+                        set: { placeHUDLayer(layer.id, at: $0) }),
+                        options: HUDLayerPosition.allCases.map { RotaOption($0.title, value: $0, systemImage: $0.symbol) },
+                        showsTitle: false, fill: true)
                     .help("Where this HUD sits around Main HUD for two-finger navigation. Choosing an occupied spot swaps the two HUDs.")
                     .accessibilityIdentifier("hud-inspector-position")
                 }
@@ -1927,27 +1911,26 @@ extension AppExplorerSettingsView {
                     .fixedSize(horizontal: false, vertical: true)
             } else if !editingWindowManager {
                 inspectorField("Slots") {
-                    Picker("Slots", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
+                    RotaSelect("Slots", selection: Binding(get: { settings.count(at: groupPath) }, set: { count in
                         var next = settings
                         guard next.resize(to: count, at: groupPath) else {
                             groupError = "Remove some tiles before choosing fewer slots. Your existing tiles have been kept."; return
                         }
                         _ = save(next)
-                    })) { ForEach(Array(2...16), id: \.self) { Text("\($0) slots").tag($0) } }
-                        .labelsHidden().accessibilityIdentifier("hud-workspace-slots")
+                    }), values: Array(2...16), showsTitle: false, fill: true) { "\($0) slots" }
+                        .accessibilityIdentifier("hud-workspace-slots")
                 }
                 if !groupPath.isEmpty, settings.favorite(at: groupPath)?.isPureGroup == true {
                     inspectorField("Contents") {
-                        Picker("Contents", selection: Binding(get: { settings.favorite(at: groupPath)?.groupMode ?? .favorites }, set: { mode in
+                        RotaSelect("Contents", selection: Binding(get: { settings.favorite(at: groupPath)?.groupMode ?? .favorites }, set: { mode in
                             guard let direction = groupPath.last, var group = settings.favorite(at: groupPath) else { return }
                             group.groupMode = mode
                             edit { $0.setFavorite(group, at: direction, in: Array(groupPath.dropLast())) }
-                        })) {
-                            Text("Assigned tiles").tag(AppExplorerMode.favorites)
-                            Text("Recent apps").tag(AppExplorerMode.recent)
-                            Text("Chrome tabs").tag(AppExplorerMode.chromeTabs)
-                            Text("Recent apps & tabs").tag(AppExplorerMode.recentAppsAndTabs)
-                        }.labelsHidden()
+                        }), options: [
+                            RotaOption("Assigned tiles", value: AppExplorerMode.favorites),
+                            RotaOption("Recent apps", value: AppExplorerMode.recent),
+                            RotaOption("Chrome tabs", value: AppExplorerMode.chromeTabs),
+                            RotaOption("Recent apps & tabs", value: AppExplorerMode.recentAppsAndTabs)], showsTitle: false, fill: true)
                     }
                 }
             }
@@ -1977,7 +1960,7 @@ extension AppExplorerSettingsView {
                         .accessibilityIdentifier("hud-inspector-remove")
                 }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.rotaGhost)
             if generatedBuiltIn == nil && !editingWindowManager {
                 Text(isRecentGroup ? "Recent apps fill these tiles at runtime." :
                     "Click a tile to edit it here. Drag tiles to swap them. Clicks in the preview never launch anything.")
@@ -2127,13 +2110,11 @@ struct ExplorerTileTransferEditor: View {
                 .font(.title2.weight(.semibold))
             Text("The tile and any HUD layers beneath it travel together.")
                 .font(.callout).foregroundStyle(.secondary)
-            Picker("Operation", selection: $copy) {
-                Text("Move / swap").tag(false)
-                Text("Copy").tag(true)
-            }.pickerStyle(.segmented).labelsHidden()
-            Picker("Destination HUD layer", selection: $destination) {
-                ForEach(containers) { container in Text(container.title).tag(container.id) }
-            }.accessibilityIdentifier("explorer-transfer-container")
+            RotaSegmented("Operation", selection: $copy,
+                options: [RotaOption("Move / swap", value: false), RotaOption("Copy", value: true)])
+            RotaSelect("Destination HUD layer", selection: $destination,
+                options: containers.map { RotaOption($0.title, value: $0.id) })
+                .accessibilityIdentifier("explorer-transfer-container")
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                     ForEach(ExplorerSlot.slots(selected?.count ?? 8), id: \.self) { slot in
@@ -2166,6 +2147,7 @@ struct ExplorerTileTransferEditor: View {
                 Button(copy ? "Copy tile" : displaced == nil ? "Move tile" : "Swap tiles") {
                     if let target { error = onSave(destination, target, copy) }
                 }.keyboardShortcut(.defaultAction).disabled(validation != nil)
+                    .buttonStyle(.rotaPrimary)
                     .accessibilityIdentifier("explorer-transfer-save")
             }
         }.padding(24).frame(width: 570)
@@ -2443,7 +2425,7 @@ struct ExplorerInlineEditor: View {
             HStack {
                 Label(windowManagerOnly ? "Edit Window Manager" : "Edit HUD", systemImage: "pencil").font(.title3.weight(.semibold))
                 Spacer()
-                Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+                Button("Done", action: onDone).keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
             }
             ScrollView {
                 AppExplorerSettingsView(store: store, groupPath: groupPath, compact: false,
@@ -2479,7 +2461,7 @@ struct ExplorerGroupNameEditor: View {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(isNew ? "Create HUD layer" : "Save") { onSave(trimmedName) }
-                    .keyboardShortcut(.defaultAction).disabled(trimmedName.isEmpty || trimmedName.count > 512)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(trimmedName.isEmpty || trimmedName.count > 512)
             }
         }.padding(24).frame(width: 400).background(Color(nsColor: .windowBackgroundColor))
     }
@@ -2513,7 +2495,7 @@ struct ExplorerShortcutEditor: View {
                     let favorite = AppExplorerFavorite(direction: direction, name: title.isEmpty ? shortcut.displayName : title, shortcut: shortcut)
                     guard favorite.isValidDestination else { return }
                     onSave(favorite)
-                }.keyboardShortcut(.defaultAction).disabled(shortcut?.isValidExplorerShortcut != true || name.count > 512)
+                }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(shortcut?.isValidExplorerShortcut != true || name.count > 512)
             }
         }.padding(24).frame(width: 440).background(Color(nsColor: .windowBackgroundColor))
     }
@@ -2588,7 +2570,7 @@ struct ExplorerURLFavoriteEditor: View {
                     let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
                     onSave(AppExplorerFavorite(direction: direction, name: title.isEmpty ? (url.host ?? "Website") : title,
                         url: url.absoluteString, iconSymbol: iconSymbol))
-                }.keyboardShortcut(.defaultAction).disabled(validURL == nil || name.count > 512)
+                }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(validURL == nil || name.count > 512)
             }
         }.textFieldStyle(.roundedBorder).padding(24).frame(width: 440)
             .background(Color(nsColor: .windowBackgroundColor))

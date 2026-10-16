@@ -56,14 +56,9 @@ import SwiftUI
             return item
         }
         func press(_ id: String) {
-            if id == "onboarding-apple-input" {
-                _ = find(id)
-                let switches = views(host).compactMap { $0 as? NSSwitch }
-                precondition(switches.count == 1, "One native trackpad opt-in switch")
-                switches[0].performClick(nil)
-            } else {
-                precondition(find(id).accessibilityPerformPress?() == true, "Could not press \(id)")
-            }
+            // The opt-in is a Rotagivan switch whose accessibility representation is a
+            // native toggle, so it is pressed like every other control.
+            precondition(find(id).accessibilityPerformPress?() == true, "Could not press \(id)")
             settle()
         }
         func capture(_ name: String) throws {

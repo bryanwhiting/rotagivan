@@ -2369,7 +2369,7 @@ struct AppExplorerView: View {
             if model.showingWindowManager && model.windowFullScreen {
                 VStack(spacing: 20) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 48, weight: .light)).foregroundStyle(accent)
-                    Button("Exit full screen") { onWindowCommand(.exitFullScreen) }.buttonStyle(.borderedProminent)
+                    Button("Exit full screen") { onWindowCommand(.exitFullScreen) }.buttonStyle(.rotaPrimary)
                     Text("Swipe up to exit full screen").font(.caption).foregroundStyle(.secondary)
                 }.frame(height: 260)
                     .background { if model.theme.isFloating { Circle().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)) } }
@@ -2603,8 +2603,7 @@ struct AppExplorerView: View {
                             .foregroundStyle(accent)
                         Text(entry.name).lineLimit(1)
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.09)))
+                    .modifier(HUDChip(accent: accent))
                 }
                 ForEach(model.actionBindings) { binding in
                     HStack(spacing: 5) {
@@ -2613,8 +2612,7 @@ struct AppExplorerView: View {
                             .foregroundStyle(accent)
                         Text(binding.action.title).lineLimit(1)
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.09)))
+                    .modifier(HUDChip(accent: accent))
                 }
             }
         }
@@ -2631,8 +2629,8 @@ struct AppExplorerView: View {
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(accent)
                 .frame(minWidth: 18, minHeight: 18)
-                .background(RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.1)))
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(accent.opacity(0.45), lineWidth: 0.7))
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(accent.opacity(0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(accent.opacity(0.45), lineWidth: 0.7))
         }
         .buttonStyle(.plain)
         .disabled(isPreview || (key == "E" && !model.canEdit))
@@ -2729,10 +2727,7 @@ struct AppExplorerView: View {
                                 .foregroundStyle(accent)
                                 .lineLimit(1)
                         }
-                        if entry.isActiveApp {
-                            Text("ACTIVE").font(.system(size: 7, weight: .bold))
-                                .foregroundStyle(Color.orange)
-                        }
+                        if entry.isActiveApp { HUDActiveBadge(size: 6.5) }
                         if entry.hasDeepChoices {
                             Image(systemName: "chevron.forward.2")
                                 .font(.system(size: 7, weight: .bold)).foregroundStyle(accent)
@@ -2859,9 +2854,7 @@ struct AppExplorerView: View {
                 if let entry {
                     entrySymbol(entry)
                     Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(entry.shortcut == nil ? 1 : 2)
-                    if entry.isActiveApp {
-                        Text("ACTIVE").font(.system(size: 9, weight: .bold)).foregroundStyle(Color.orange)
-                    }
+                    if entry.isActiveApp { HUDActiveBadge(size: 8) }
                     if let shortcut = entry.shortcut {
                         if !entry.name.hasSuffix("(\(shortcut.readableCombination))") { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
                     }
@@ -2874,6 +2867,7 @@ struct AppExplorerView: View {
                 }
                 Text(selected && model.theme.isHUD ? "\(direction.title.uppercased()) · READY" : direction.title)
                     .font(.system(size: 9, weight: .medium, design: model.theme.isHUD ? .monospaced : .default))
+                    .tracking(model.theme.isHUD ? 0.4 : 0)
                     .foregroundStyle(selected ? accent : .secondary)
             }
             .frame(width: 130, height: 98)
@@ -2908,5 +2902,28 @@ private struct RealtimeLauncherStatus: View {
             if session.phase == .failed { Button("Retry voice") { session.start() } }
             Text("Audio → OpenAI · matching stays local · no automatic execution").font(.caption2).foregroundStyle(.secondary)
         }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// Shared keycap/hotkey chip used along the HUD footer.
+private struct HUDChip: ViewModifier {
+    let accent: Color
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(accent.opacity(0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent.opacity(0.22), lineWidth: 0.6))
+    }
+}
+
+/// The "active app" marker shared by sector and grid tiles.
+private struct HUDActiveBadge: View {
+    var size: CGFloat
+    var body: some View {
+        Text("ACTIVE")
+            .font(.system(size: size, weight: .bold)).tracking(0.6)
+            .foregroundStyle(Color.orange)
+            .padding(.horizontal, size * 0.55).padding(.vertical, size * 0.18)
+            .background(Capsule().fill(Color.orange.opacity(0.16)))
     }
 }

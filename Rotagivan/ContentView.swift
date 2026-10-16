@@ -9,11 +9,11 @@ struct VoiceModeSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-        GroupBox("Action matching") {
+        RotaCard("Action matching", systemImage: "waveform") {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("Voice provider", selection: $localProvider) {
-                    ForEach(LauncherVoiceProvider.allCases) { Text($0.label).tag($0.rawValue) }
-                }.accessibilityIdentifier("voice-provider")
+                RotaSelect("Voice provider", selection: $localProvider,
+                    options: LauncherVoiceProvider.allCases.map { RotaOption($0.label, value: $0.rawValue) })
+                    .accessibilityIdentifier("voice-provider")
                 Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Press Return once to confirm and run the selected action. Auto-select applies only to OpenRouter/Jev, which sends audio to OpenRouter / xAI and text plus action names to Jev; Rotagivan does not save audio or transcripts.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Start listening when HUD opens", isOn: Binding(
@@ -38,9 +38,9 @@ struct VoiceModeSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Assign Activate voice mode and edit voice keywords in Actions.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        GroupBox("Application index") {
+        RotaCard("Application index", systemImage: "square.grid.2x2") {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Applications refresh automatically on this Mac at startup and after app changes. Voice, Actions, and app pickers share this local index.")
                     .foregroundStyle(.secondary)
@@ -67,10 +67,10 @@ struct VoiceModeSettingsView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                 }
-            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        GroupBox("Temporary intention") {
-            TemporaryIntentionControl(store: intentionStore).padding(10)
+        RotaCard("Temporary intention", systemImage: "scope") {
+            TemporaryIntentionControl(store: intentionStore)
         }
         }
         .font(.system(size: 12))
@@ -108,6 +108,7 @@ struct ProfileNameEditor: View {
                 Spacer()
                 Button("Save") { saveFailed = !onSave(trimmedName) }
                     .keyboardShortcut(.defaultAction).disabled(!valid)
+                    .buttonStyle(.rotaPrimary)
             }
         }.padding(24).frame(width: 380)
             .onAppear { nameFocused = true }
@@ -129,6 +130,9 @@ struct ContentView: View {
     @State private var actionDevice: GestureDevice = .navigator
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
+    @State private var deletingProfile: ConfigurationProfile?
+    /// Persisted, user-controlled sidebar state (toggle button or ⌃⌘S).
+    @AppStorage("settings.sidebarCollapsed") private var sidebarCollapsed = false
     @State private var pendingLayerDeletion: PendingLayerDeletion?
     private let initialHUDGroup: ExplorerReservedGroup?
     private let layerColumnWidth: CGFloat = 468
@@ -177,7 +181,8 @@ struct ContentView: View {
             footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .toggleStyle(.checkbox)
+        .toggleStyle(.rotaCheckbox)
+        .buttonStyle(.rotaSecondary)
         .tint(.primary)
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
@@ -195,6 +200,18 @@ struct ContentView: View {
                 renamingProfile = nil
                 return true
             }, onCancel: { renamingProfile = nil })
+        }
+        .confirmationDialog("Delete profile “\(deletingProfile?.name ?? "")”?",
+            isPresented: Binding(get: { deletingProfile != nil }, set: { if !$0 { deletingProfile = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Profile", role: .destructive) {
+                if let id = deletingProfile?.id { deleteProfile(id) }
+                deletingProfile = nil
+            }
+            Button("Cancel", role: .cancel) { deletingProfile = nil }
+        } message: {
+            Text("Its devices, layers, HUD and shortcuts are removed. Other profiles are unchanged.")
         }
     }
 
@@ -240,61 +257,74 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "safari").font(.system(size: 24, weight: .light)).foregroundStyle(.teal)
+        HStack(spacing: RotaTokens.Space.l) {
+            Button {
+                if reduceMotion { sidebarCollapsed.toggle() }
+                else { withAnimation(.snappy(duration: 0.22)) { sidebarCollapsed.toggle() } }
+            } label: {
+                Label(sidebarCollapsed ? "Show sidebar" : "Hide sidebar", systemImage: "sidebar.left")
+            }
+            .buttonStyle(.rotaIcon)
+            .keyboardShortcut("s", modifiers: [.control, .command])
+            .help(sidebarCollapsed ? "Show sidebar (⌃⌘S)" : "Hide sidebar (⌃⌘S)")
+            .accessibilityIdentifier("toggle-sidebar")
             VStack(alignment: .leading, spacing: 2) {
                 Text("ROTAGIVAN").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
-                Text(store.activeConfigurationName)
+                Text(sectionTitle(selection))
                     .font(.system(size: 19, weight: .semibold)).lineLimit(1)
-                    .accessibilityLabel("Profile name")
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("settings-header-title")
             }
             Spacer()
-            Picker("Profile", selection: Binding(get: { store.activeConfigurationID }, set: { switchProfile($0) })) {
-                ForEach(store.configurationProfiles) { profile in Text(profile.name).tag(profile.id) }
-            }.frame(width: 215)
-            Button("Rename…", systemImage: "pencil") {
-                renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID }
-            }.help("Rename the selected profile without changing its settings")
-                .accessibilityIdentifier("rename-profile")
-            Button { switchProfile(nil) } label: { Label("Add Profile", systemImage: "plus") }
-                .disabled(store.configurationProfiles.count >= 20)
-                .help("Copy this profile, including every action layer and HUD layer")
+            RotaProfileSwitcher(profiles: store.configurationProfiles, activeID: store.activeConfigurationID,
+                onSelect: { switchProfile($0) },
+                onRename: { renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID } },
+                onDuplicate: { switchProfile(nil) },
+                onDelete: { deletingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID } })
         }
-        .padding(.horizontal, 22).padding(.vertical, 16)
+        .padding(.horizontal, RotaTokens.Space.l + 2).padding(.vertical, RotaTokens.Space.xl)
     }
 
-    // Icons only on the HUD page, whose own HUD list needs the width.
-    private var compactSidebar: Bool { selection == "HUD" }
-
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if !compactSidebar {
-                Text("SETTINGS").font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
-            }
-            ForEach(sections, id: \.0) { title, icon in
-                Button { selection = title } label: {
-                    Group {
-                        if compactSidebar { Image(systemName: icon).frame(maxWidth: .infinity) }
-                        else { Label(sectionTitle(title), systemImage: icon) }
-                    }
-                        .font(.system(size: compactSidebar ? 14 : 12, weight: selection == title ? .semibold : .regular))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, compactSidebar ? 0 : 10).padding(.vertical, 10)
-                        .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityAddTraits(selection == title ? .isSelected : [])
-                    .help(sectionTitle(title))
-                    .accessibilityLabel(sectionTitle(title))
-                    .accessibilityIdentifier("settings-section-\(title)")
+        VStack(alignment: .leading, spacing: RotaTokens.Space.xxs + 1) {
+            ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
+                sidebarRow(section.0, icon: section.1, index: index)
             }
             Spacer()
-            if !compactSidebar {
-                Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
-                    .font(.caption).foregroundStyle(.secondary).lineSpacing(4).padding(10)
+        }
+        .padding(sidebarCollapsed ? RotaTokens.Space.m : RotaTokens.Space.l).padding(.top, RotaTokens.Space.xs)
+        .frame(width: sidebarCollapsed ? 56 : 196)
+        .background(Color(nsColor: .underPageBackgroundColor).opacity(0.4))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Settings sections")
+    }
+
+    private func sidebarRow(_ title: String, icon: String, index: Int) -> some View {
+        let selected = selection == title
+        return Button { selection = title } label: {
+            HStack(spacing: RotaTokens.Space.m + 1) {
+                Image(systemName: icon)
+                    .font(.system(size: sidebarCollapsed ? 14 : 12.5, weight: .medium))
+                    .foregroundStyle(selected ? RotaTokens.accent : Color.secondary)
+                    .frame(width: 18)
+                if !sidebarCollapsed {
+                    Text(sectionTitle(title)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
             }
-        }.padding(compactSidebar ? 8 : 12).padding(.top, 10).frame(width: compactSidebar ? 56 : 180)
-            .background(Color(nsColor: .underPageBackgroundColor).opacity(0.4))
+            .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+            .frame(maxWidth: .infinity, alignment: sidebarCollapsed ? .center : .leading)
+            .padding(.horizontal, sidebarCollapsed ? 0 : RotaTokens.Space.m + 2).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: RotaTokens.Radius.m + 1, style: .continuous)
+                .fill(selected ? RotaTokens.accent.opacity(0.14) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help("\(sectionTitle(title)) (⌘\(index + 1))")
+        .accessibilityLabel(sectionTitle(title))
+        .accessibilityIdentifier("settings-section-\(title)")
     }
 
     private var page: some View {
@@ -307,12 +337,9 @@ struct ContentView: View {
                 GeometryReader { viewport in
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 20) {
-                        if selection != "Pointer & scrolling" {
-                            Text(sectionTitle(selection)).font(.system(size: 24, weight: .semibold))
-                                .accessibilityIdentifier("settings-page-heading")
-                            Text(selection == "Sync & backup" ? "Settings and API keys, automatically synced and encrypted." : selection == "General" ? "Permissions and startup belong to this Mac." : "Settings for \(store.activeConfigurationName)")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
+                        Text(pageSubtitle)
+                            .font(.callout).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("settings-page-heading")
                         pageContent
                     }
                     .frame(width: selection == "Actions" ? max(708, viewport.size.width - 44) : 708,
@@ -331,6 +358,15 @@ struct ContentView: View {
         }
     }
 
+    private var pageSubtitle: String {
+        switch selection {
+        case "Sync & backup": return "Settings and API keys, automatically synced and encrypted."
+        case "General": return "Permissions and startup belong to this Mac."
+        case "Pointer & scrolling": return "Device controls for \(store.activeConfigurationName). Navigator tuning applies across its action layers."
+        default: return "Settings for \(store.activeConfigurationName)"
+        }
+    }
+
     @ViewBuilder private var pageContent: some View {
         switch selection {
         case "General": general
@@ -341,7 +377,7 @@ struct ContentView: View {
         case "HUD": hudAndTapSettings
         case "Actions":
             HotkeyOrganizerView(store: store)
-            DisclosureGroup("Tap calibration") {
+            RotaDisclosureSection("Tap calibration") {
                 CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
                     .padding(.top, 12)
             }
@@ -358,7 +394,7 @@ struct ContentView: View {
     }
 
     private var defaultTapSettings: some View {
-            GroupBox {
+            RotaCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -373,16 +409,17 @@ struct ContentView: View {
                     Divider()
                     Toggle("Share tap and swipe actions across devices", isOn: deviceBinding(\.shareTapActions))
                     if !store.settings.resolvedDevices.shareTapActions {
-                        Picker("Edit actions for", selection: $actionDevice) {
-                            ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
-                        }.pickerStyle(.segmented).frame(width: 340)
+                        HStack(spacing: 8) {
+                            Text("Edit actions for")
+                            RotaSegmented("Edit actions for", selection: $actionDevice, values: GestureDevice.allCases) { $0.title }
+                        }
                     } else {
                         Label("One set of actions for Navigator and Apple trackpads", systemImage: "link")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     gestures(store.defaultProfileID)
                 }
-                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
     }
 
@@ -505,7 +542,7 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             if id != store.defaultProfileID {
-                Button("Make default") { makeDefault(id) }.buttonStyle(.link).font(.caption)
+                Button("Make default") { makeDefault(id) }.buttonStyle(.rotaLink).font(.caption)
             }
             if store.canRemoveProfile(id) {
                 Button {
@@ -513,8 +550,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.rotaIcon)
                 .help("Delete \(title)")
                 .accessibilityLabel("Delete \(title)")
             }
@@ -567,13 +603,9 @@ struct ContentView: View {
 
     private var pointerSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Pointer & scrolling").font(.system(size: 24, weight: .semibold))
-            Text("Device controls for \(store.activeConfigurationName). Navigator tuning applies across its action layers.")
-                .font(.callout).foregroundStyle(.secondary)
-            Picker("Device", selection: $pointerDevice) {
-                Label("ZSA Navigator", systemImage: "computermouse").tag(GestureDevice.navigator)
-                Label("macOS Trackpad", systemImage: "rectangle.and.hand.point.up.left").tag(GestureDevice.apple)
-            }.pickerStyle(.segmented).frame(width: 390)
+            RotaSegmented("Device", selection: $pointerDevice, options: [
+                RotaOption("ZSA Navigator", value: GestureDevice.navigator, systemImage: "computermouse"),
+                RotaOption("macOS Trackpad", value: GestureDevice.apple, systemImage: "rectangle.and.hand.point.up.left")])
                 .accessibilityIdentifier("pointer-device-picker")
             if pointerDevice == .navigator {
                 navigatorPointerSettings.accessibilityIdentifier("pointer-pane-navigator")
@@ -628,24 +660,16 @@ struct ContentView: View {
         }
     }
 
-    private func pointerWideCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon).font(.headline)
-            Divider()
-            content()
-        }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
+    private func pointerWideCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+        RotaCard(title, systemImage: icon) {
+            VStack(alignment: .leading, spacing: 14) { content() }
+        }
     }
 
-    private func pointerCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon).font(.headline)
-            Divider()
-            content()
-        }.padding(16).frame(width: 338, alignment: .topLeading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
+    private func pointerCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+        RotaCard(title, systemImage: icon) {
+            VStack(alignment: .leading, spacing: 14) { content() }
+        }.frame(width: 338, alignment: .topLeading)
     }
 
     private func gestures(_ id: UInt32) -> some View {
@@ -699,27 +723,27 @@ struct ContentView: View {
     }
 
     private var general: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Section("Status") {
-                LabeledContent("Navigator") { Text(statusText) }
-                Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }
-                Button("Set up this Mac…") { hid.presentOnboarding() }
-                .accessibilityIdentifier("open-accessibility-setup")
-                Button("Open Input Monitoring Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
+        VStack(alignment: .leading, spacing: 16) {
+            RotaCard("Status", systemImage: "dot.radiowaves.left.and.right") {
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("Navigator") { Text(statusText).foregroundStyle(.secondary) }
+                    Toggle("Enable Rotagivan", isOn: enabledBinding).toggleStyle(.rotaSwitch)
+                    HStack(spacing: 8) {
+                        Button("Reconnect") { hid.stop(); if store.settings.enabled { hid.start() } }
+                        Button("Set up this Mac…") { hid.presentOnboarding() }
+                            .accessibilityIdentifier("open-accessibility-setup")
+                        Button("Open Input Monitoring Settings") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
+                        }
+                    }
                 }
-                Toggle("Enable Rotagivan", isOn: enabledBinding)
             }
-            Divider()
-            Section {
-                Toggle("Launch at login", isOn: launchAtLoginBinding)
+            RotaCard("Startup", systemImage: "power") {
+                Toggle("Launch at login", isOn: launchAtLoginBinding).toggleStyle(.rotaSwitch)
             }
-            Divider()
-            Section {
-                Text("Rotagivan is an independent, editable implementation. Quit ZSA Navigator before using Rotagivan’s Navigator driver. Apple trackpad actions are independent of that driver.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Rotagivan is an independent, editable implementation. Quit ZSA Navigator before using Rotagivan’s Navigator driver. Apple trackpad actions are independent of that driver.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .font(.system(size: 12))
     }
@@ -735,6 +759,17 @@ struct ContentView: View {
     private func updateEditableGestures(_ value: ProfileGestures, for id: UInt32) {
         if editingAppleActions { store.updateAppleGestures(value, for: id) }
         else { store.updateGestures(value, for: id) }
+    }
+
+    private func deleteProfile(_ id: String) {
+        NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
+        hid.stop()
+        store.deleteConfiguration(id)
+        actionDevice = .navigator
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
+            if store.settings.enabled { hid.start() }
+        }
     }
 
     private func switchProfile(_ id: String?) {
@@ -760,23 +795,23 @@ struct ContentView: View {
 
     private var devices: some View {
         VStack(alignment: .leading, spacing: 18) {
-            GroupBox {
+            RotaCard("ZSA Navigator", systemImage: "computermouse") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Use ZSA Navigator", isOn: deviceBinding(\.navigatorEnabled))
+                    Toggle("Use ZSA Navigator", isOn: deviceBinding(\.navigatorEnabled)).toggleStyle(.rotaSwitch)
                     Text("Cursor, scrolling, tap actions, layers and Explorer. When off, Rotagivan releases the Navigator driver.")
                         .font(.caption).foregroundStyle(.secondary)
-                }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            GroupBox {
+            RotaCard("Apple trackpads", systemImage: "rectangle.and.hand.point.up.left") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Use Apple trackpad actions", isOn: deviceBinding(\.appleEnabled))
+                    Toggle("Use Apple trackpad actions", isOn: deviceBinding(\.appleEnabled)).toggleStyle(.rotaSwitch)
                     Text("Built-in and Magic Trackpads. Tap actions require two nearby fingers landing together and lifting quickly without sliding. Typing briefly blocks activation. Native pointer and scrolling remain controlled by macOS.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Allow Apple input on this Mac", isOn: Binding(get: { hid.appleTrackpadEnabled }, set: { hid.setAppleTrackpadEnabled($0) }))
                     Text(hid.appleTrackpadStatus).font(.caption).foregroundStyle(.secondary)
                     Text("Experimental private macOS touch interface. Clicks take priority over touch actions. The pointer pauses only while an Apple-controlled HUD is active.")
                         .font(.caption).foregroundStyle(.secondary)
-                }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
             Toggle("Share tap and swipe actions across devices", isOn: deviceBinding(\.shareTapActions))
             Text("The Default tap layer drives the same gestures across pointer profiles. Turn sharing off to customize Apple actions in HUD. Existing overrides are preserved when sharing is turned back on.")
@@ -886,7 +921,7 @@ struct ShortcutEditor: View {
                     Text(title).fontWeight(.semibold)
                 }
                 Spacer()
-                Toggle("Hotkey", isOn: value.enabled).toggleStyle(.switch).controlSize(.small)
+                Toggle("Hotkey", isOn: value.enabled).toggleStyle(.rotaSwitch).controlSize(.small)
             }
             if actionIndex == nil {
                 ShortcutRecorder(title: value.wrappedValue.enabled ? value.wrappedValue.displayName : "Record shortcut…") { recorded in
@@ -897,27 +932,75 @@ struct ShortcutEditor: View {
                 .frame(maxWidth: .infinity).frame(height: 26)
             } else {
             HStack(spacing: 6) {
-                Picker("Key", selection: value.keyCode) {
-                    ForEach(ShortcutSettings.keys, id: \.1) { name, code in Text(name).tag(code) }
-                }.frame(width: 120)
+                RotaSelect("Key", selection: value.keyCode,
+                    options: ShortcutSettings.keys.map { RotaOption($0.0, value: $0.1) }, fill: true)
+                    .frame(width: 120)
                 ForEach([( "⌃", UInt32(4096)), ("⌥", UInt32(2048)), ("⇧", UInt32(512)), ("⌘", UInt32(256))], id: \.1) { label, flag in
                     Toggle(label, isOn: Binding(get: { value.wrappedValue.modifiers & flag != 0 }, set: { on in
                         if on { value.wrappedValue.modifiers |= flag }
                         else { value.wrappedValue.modifiers &= ~flag }
                     }))
-                    .toggleStyle(.button)
+                    .toggleStyle(.rotaChip)
                     .help(flag == 4096 ? "Control" : flag == 2048 ? "Option" : flag == 512 ? "Shift" : "Command")
                 }
             }.disabled(!value.wrappedValue.enabled)
             }
             if showBehavior && actionIndex == nil {
-                Picker("Activation", selection: Binding(get: { value.wrappedValue.holdToActivate ?? true }, set: { value.wrappedValue.holdToActivate = $0 })) {
-                    Text("Hold to activate").tag(true)
-                    Text("Tap to toggle").tag(false)
-                }
-                .accessibilityLabel("\(title) activation")
+                RotaSegmented("\(title) activation", selection: Binding(get: { value.wrappedValue.holdToActivate ?? true }, set: { value.wrappedValue.holdToActivate = $0 }),
+                    options: [RotaOption("Hold to activate", value: true), RotaOption("Tap to toggle", value: false)])
                 .disabled(!value.wrappedValue.enabled)
             }
         }.padding(.vertical, 4)
+    }
+}
+
+// MARK: - Profile switcher
+// Built from RotaMenuButton (UIComponents.swift).
+
+/// One compact control for the configuration profile library: switch, rename,
+/// duplicate and delete live in a single menu instead of scattered buttons.
+struct RotaProfileSwitcher: View {
+    let profiles: [ConfigurationProfile]
+    let activeID: String
+    var onSelect: (String) -> Void
+    var onRename: () -> Void
+    var onDuplicate: () -> Void
+    var onDelete: () -> Void
+    var maximumProfiles = 20
+
+    private var activeName: String { profiles.first { $0.id == activeID }?.name ?? "Default" }
+
+    var body: some View {
+        HStack(spacing: RotaTokens.Space.s) {
+            Text(String(activeName.prefix(1)).uppercased())
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(RotaTokens.accent.gradient))
+                .accessibilityHidden(true)
+            RotaMenuButton(activeName, kind: .field) {
+                Section("Profiles") {
+                    ForEach(profiles) { profile in
+                        Button { onSelect(profile.id) } label: {
+                            if profile.id == activeID { Label(profile.name, systemImage: "checkmark") }
+                            else { Text(profile.name) }
+                        }
+                    }
+                }
+                Divider()
+                Button("Rename…", action: onRename)
+                    .accessibilityIdentifier("rename-profile")
+                Button("Duplicate", action: onDuplicate)
+                    .disabled(profiles.count >= maximumProfiles)
+                    .accessibilityIdentifier("duplicate-profile")
+                Button("Delete…", role: .destructive, action: onDelete)
+                    .disabled(profiles.count <= 1)
+                    .accessibilityIdentifier("delete-profile")
+            }
+            .accessibilityLabel("Profile")
+            .accessibilityValue(activeName)
+            .accessibilityIdentifier("profile-switcher")
+        }
+        .help("Switch, rename, duplicate or delete profiles")
     }
 }

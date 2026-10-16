@@ -14,6 +14,7 @@ security find-identity -v -p codesigning | grep -Fq "$signing_identity" || {
 }
 
 sources=(
+  "$script_dir/UIComponents.swift"
   "$script_dir/Models.swift"
   "$script_dir/HotkeyOrganizer.swift"
   "$script_dir/ActionTableRow.swift"

@@ -192,6 +192,7 @@ struct AccessibilitySetupView: View {
         .frame(width: 410)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
+        .buttonStyle(.rotaSecondary)
     }
 
     private var accessibilityStep: some View {
@@ -209,13 +210,13 @@ struct AccessibilitySetupView: View {
             VStack(alignment: .leading, spacing: 14) {
                 step("1", title: "Open Accessibility settings", detail: "Keep this guide beside System Settings.")
                 Button("Open Accessibility Settings", action: openSettings)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.rotaPrimary)
                     .accessibilityIdentifier("accessibility-open-settings")
                 step("2", title: "Drag Rotagivan into the list", detail: "Drag the app below into the Accessibility app list.")
                 if let url = appURL {
                     AccessibilityAppDragTile(appURL: url).frame(height: 82)
                     Button("Show in Finder", action: revealApp)
-                        .buttonStyle(.link).accessibilityIdentifier("accessibility-show-finder")
+                        .buttonStyle(.rotaLink).accessibilityIdentifier("accessibility-show-finder")
                 } else {
                     Text("Open your installed Rotagivan app to drag it from this guide. You can also use + in System Settings to select it.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -244,11 +245,11 @@ struct AccessibilitySetupView: View {
                 Spacer()
                 if state.trusted {
                     Button("Continue") { state.step = .trackpad }
-                        .keyboardShortcut(.defaultAction)
+                        .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                         .accessibilityIdentifier("onboarding-continue")
                 } else {
                     Button("Set up later", action: close)
-                        .keyboardShortcut(.defaultAction)
+                        .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                         .accessibilityIdentifier("accessibility-close")
                 }
             }
@@ -269,7 +270,7 @@ struct AccessibilitySetupView: View {
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
             Toggle("Enable Apple trackpad gestures", isOn: Binding(
                 get: { state.input.actionsEnabled }, set: { state.setAppleInput($0) }))
-                .toggleStyle(.switch)
+                .toggleStyle(.rotaSwitch)
                 .accessibilityIdentifier("onboarding-apple-input")
             Text("Turns on “Allow Apple input on this Mac” and Apple actions in this profile. This Mac’s input choice is not synced.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -293,7 +294,7 @@ struct AccessibilitySetupView: View {
                 Button(state.input.actionsEnabled ? "Done" : "Skip Apple gestures") {
                     if state.finishInputSetup() { close() }
                 }
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                 .accessibilityIdentifier("onboarding-finish")
             }
         }

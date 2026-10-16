@@ -22,26 +22,31 @@ The HUD has eight commands, scoped keyboard shortcuts (1–8 and Escape), reset,
 
 ## Cloudflare deployment
 
-This is a separate Worker named `rotagivan-website`; it does not change `rotagivan-sync` or its database. Only `dist/` is uploaded. No Astro adapter or server is needed.
-
-Authenticate with `npx wrangler login`, then run:
+The Worker `rotagivan-website` (`worker/index.js`) serves `dist/` as static
+assets at https://rota.silvermine.dev (Workers custom domain). Only the paths
+in `assets.run_worker_first` run Worker code: release downloads from the
+`rotagivan-releases` R2 bucket (`/download/latest`, `/latest.json`,
+`/releases/*`), and the Voice mode payments API under `/api/*`, backed by the
+`rotagivan-licenses` D1 database. The Worker does not touch `rotagivan-sync`.
 
 ```sh
-npm run deploy
+npm test            # Worker tests (node:test; in-memory D1/R2)
+npm run deploy      # astro build + wrangler deploy
+npm run db:migrate  # apply migrations/ to the remote D1 database
 ```
 
-The deploy wrapper uses an existing Wrangler OAuth login, or Cloudflare credentials from the process environment / the existing `~/.env` account convention. It reads only the relevant Cloudflare values and never sources shell commands or prints credentials. Never commit credentials.
+`scripts/cloudflare.mjs` runs Wrangler with an existing OAuth login or with
+Cloudflare credentials from the environment or `~/.env`, and never prints
+them. Publish app builds with `../scripts/release.sh`. For payments setup and
+the app licensing contract, see `../docs/payments.md`. For signing,
+notarization and the Gatekeeper status, see `../docs/customer-distribution.md`.
 
-For Cloudflare Git builds: root directory `website`, build command `npm run build`, deploy command `npx wrangler deploy`. Set `SITE_URL` to the final HTTPS origin before the production build to enable canonical URLs. A custom domain can be attached to this Worker after domain selection; no domain is assumed in source.
+## Still to decide before launch
 
-## Launch decisions still needed
-
-- Actual pricing, purchase terms, payment provider, and licensing model. The current pricing page deliberately says **Pricing coming soon**.
-- A Developer ID-signed, notarized and stapled customer build. The website does not offer the locally signed development app for public download.
-- Verified supported macOS versions, hardware, and processor architectures.
-- A production domain, support contact, and privacy/terms documents appropriate to the final app and sale.
-
-Customer distribution is described in `../docs/customer-distribution.md`. Page copy is grounded in the existing app; experimental Apple trackpad support and optional cloud voice requirements are disclosed. The sample Focus macro uses customer-selected apps/shortcuts rather than claiming a built-in universal focus command.
+- The Voice mode price (`src/pricing.ts` plus the Stripe price) and the Stripe setup in `docs/payments.md`.
+- A Developer ID-signed, notarized build. Until then, the first launch needs Open Anyway.
+- Verified macOS versions and architectures. Releases currently contain whatever `build.sh` produced on this Mac (arm64).
+- Support contact, terms and privacy pages.
 
 ## Verification
 

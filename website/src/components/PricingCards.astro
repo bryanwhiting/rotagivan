@@ -1,0 +1,40 @@
+---
+import VoiceCheckout from "./VoiceCheckout.astro";
+import { voicePrice } from "../pricing";
+---
+
+<div class="pricing-layout">
+  <article class="price-card">
+    <span class="pill-label">ROTAGIVAN</span>
+    <h2>Everything but voice</h2>
+    <p class="price">Free.</p>
+    <ul>
+      <li>Radial HUD launcher with nested groups</li>
+      <li>Window Manager and Chrome tabs HUD</li>
+      <li>Macros, keybindings, profiles and layers</li>
+      <li>ZSA Navigator gestures and tuning</li>
+      <li>Settings sync between your Macs</li>
+    </ul>
+    <a class="button secondary" href="/download/latest">
+      Download for macOS
+    </a>
+  </article>
+  <article class="price-card featured">
+    <span class="pill-label">VOICE MODE</span>
+    <h2>Talk to your Mac</h2>
+    <p class="price">
+      {voicePrice.amount}<small>{voicePrice.period}</small>
+    </p>
+    <ul>
+      <li>Speak a command, pick from the top three matches</li>
+      <li>Matches your own apps, macros and HUD actions</li>
+      <li>Nothing runs until you confirm</li>
+      <li>Use it on up to three of your Macs</li>
+    </ul>
+    <VoiceCheckout />
+    <p class="fineprint">
+      {voicePrice.note} Voice mode uses your own OpenRouter or OpenAI API
+      key; provider charges are billed by them.
+    </p>
+  </article>
+</div>

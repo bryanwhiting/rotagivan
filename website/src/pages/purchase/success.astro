@@ -1,0 +1,59 @@
+---
+import Layout from "../../layouts/Layout.astro";
+---
+
+<Layout
+  title="Thanks — Rotagivan Voice mode"
+  description="Your Rotagivan Voice mode license key."
+>
+  <div class="wrap">
+    <section class="page-hero">
+      <p class="eyebrow">THANK YOU</p>
+      <h1>
+        Voice mode
+        <br />
+        <em>is yours.</em>
+      </h1>
+      <p class="lede" data-purchase-status role="status" aria-live="polite">
+        Confirming your purchase…
+      </p>
+    </section>
+    <div class="download-state" data-license hidden>
+      <h2>Your license key</h2>
+      <p class="license-key" data-license-key></p>
+      <p>
+        Copy this key and keep it somewhere safe, such as your password
+        manager. Paste it into Rotagivan to unlock Voice mode on up to three of
+        your Macs.
+      </p>
+      <div class="button-row">
+        <a class="button" href="/download/latest">Download Rotagivan</a>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  const status = document.querySelector<HTMLElement>("[data-purchase-status]")!;
+  const id = new URLSearchParams(location.search).get("session_id");
+  let tries = 0;
+  async function poll() {
+    if (!id) {
+      status.textContent = "This page needs a checkout session. Check your receipt email for details.";
+      return;
+    }
+    try {
+      const r = await fetch(`/api/checkout/session?session_id=${encodeURIComponent(id)}`);
+      const body = await r.json();
+      if (r.status === 200 && body.licenseKey) {
+        status.textContent = "Payment confirmed.";
+        document.querySelector<HTMLElement>("[data-license-key]")!.textContent = body.licenseKey;
+        document.querySelector<HTMLElement>("[data-license]")!.hidden = false;
+        return;
+      }
+    } catch {}
+    if (++tries < 20) setTimeout(poll, 1500);
+    else status.textContent = "Your payment is still processing. Refresh this page in a minute.";
+  }
+  poll();
+</script>

@@ -88,6 +88,7 @@ sources=(
   "$script_dir/HotKeyManager.swift"
   "$script_dir/CalibrationSettingsView.swift"
   "$script_dir/AccessibilitySetup.swift"
+  "$script_dir/UpdateChecker.swift"
   "$script_dir/ContentView.swift"
   "$script_dir/ShortcutRecorder.swift"
   "$script_dir/RotagivanApp.swift"

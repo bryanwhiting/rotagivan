@@ -26,9 +26,41 @@ A future distribution workflow should:
 - Host a versioned downloadable artifact over HTTPS with a checksum, release notes, exact supported platforms, and clear support instructions. Add a verified download URL to the site only after these gates pass.
 - Implement and verify any paid licensing/activation and update mechanisms separately. A pricing page alone does not implement billing or entitlements. Automatic updating is not currently established by this change.
 
-## Current website behavior
+## Current release pipeline
 
-The Astro site shows **Pricing coming soon** and **Public download coming soon**. Its HUD is explicitly a browser simulation; it requests no microphone or Mac control. App marketing distinguishes experimental Apple trackpad support and optional cloud voice services. No unverified testimonials, speed benchmarks, purchase promises, or customer download are published.
+`scripts/release.sh` builds with `Rotagivan/build.sh`, then packages
+`Rotagivan-<version>-<build>.dmg` (drag-to-Applications) and `.zip`. It uploads
+them to the private `rotagivan-releases` R2 bucket and publishes
+`latest.json`. The `rotagivan-website` Worker serves:
+
+- `https://rota.silvermine.dev/download/latest`: 302 to the newest DMG (`/download/latest.zip` for the zip)
+- `https://rota.silvermine.dev/latest.json`: `{version, build, url, sha256, size, minimumOS, architectures, zip, commit, signing, notarized, publishedAt}`
+- `https://rota.silvermine.dev/releases/<file>`: immutable versioned files
+
+The app's `UpdateChecker` reads `latest.json` about once a day and offers the
+download when a newer version/build exists.
+
+**Gatekeeper status:** this Mac has no Developer ID Application identity, so
+releases keep the local "Rotagivan Development" signature and are not
+notarized. Downloaded copies are quarantined, and on first launch macOS
+reports that it cannot verify the app. The user must click **Open Anyway** in
+System Settings → Privacy & Security once. The download page explains this
+step and hides it automatically when `latest.json` says `notarized: true`.
+
+To ship a normal "download and open" app:
+
+1. Join the Apple Developer Program, then create a **Developer ID Application**
+   certificate and install it in the login Keychain.
+2. `xcrun notarytool store-credentials rotagivan-notary --apple-id … --team-id … --password <app-specific password>`
+3. `DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=rotagivan-notary scripts/release.sh`
+
+The script re-signs a *copy* of the app with hardened runtime, a secure
+timestamp and `Rotagivan/Release.entitlements` (microphone and Apple Events).
+It then notarizes and staples the app and the DMG, and checks the DMG with
+`spctl`. Local `build.sh` builds keep the development identity. A Developer
+ID build has a different designated requirement, so its first launch needs a
+new Accessibility grant. Test the hardened-runtime build (voice, Chrome
+automation, the Rust search dylib) before publishing it.
 
 ## Official references
 

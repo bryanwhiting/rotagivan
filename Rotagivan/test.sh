@@ -23,6 +23,9 @@ for test in CursorResponseTests CursorGainTests CursorTelemetryTests ScrollRespo
   xcrun swiftc -j 4 "${common[@]}" "Rotagivan/Tests/$test.swift" -o "$test_dir/$test"
   "$test_dir/$test"
 done
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/UpdateChecker.swift Rotagivan/Tests/UpdateCheckerTests.swift \
+  -framework AppKit -framework Security -o "$test_dir/UpdateCheckerTests"
+"$test_dir/UpdateCheckerTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/HotkeyOrganizerTests.swift -o "$test_dir/HotkeyOrganizerTests"
 "$test_dir/HotkeyOrganizerTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKeyManager.swift \

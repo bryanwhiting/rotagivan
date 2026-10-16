@@ -12,3 +12,4 @@ node_modules/
 .dev.vars*
 SyncBackend/worker-configuration.d.ts
 SyncBackend/dist/
+release/

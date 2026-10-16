@@ -64,7 +64,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
         let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "HUD")
             .modifier(WorkspaceViewportProbe(geometry: viewportGeometry))
             .defaultAppStorage(defaults).environment(\.colorScheme, .dark))
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 940, height: 740),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1220, height: 740),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.contentView = host
         panel.center(); panel.makeKeyAndOrderFront(nil); NSApp.activate()
@@ -203,7 +203,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
             "No add circles remain when all eight positions are occupied")
         var vacant = baseline; vacant.holdLayers = []
         store.settings.appExplorer = vacant
-        panel.setContentSize(NSSize(width: 860, height: 680)); settle()
+        panel.setContentSize(NSSize(width: 1100, height: 680)); settle()
         try capture("hud-workspace-all-empty-min")
         for position in HUDLayerPosition.allCases {
             let circle = frame(find("hud-add-position-" + position.rawValue))
@@ -218,7 +218,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
         store.settings.appExplorer = baseline; settle()
         // Capture the supported minimum before assertions, including the extra
         // Window Manager toolbar, so a failure still leaves useful visual evidence.
-        panel.setContentSize(NSSize(width: 860, height: 680)); settle()
+        panel.setContentSize(NSSize(width: 1100, height: 680)); settle()
         try capture("hud-workspace-min-main")
         let captureWindowLayer = ExplorerHoldLayer(builtIn: .windowManager, name: "Window HUD", position: .right, holdShortcut: nil)
         var captureSettings = baseline
@@ -232,7 +232,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
         }
         store.settings.appExplorer = baseline; settle()
         press("hud-layer-button-main")
-        for size in [NSSize(width: 940, height: 740), NSSize(width: 860, height: 680), NSSize(width: 1240, height: 900)] {
+        for size in [NSSize(width: 1220, height: 740), NSSize(width: 1100, height: 680), NSSize(width: 1400, height: 900)] {
             panel.setContentSize(size); settle()
             try capture("hud-workspace-initial-\(Int(size.width))-\(Int(size.height))")
             press("hud-layer-button-main")
@@ -244,7 +244,11 @@ private struct WorkspaceViewportProbe: ViewModifier {
             precondition(store.settings.appExplorer == baseline, "Selecting every mapped/legacy HUD must not mutate settings")
             try capture("hud-workspace-\(Int(size.width))-\(Int(size.height))")
         }
-        panel.setContentSize(NSSize(width: 940, height: 740)); settle()
+        panel.setContentSize(NSSize(width: 1220, height: 740)); settle()
+        // The HUD list shows nested HUDs under their parent and opens them directly.
+        press("hud-nested-main-up")
+        _ = tile(.left, name: "Main Nested left")
+        press("hud-layer-button-main")
         let selected = layers[0]
         press("hud-layer-button-" + selected.id.uuidString)
         press("hud-visual-actions")
@@ -269,10 +273,9 @@ private struct WorkspaceViewportProbe: ViewModifier {
         afterDrag.holdLayers = baseline.holdLayers
         precondition(afterDrag == baseline, "Native drag must edit only the selected HUD layer")
         precondition(tile(.up, name: "Layer 0 Group").accessibilityPerformPress?() == true); settle()
-        guard let popover = NSApp.windows.first(where: { $0 !== panel && $0.isVisible }), let popupRoot = popover.contentView else {
-            preconditionFailure("Actual workspace tile must open a native popover")
-        }
-        precondition(button("Edit HUD layer…", in: popupRoot).accessibilityPerformPress?() == true); settle()
+        precondition(!NSApp.windows.contains { $0 !== panel && $0.isVisible },
+            "Selecting a workspace tile edits it in the docked inspector, not a popover")
+        precondition(button("Edit HUD layer…").accessibilityPerformPress?() == true); settle()
         let nestedBefore = store.settings.appExplorer!
         drag(tile(.left, name: "Layer 0 Nested left"), to: tile(.right, name: "Layer 0 Nested right"))
         let nestedAfter = store.settings.appExplorer!
@@ -287,27 +290,15 @@ private struct WorkspaceViewportProbe: ViewModifier {
         precondition(nestedAfter == expected, "Nested routed drop must preserve every unrelated layer and root path")
         press("hud-layer-button-main")
         let beforeDefaultTaps = store.settings.appExplorer
-        let setup = find("hud-workspace-setup") as! NSPopUpButtonCell
-        let setupFrame = frame(setup)
-        let setupPoint = NSPoint(x: setupFrame.midX, y: setupFrame.midY)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            guard let item = setup.menu?.items.first(where: { $0.title == "Default taps…" }),
-                  let action = item.action else { preconditionFailure("Setup menu must expose default tap settings") }
-            precondition(NSApp.sendAction(action, to: item.target, from: item))
-            let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: panel.windowNumber, context: nil, characters: "\u{1b}",
-                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
-            NSApp.postEvent(escape, atStart: false)
-        }
-        send(.leftMouseDown, screen: setupPoint)
-        send(.leftMouseUp, screen: setupPoint)
-        settle()
-        guard let tapSheet = panel.attachedSheet, let tapRoot = tapSheet.contentView else { preconditionFailure("Default tap actions need a native sheet") }
-        _ = find("default-tap-settings", in: tapRoot)
-        try capture("hud-default-taps-sheet", root: tapRoot)
-        precondition(button("Done", in: tapRoot).accessibilityPerformPress?() == true); settle()
-        precondition(panel.attachedSheet == nil, "Native dismissal must release the sheet and mouse responder state")
+        press("hud-default-taps")
+        _ = find("default-tap-settings")
+        precondition(panel.attachedSheet == nil, "Default taps edit inline in the HUD workspace")
+        try capture("hud-default-taps-inline")
         precondition(store.settings.appExplorer == beforeDefaultTaps)
+        press("hud-builtin-default-mediaControls")
+        _ = find("hud-builtin-default-pane")
+        precondition(store.settings.appExplorer == beforeDefaultTaps, "Browsing built-in defaults must not mutate settings")
+        press("hud-layer-button-main")
         let windowLayer = ExplorerHoldLayer(builtIn: .windowManager, name: "Window HUD", position: .right, holdShortcut: nil)
         var beforeWindow = store.settings.appExplorer!
         beforeWindow.holdLayers![1] = windowLayer
@@ -366,6 +357,6 @@ private struct WorkspaceViewportProbe: ViewModifier {
                 if size.width == 860 { try capture("hud-other-page-" + section.replacingOccurrences(of: " ", with: "-"), root: ordinaryHost) }
             }
         }
-        print("HUD workspace passed actual ContentView viewport centering, all mapped/legacy layers, inert browsing, selected/nested drag persistence, native tile popover, and default taps access.")
+        print("HUD workspace passed actual ContentView viewport centering, all mapped/legacy layers, inert browsing, selected/nested drag persistence, docked tile inspector, nested HUD list, and inline default taps.")
     }
 }

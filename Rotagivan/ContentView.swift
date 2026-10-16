@@ -130,7 +130,6 @@ struct ContentView: View {
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
     @State private var pendingLayerDeletion: PendingLayerDeletion?
-    @State private var editingDefaultTaps = false
     private let initialHUDGroup: ExplorerReservedGroup?
     private let layerColumnWidth: CGFloat = 468
 
@@ -183,24 +182,13 @@ struct ContentView: View {
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
         .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
-        .frame(minWidth: 860, idealWidth: 940, maxWidth: .infinity,
+        // The HUD workspace needs room for its list, canvas and inspector.
+        .frame(minWidth: selection == "HUD" ? 1100 : 860, idealWidth: selection == "HUD" ? 1220 : 940, maxWidth: .infinity,
                minHeight: 680, idealHeight: 740, maxHeight: .infinity)
     }
 
     private var profileEditingContent: some View {
         settingsLayout
-        .sheet(isPresented: $editingDefaultTaps) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Default tap actions").font(.title2.weight(.semibold))
-                    Spacer()
-                    Button("Done") { editingDefaultTaps = false }.keyboardShortcut(.cancelAction)
-                }
-                ScrollView { defaultTapSettings }
-            }
-            .padding(24).frame(width: 660, height: 580)
-            .accessibilityIdentifier("default-tap-settings")
-        }
         .sheet(item: $renamingProfile) { profile in
             ProfileNameEditor(name: profile.name, onSave: { name in
                 guard store.renameConfiguration(name, for: profile.id) else { return false }
@@ -275,25 +263,37 @@ struct ContentView: View {
         .padding(.horizontal, 22).padding(.vertical, 16)
     }
 
+    // Icons only on the HUD page, whose own HUD list needs the width.
+    private var compactSidebar: Bool { selection == "HUD" }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("SETTINGS").font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
+            if !compactSidebar {
+                Text("SETTINGS").font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(1.4).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 9)
+            }
             ForEach(sections, id: \.0) { title, icon in
                 Button { selection = title } label: {
-                    Label(sectionTitle(title), systemImage: icon)
-                        .font(.system(size: 12, weight: selection == title ? .semibold : .regular))
+                    Group {
+                        if compactSidebar { Image(systemName: icon).frame(maxWidth: .infinity) }
+                        else { Label(sectionTitle(title), systemImage: icon) }
+                    }
+                        .font(.system(size: compactSidebar ? 14 : 12, weight: selection == title ? .semibold : .regular))
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, compactSidebar ? 0 : 10).padding(.vertical, 10)
                         .background(selection == title ? Color.teal.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityAddTraits(selection == title ? .isSelected : [])
+                    .help(sectionTitle(title))
+                    .accessibilityLabel(sectionTitle(title))
                     .accessibilityIdentifier("settings-section-\(title)")
             }
             Spacer()
-            Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
-                .font(.caption).foregroundStyle(.secondary).lineSpacing(4).padding(10)
-        }.padding(12).padding(.top, 10).frame(width: 180)
+            if !compactSidebar {
+                Text("\(store.profiles.count) layers\n\(store.settings.resolvedDevices.shareTapActions ? "Shared actions" : "Device overrides")")
+                    .font(.caption).foregroundStyle(.secondary).lineSpacing(4).padding(10)
+            }
+        }.padding(compactSidebar ? 8 : 12).padding(.top, 10).frame(width: compactSidebar ? 56 : 180)
             .background(Color(nsColor: .underPageBackgroundColor).opacity(0.4))
     }
 
@@ -354,7 +354,7 @@ struct ContentView: View {
 
     private var hudAndTapSettings: some View {
         HUDSettingsView(store: store, initialGroup: initialHUDGroup,
-                        onEditDefaultTaps: { editingDefaultTaps = true })
+                        defaultTaps: { AnyView(defaultTapSettings.accessibilityIdentifier("default-tap-settings")) })
     }
 
     private var defaultTapSettings: some View {

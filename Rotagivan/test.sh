@@ -230,7 +230,7 @@ done
 settings_sources=()
 while IFS= read -r source; do
   settings_sources+=("Rotagivan/$source")
-done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)".*/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
+done < <(sed -n '/^sources=(/,/^)/s/^  "$script_dir\/\([^"]*\.swift\)"$/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
 for test in ReleaseSettingsTests BuiltInHUDUISmoke TemporaryIntentionUISmoke HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML -lsqlite3 "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \

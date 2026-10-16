@@ -355,8 +355,9 @@ editor instead of being mixed into the action catalog.
 
 ### Editable HUD templates
 
-In HUD settings, choose **Add HUD → Templates → Mac Actions / Media Controls /
-Editing Actions**, then an empty position. Templates copy ordinary tiles that
+In HUD settings, choose **New HUD → From template → Mac Actions / Media Controls /
+Editing Actions** below the HUD list. The new HUD takes the next free position
+around Main HUD; change it under Position in the inspector. Templates copy ordinary tiles that
 can be replaced, moved, or removed; clearing them does not regenerate defaults.
 Recent Apps and Window Manager remain dynamic built-ins. Existing media layers
 now show their six controls in the editor and become ordinary saved tiles on

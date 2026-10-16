@@ -38,6 +38,8 @@ struct ConfigurationTests {
     @MainActor static func main() throws {
         let yaml = try String(contentsOfFile: "Rotagivan/DefaultConfiguration.yaml", encoding: .utf8)
         let factory = try AppConfiguration.parse(yaml)
+        do { _ = try AppConfiguration.parse("rota-e2ee-settings-v9:" + String(repeating: "A", count: 600)); fatalError("Accepted scalar config") }
+        catch { precondition(error.localizedDescription == "This isn’t a Rotagivan configuration.", error.localizedDescription) }
         precondition(factory.settings.resolvedApplicationCommands.isEmpty, "Legacy settings need no application command migration")
         var customCommands = factory
         var browserURL = BindingAction.openURL("https://example.com/project")

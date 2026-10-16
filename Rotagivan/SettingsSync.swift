@@ -426,7 +426,7 @@ struct SyncCredentials {
                 if localState.journal.fields.isEmpty {
                     let firstCloud = try await fetchEncrypted(signed)
                     if let yaml = firstCloud.ciphertext, !yaml.hasPrefix("rota-e2ee-settings-v1:") {
-                        let legacyConfig = try AppConfiguration.parse(yaml)
+                        let legacyConfig = try Self.parseLegacyCloud(yaml)
                         defaults.set(try JSONEncoder().encode(legacyConfig), forKey: "encrypted.legacyCloud." + accountID)
                         let legacyFields = try SyncConfigurationCodec.fields(legacyConfig)
                         for (name, value) in legacyFields.sorted(by: { $0.key < $1.key }) {
@@ -452,7 +452,7 @@ struct SyncCredentials {
                         preferences.defaults.set(try JSONEncoder().encode(state), forKey: stateKey)
                     }, validate: { journal in _ = try SyncConfigurationCodec.configuration(journal) }, legacy: { yaml in
                         var journal = EncryptedSettingsJournal()
-                        for (name, value) in try SyncConfigurationCodec.fields(AppConfiguration.parse(yaml)).sorted(by: { $0.key < $1.key }) {
+                        for (name, value) in try SyncConfigurationCodec.fields(SettingsSync.parseLegacyCloud(yaml)).sorted(by: { $0.key < $1.key }) {
                             try journal.set(value, for: name, deviceID: "legacy")
                         }
                         return journal
@@ -506,6 +506,14 @@ struct SyncCredentials {
             }
             self.error = "Sync paused. Your local settings are safe. " + error.localizedDescription
             syncStatus = "Waiting to sync · retrying automatically"
+        }
+    }
+    /// The cloud copy is neither encrypted sync data nor a plain YAML save.
+    nonisolated static func parseLegacyCloud(_ yaml: String) throws -> AppConfiguration {
+        do { return try AppConfiguration.parse(yaml) } catch {
+            let format = yaml.hasPrefix("rota-e2ee-") ? "was saved by a newer version of Rotagivan"
+                : "isn’t in a format this version of Rotagivan can read"
+            throw ConfigurationError("The cloud copy of your settings \(format) (\(error.localizedDescription)) Update Rotagivan on your other Macs, then sync again.")
         }
     }
     private func expireAccount(_ signed: SyncAccount) async throws {

@@ -42,6 +42,9 @@ struct AppConfiguration: Codable {
         // Inspect numeric values BEFORE model decoding, which may sanitize
         // old cursor curves. Invalid imports must not silently change values.
         let raw = try ConfigurationYAML.decode(ConfigurationValue.self, from: yaml)
+        // A lone scalar (e.g. an unrecognised sync blob) would otherwise fail
+        // the per-string length check as "config is too long."
+        guard case .object = raw else { throw ConfigurationError("This isn’t a Rotagivan configuration.") }
         try raw.validate()
         let result = try ConfigurationYAML.decode(Self.self, from: yaml)
         try result.validate()

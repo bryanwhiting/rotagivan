@@ -92,7 +92,6 @@ struct HotkeyOrganizerView: View {
     @State private var deleting: NamedHotkey?
     @State private var editingBinding: ActionBinding?
     @State private var migratingNamedHotkeyID: String?
-    @State private var assigningHotkey = false
     @State private var expandedAssignment: String?
 
     @MainActor init(store: SettingsStore, catalog: ActionCatalogSnapshot? = nil) {
@@ -133,9 +132,7 @@ struct HotkeyOrganizerView: View {
     }
 
     var body: some View {
-        // Read this in the parent body so the sheet captures the current mode.
-        let keyboardOnly = assigningHotkey
-        return VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 TextField("Search actions, apps or shortcuts", text: $search).textFieldStyle(.roundedBorder)
                 addActionMenu
@@ -234,11 +231,11 @@ struct HotkeyOrganizerView: View {
                 HStack { Spacer(); Button("Done") { managingOverrides = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 720, height: 580)
         }
-        .sheet(item: $editingBinding, onDismiss: { assigningHotkey = false }) { binding in
-            BindingEditor(binding: binding, existing: store.settings.actionBindings ?? [], allowsGestures: !keyboardOnly, global: true,
+        .sheet(item: $editingBinding) { binding in
+            BindingEditor(binding: binding, existing: store.settings.actionBindings ?? [], global: true,
                 reservedKeys: reservedGlobalKeys,
                 occupiedGestures: occupiedGestures,
-                title: keyboardOnly ? "Assign hotkey" : "Global assignment", onSave: { updated in
+                title: "Assign hotkey or gesture", onSave: { updated in
                     var bindings = store.settings.actionBindings ?? []
                     if let index = bindings.firstIndex(where: { $0.id == updated.id }) { bindings[index] = updated }
                     else { bindings.append(updated) }
@@ -348,8 +345,7 @@ struct HotkeyOrganizerView: View {
             action: row?.action ?? BindingAction(kind: .keystroke))
     }
 
-    private func assign(_ action: BindingAction, keyboardOnly: Bool = false) {
-        assigningHotkey = keyboardOnly
+    private func assign(_ action: BindingAction) {
         migratingNamedHotkeyID = nil
         editingBinding = ActionBinding(trigger: BindingTrigger(), action: action)
     }
@@ -405,13 +401,13 @@ struct HotkeyOrganizerView: View {
                             .lineLimit(2).help(row.keybindings)
                         }
                         Spacer(minLength: 0)
-                        Button("Assign hotkey…") { assign(row.action, keyboardOnly: true) }
+                        Button("Assign hotkey…") { assign(row.action) }
                             .buttonStyle(.bordered).controlSize(.small).fixedSize()
                             .disabled(row.isAppScoped)
                             .help(row.isAppScoped
                                 ? "This action belongs to an application. Manage its application overrides to assign an app-specific shortcut."
-                                : "Assign a keyboard shortcut to \(row.name)")
-                            .accessibilityLabel("Assign hotkey to \(row.name)")
+                                : "Assign a keyboard shortcut or trackpad gesture to \(row.name)")
+                            .accessibilityLabel("Assign hotkey or gesture to \(row.name)")
                             .accessibilityIdentifier("assign-action-hotkey-\(row.id)")
                         Menu {
                             Button("Edit voice keywords…") { vocabularyRow = row }

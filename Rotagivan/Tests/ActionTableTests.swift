@@ -121,8 +121,8 @@ import SwiftUI
             preconditionFailure("Inline assignment must open the shared editor")
         }
         let sheetElements = elements(in: sheetContent)
-        precondition(!sheetElements.contains { ($0.accessibilityLabel?() ?? "").contains("Tap or swipe") },
-            "Inline hotkey assignment must hide the gesture picker")
+        precondition(descendants(sheetContent).contains { ($0 as? NSPopUpButton)?.title == "Trackpad tap or swipe" },
+            "Inline hotkey assignment must offer keyboard shortcuts and trackpad gestures")
         precondition(sheetElements.contains { ($0.accessibilityLabel?() ?? "").contains("Action: \(lockRow.name)") },
             "The editor must be prefilled with the clicked action")
         guard let cancel = sheetElements.first(where: { $0.accessibilityLabel?() == "Cancel" }) else {

@@ -48,7 +48,7 @@ struct LauncherAction: Identifiable, Hashable, Sendable {
         records.filter { $0.enabled && $0.action.kind != .openApp }.map {
             let category = $0.action.kind == .macro ? "Macro" : ($0.action.kind == .openURL ? "Website bookmark" : ($0.appName ?? "Mac action"))
             return Self(id: "registered:" + $0.id, name: $0.title,
-                detail: category + " · Return twice to confirm", target: .registered($0.id))
+                detail: category + " · Return to run", target: .registered($0.id))
         }
     }
     static var settings: Self {
@@ -114,7 +114,7 @@ enum LauncherMenuCatalog {
                 if !name.isEmpty, enabled(child), pressable(child) {
                     let action = LauncherMenuAction(pid:pid,indices:path,titles:labels)
                     result.append(LauncherAction(id:action.id,name:readable.joined(separator:" → "),
-                        detail:"App menu · Return twice to confirm",target:.menu(action)))
+                        detail:"App menu · Return to run",target:.menu(action)))
                 }
                 walk(child,indices:path,titles:labels,depth:depth+1)
             }

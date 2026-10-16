@@ -88,7 +88,7 @@ enum ActionPickerCatalog {
         CommonMacShortcut.all.forEach { add($0.action, .shortcuts, detail: $0.detail) }
         dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             .forEach { add(.macro($0), .macros, detail: $0.summary) }
-        AppExplorerAction.macOSCommands.forEach { add(.command($0), .mac) }
+        (AppExplorerAction.appCommands + AppExplorerAction.macOSCommands).forEach { add(.command($0), .mac) }
         AppExplorerAction.windowCommands.forEach { add(.command($0), .windows) }
         for layout in ExplorerWindowLayout.allCases {
             for direction in SwipeDirection.allCases {
@@ -147,6 +147,21 @@ struct ActionPickerModal: View {
     @State private var custom: String?
     @State private var draft: BindingAction?
     @State private var url = "https://"
+    @State private var websiteName = ""
+
+    private var websiteDraft: BindingAction {
+        var action = current.kind == .openURL ? current : .openURL(url)
+        action.url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = websiteName.trimmingCharacters(in: .whitespacesAndNewlines)
+        action.name = title.isEmpty ? nil : title
+        return action
+    }
+
+    private func editWebsite() {
+        url = current.kind == .openURL ? current.url ?? "https://" : "https://"
+        websiteName = current.kind == .openURL ? current.name ?? "" : ""
+        custom = "Website"
+    }
 
     private var items: [ActionPickerItem] {
         ActionPickerCatalog.make(dictionary: dictionary, layers: layers, destinations: destinations,
@@ -154,6 +169,7 @@ struct ActionPickerModal: View {
     }
     private var results: [ActionPickerItem] { ActionPickerCatalog.search(items, query: query, category: category) }
     private var selected: BindingAction? {
+        if custom == "Website" { return websiteDraft }
         if custom != nil { return draft }
         return results.first { $0.id == selectedID }?.action
     }
@@ -205,7 +221,8 @@ struct ActionPickerModal: View {
                     Text("CREATE YOUR OWN").font(.system(size: 9, weight: .semibold)).tracking(0.7).foregroundStyle(.secondary).padding(.horizontal, 10)
                     Button { custom = "Keystroke"; draft = nil } label: { Label("Record keystroke", systemImage: "keyboard") }
                         .buttonStyle(.plain).padding(8)
-                    Button { custom = "Website"; url = current.kind == .openURL ? current.url ?? "https://" : "https://"; draft = .openURL(url) } label: { Label("Open a website", systemImage: "link") }
+                    Button(action: editWebsite) { Label("Open a website", systemImage: "link") }
+                        .accessibilityIdentifier("action-picker-create-website")
                         .buttonStyle(.plain).padding(8)
                     Button(action: browseApplication) { Label("Browse for app…", systemImage: "folder") }
                         .buttonStyle(.plain).padding(8)
@@ -267,7 +284,10 @@ struct ActionPickerModal: View {
         }
         .frame(width: 760, height: 620)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { selectedID = current.identity; if selected == nil { selectFirst() } }
+        .onAppear {
+            if current.kind == .openURL { editWebsite() }
+            else { selectedID = current.identity; if selected == nil { selectFirst() } }
+        }
         .onChange(of: query) { _, _ in
             custom = nil; draft = nil
             if !results.contains(where: { $0.id == selectedID }) { selectFirst() }
@@ -314,13 +334,19 @@ struct ActionPickerModal: View {
             Image(systemName: name == "Website" ? "link" : "keyboard")
                 .font(.system(size: 30, weight: .light)).foregroundStyle(Color.accentColor)
             Text(name == "Website" ? "Open a website" : "Record a keystroke").font(.title2.weight(.semibold))
-            Text(name == "Website" ? "Enter an http or https address. This action opens it in your default browser." :
+            Text(name == "Website" ? "Enter an http or https address and an optional title. The action keeps its selected browser, or uses your default browser." :
                 "Press the key combination you want this action to send. This is the output, not the trigger.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if name == "Website" {
+                Text("Website title (optional)").font(.headline)
+                TextField("For example, Client dashboard", text: $websiteName).textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Website title")
+                    .accessibilityIdentifier("action-picker-website-name")
+                Text("Website address").font(.headline)
                 TextField("https://example.com", text: $url).textFieldStyle(.roundedBorder)
-                    .onChange(of: url) { _, value in draft = .openURL(value.trimmingCharacters(in: .whitespacesAndNewlines)) }
-                if draft != nil && draft?.isValid != true { Text("Enter a valid http or https URL.").font(.caption).foregroundStyle(.orange) }
+                    .accessibilityLabel("Website address")
+                    .accessibilityIdentifier("action-picker-website-url")
+                if !websiteDraft.isValid { Text("Enter a valid http or https URL and a title of at most 512 characters.").font(.caption).foregroundStyle(.orange) }
             } else {
                 ShortcutRecorder(title: draft?.title ?? "Click to record…") { draft = .keystroke($0) }.frame(height: 34)
             }

@@ -34,7 +34,7 @@ struct LayerActionAssignmentsEditor: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Tap action assignments")
+                    Text("Tap and swipe assignments")
                         .font(.system(size: 13, weight: .semibold))
                     Text("A gesture on the left runs the action on the right.")
                         .font(.caption)
@@ -44,7 +44,7 @@ struct LayerActionAssignmentsEditor: View {
                 Button {
                     showingAddAction = true
                 } label: {
-                    Label("Add tap action", systemImage: "plus")
+                    Label("Add tap or swipe", systemImage: "plus")
                 }
                 .accessibilityIdentifier("add-layer-action")
             }
@@ -55,7 +55,7 @@ struct LayerActionAssignmentsEditor: View {
                         Image(systemName: "hand.tap")
                             .font(.system(size: 17))
                             .foregroundStyle(.secondary)
-                        Text("No tap actions assigned")
+                        Text("No tap or swipe actions assigned")
                             .foregroundStyle(.secondary)
                         Spacer()
                     }
@@ -394,9 +394,9 @@ struct AddLayerActionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Add tap action")
+                Text("Add tap or swipe action")
                     .font(.title3.weight(.semibold))
-                Text("Choose a tap. Optionally add a one- or two-finger swipe and its direction.")
+                Text("Choose a tap or two-finger swipe. Taps can optionally add a one- or two-finger swipe and its direction.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

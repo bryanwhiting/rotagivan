@@ -72,6 +72,18 @@ import AppKit
   precondition(controller.processLayerKey(key(44,"/")),"Slash should open settings")
   try await Task.sleep(nanoseconds:100_000_000)
   precondition(settingsOpened && !controller.isVisible,"Slash opens settings without consuming a search character")
+  controller.frontmostPID = { 999_999 }
+  controller.frontmostBundleID = { nil }
+  controller.voiceCatalog = { [VoiceRegisteredAction(action: .command(.syncSettings), detail: "Sync fixture")] }
+  var dispatched: [BindingAction] = []
+  controller.onKeyboardBindingAction = { dispatched.append($0) }
+  controller.show(waitingForLift:false)
+  precondition(controller.processLayerKey(key(0,"sync settings")))
+  precondition(controller.displayedLauncherActions.first?.name == "Sync settings")
+  precondition(controller.processLayerKey(key(36)))
+  try await Task.sleep(nanoseconds:100_000_000)
+  precondition(dispatched == [.command(.syncSettings)] && !controller.isVisible,
+               "One Return confirms and executes a selected action, without a second confirmation")
   controller.showWindowManager(waitingForLift:false)
   _ = controller.processLayerKey(key(0,"s"))
   precondition(controller.displayedLauncherQuery.isEmpty,"Window Manager retains its key routing")

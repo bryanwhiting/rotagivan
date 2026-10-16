@@ -149,11 +149,13 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
   Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift -lsqlite3)
+for test in ActionTableTests HotkeyGestureAssignmentTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ActionTableTests.swift \
-  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ActionTableTests"
-"$test_dir/ActionTableTests" "$test_dir"
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift "Rotagivan/Tests/$test.swift" \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
+"$test_dir/$test" "$test_dir"
+done
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
   Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
@@ -164,7 +166,7 @@ for test in ApplicationCommandTests BrowserURLDispatcherTests; do
     -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
-for test in ActionPickerTests SharedApplicationPickerTests; do
+for test in ActionPickerTests SharedApplicationPickerTests WebsiteActionTests; do
   xcrun swiftc -j 4 "${ui_sources[@]}" "Rotagivan/Tests/$test.swift" \
     -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test" "$test_dir"
@@ -214,7 +216,7 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
   Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/SyncStorageTests.swift \
   -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncStorageTests"
 "$test_dir/SyncStorageTests"
-for test in ManualSyncTests CredentialLifecycleTests; do
+for test in ManualSyncTests CredentialLifecycleTests SettingsSyncActionTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \
   Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift \

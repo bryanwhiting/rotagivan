@@ -636,7 +636,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
 }
 
 enum AppExplorerAction: String, Codable, CaseIterable {
-    case activateVoiceMode
+    case activateVoiceMode, syncSettings
     case toggleStageManager
     case toggleDock, previousApp, nextAppWindow, previousAppWindow, appExpose, hideApp, hideOtherApps
     case moveWindowPreviousDesktop, moveWindowNextDesktop
@@ -645,6 +645,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     var title: String {
         switch self {
         case .activateVoiceMode: return "Activate voice mode"
+        case .syncSettings: return "Sync settings"
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
         case .appWindows: return "Show current app’s windows"
@@ -673,6 +674,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     var symbol: String {
         switch self {
         case .activateVoiceMode: return "mic.fill"
+        case .syncSettings: return "arrow.triangle.2.circlepath"
         case .windowManager: return "rectangle.split.2x2"
         case .mediaControls: return "speaker.wave.2.fill"
         case .appWindows: return "macwindow.on.rectangle"
@@ -701,6 +703,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     var description: String {
         switch self {
         case .activateVoiceMode: return "Open voice mode in the main HUD to speak an action."
+        case .syncSettings: return "Save all settings locally and publish them to your signed-in cloud account. Does not restore or merge remote settings, or transfer encrypted API keys."
         case .toggleStageManager: return "Turn Stage Manager on or off using your macOS shortcut. First enable Turn Stage Manager on/off in System Settings → Keyboard → Keyboard Shortcuts → Mission Control. No shortcut is assigned automatically."
         case .toggleDock: return "Toggle automatic hiding of the Dock with Option–Command–D."
         case .previousApp: return "Switch to the most recently used other app with Command–Tab. Repeating toggles between the last two apps."
@@ -726,6 +729,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .closeWindow: return "Close the focused window. The app may ask about unsaved changes."
         }
     }
+    static let appCommands: [Self] = [.syncSettings]
     static let windowCommands: [Self] = [.maximize, .toggleFullScreen, .exitFullScreen, .minimize, .closeWindow]
     static let macOSCommands: [Self] = [.toggleStageManager, .toggleDock, .previousApp, .nextAppWindow, .previousAppWindow, .appExpose, .missionControl, .appWindows, .previousDesktop, .nextDesktop, .moveWindowPreviousDesktop, .moveWindowNextDesktop, .showDesktop, .hideApp, .hideOtherApps, .lockScreen]
     var shortcutSetupMessage: String? {

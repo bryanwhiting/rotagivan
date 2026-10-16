@@ -30,7 +30,7 @@ struct BindingTriggerPicker: View {
                     ForEach(AppGestureTrigger.baseTapTriggers) { gesture in
                         Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                     }
-                    Menu("Swipe") {
+                    Menu("Two-finger swipe") {
                         ForEach([AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown]) { gesture in
                             Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                         }
@@ -41,7 +41,7 @@ struct BindingTriggerPicker: View {
                         }
                     }
                 } label: {
-                    Label(trigger.gesture?.title ?? "Tap or swipe", systemImage: "hand.tap")
+                    Label(trigger.gesture?.title ?? "Trackpad tap or swipe", systemImage: "hand.tap")
                         .lineLimit(1)
                 }
                 .fixedSize(horizontal: true, vertical: false)
@@ -112,7 +112,9 @@ struct BindingEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title3.weight(.semibold))
-            Text("Choose what starts the action, then what it runs.")
+            Text(allowsGestures
+                ? "Choose a keyboard shortcut or trackpad gesture, then what it runs."
+                : "Choose a keyboard shortcut, then what it runs.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Text("When").frame(width: 46, alignment: .leading)

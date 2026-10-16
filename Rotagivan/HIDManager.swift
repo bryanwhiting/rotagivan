@@ -219,6 +219,8 @@ final class NavigatorHIDManager: ObservableObject {
         }
     }
 
+    var onSyncSettings: (() -> Void)?
+
     /// Shared executor for keyboard and trackpad bindings, including actions
     /// assigned inside the HUD. A single path keeps action references from
     /// accidentally being posted as physical keystrokes.
@@ -283,6 +285,9 @@ final class NavigatorHIDManager: ObservableObject {
         case .command:
             guard let command = action.command else { return }
             switch command {
+            case .syncSettings:
+                if let onSyncSettings { onSyncSettings() }
+                else { AppExplorerController.showWindowError("Settings sync is not available yet. Open Settings and try again.", title: "Sync settings") }
             case .activateVoiceMode:
                 let wasVisible = explorer?.isVisible == true
                 if !wasVisible { openAppExplorer() }

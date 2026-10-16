@@ -14,7 +14,7 @@ struct VoiceModeSettingsView: View {
                 Picker("Voice provider", selection: $localProvider) {
                     ForEach(LauncherVoiceProvider.allCases) { Text($0.label).tag($0.rawValue) }
                 }.accessibilityIdentifier("voice-provider")
-                Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Return selects; menu actions require a second Return. Auto-decide applies only to OpenRouter/Jev.")
+                Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Press Return once to confirm and run the selected action. Auto-decide applies only to OpenRouter/Jev.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Start listening when HUD opens", isOn: Binding(
                     get: { store.settings.appExplorer?.resolvedVoiceAutoStart ?? false },

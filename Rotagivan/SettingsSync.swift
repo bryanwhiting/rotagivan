@@ -121,6 +121,20 @@ struct SyncCredentials {
         self.snapshot = snapshot ?? { AppConfiguration(store: store) }
         applyOverride = apply
         self.computerName = computerName
+        hid.onSyncSettings = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.start()
+                await self.awaitLoginRestore()
+                guard self.credentialsReady else {
+                    AppExplorerController.showWindowError(self.error ?? "Saved login is unavailable. Open Sync & backup to retry.", title: "Sync settings")
+                    return
+                }
+                guard !self.busy else { return }
+                await self.save()
+                if let error = self.error { AppExplorerController.showWindowError(error, title: "Sync settings") }
+            }
+        }
     }
 
     /// Production starts encrypted automatic reconciliation. The explicit

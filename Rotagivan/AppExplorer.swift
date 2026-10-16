@@ -538,18 +538,8 @@ extension AppExplorerPresenting {
                 model.message = "This action or active app changed. Reopen the launcher and choose again."
                 return
             }
-            guard pendingMenuAction == action else {
-                pendingMenuAction = action
-                model.message = "Confirm action: " + action.name + " · press Return again or Esc to cancel"
-                return
-            }
             performBoundAction(current.action, fromKeyboard: true)
         case .menu(let menu):
-            guard pendingMenuAction == action else {
-                pendingMenuAction = action
-                model.message = "Confirm menu action: " + action.name + " · press Return again or Esc to cancel"
-                return
-            }
             dismiss()
             if let error = LauncherMenuCatalog.execute(menu) { NSLog("Rotagivan menu action unavailable: %@", error) }
         }
@@ -1399,6 +1389,10 @@ extension AppExplorerPresenting {
             windowList = pid.map(listWindows) ?? []; windowPage = 0
             model.showingAppWindows = true
             refreshGroup(); return
+        }
+        if let command = entry?.command, AppExplorerAction.appCommands.contains(command) {
+            performBoundAction(.command(command), fromKeyboard: fromKeyboard)
+            return
         }
         if let command = entry?.command, command.macOSShortcut == nil,
            let message = command.shortcutSetupMessage {

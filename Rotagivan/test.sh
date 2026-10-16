@@ -3,7 +3,7 @@ set -euo pipefail
 script_dir=${0:A:h}
 cd "$script_dir/.."
 test_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/rotagivan-tests.XXXXXX")
-xcrun swiftc Rotagivan/AccessibilitySetup.swift Rotagivan/Tests/AccessibilitySetupTests.swift -framework AppKit -framework SwiftUI -o "$test_dir/AccessibilitySetupTests"
+xcrun swiftc Rotagivan/AccessibilitySetup.swift Rotagivan/UIComponents.swift Rotagivan/Tests/AccessibilitySetupTests.swift -framework AppKit -framework SwiftUI -o "$test_dir/AccessibilitySetupTests"
 "$test_dir/AccessibilitySetupTests" "$test_dir"
 swift build --package-path YAML -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
@@ -36,14 +36,14 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKe
 "$test_dir/ActionCatalogSnapshotTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/MacroAuditTests.swift -o "$test_dir/MacroAuditTests"
 "$test_dir/MacroAuditTests"
-xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/UIComponents.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/LiveCursorPreviewTests"
 "$test_dir/LiveCursorPreviewTests" "$test_dir"
 for test in ProfileStorageTests ProfileActivationTests ShortcutRecorderTests; do
   xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift \
     Rotagivan/ActionPicker.swift Rotagivan/BindingEditor.swift Rotagivan/ExplorerApplicationCatalog.swift \
     Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
-    "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
+    Rotagivan/UIComponents.swift "Rotagivan/Tests/$test.swift" -framework AppKit -framework SwiftUI -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"
 done
 for test in ClickTests ParagraphSelectionTests; do
@@ -133,7 +133,7 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventP
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/Tests/PointerLayerIsolationTests.swift \
   -framework AppKit -framework CoreGraphics -o "$test_dir/PointerLayerIsolationTests"
 "$test_dir/PointerLayerIsolationTests"
-ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
+ui_sources=("${common[@]}" Rotagivan/UIComponents.swift Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.swift Rotagivan/MacroPlayback.swift \
   Rotagivan/TemporaryIntention.swift Rotagivan/TemporaryIntentionView.swift \
   Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/NoteDictationSession.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
@@ -181,7 +181,7 @@ xcrun swiftc -j 4 Rotagivan/CredentialWorker.swift Rotagivan/VaultCrypto.swift R
 "$test_dir/VaultCryptoTests"
 for test in CredentialVaultTests VaultRestoreUISmoke VoiceTransportTests; do
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift Rotagivan/TemporaryIntention.swift \
-  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift "Rotagivan/Tests/$test.swift" \
+  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/UIComponents.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
 done

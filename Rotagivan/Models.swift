@@ -2606,6 +2606,19 @@ final class SettingsStore: ObservableObject {
         return id
     }
 
+    /// Removes a configuration profile. The last profile cannot be deleted;
+    /// deleting the active one first switches to its nearest neighbour.
+    @discardableResult func deleteConfiguration(_ id: String) -> Bool {
+        guard configurationProfiles.count > 1,
+              let index = configurationProfiles.firstIndex(where: { $0.id == id }) else { return false }
+        if id == activeConfigurationID {
+            selectConfiguration(configurationProfiles[index == 0 ? 1 : index - 1].id)
+        }
+        configurationProfiles.removeAll { $0.id == id }
+        persistLibrary()
+        return true
+    }
+
     func selectConfiguration(_ id: String) {
         guard id != activeConfigurationID, configurationProfiles.contains(where: { $0.id == id }) else { return }
         configurationProfiles = profileSnapshot()

@@ -34,7 +34,7 @@ import SwiftUI
             return item
         }
         func keyEditorIsHidden() -> Bool {
-            !controls().contains { $0.accessibilityLabel?() == "Save & sync keys" || $0.accessibilityLabel?() == "Load synced keys" }
+            !controls().contains { $0.accessibilityLabel?() == "Save keys" || $0.accessibilityLabel?() == "Load synced keys" }
         }
         func capture(_ state: String) throws {
             host.layoutSubtreeIfNeeded(); panel.display(); host.displayIfNeeded()
@@ -57,7 +57,7 @@ import SwiftUI
         try capture("error")
         precondition(retry.accessibilityPerformPress?() == true); settle()
         precondition(vault.localReady && attempts == 2 && vault.error == nil)
-        precondition(button("Save & sync keys").isAccessibilityEnabled?() == true)
+        precondition(button("Save keys").isAccessibilityEnabled?() == false, "Save stays disabled until a key is typed")
         precondition(controls().contains { $0.accessibilityIdentifier?() == "vault-openrouter-key" }, "OpenRouter secure entry must be visible")
         precondition(controls().contains { $0.accessibilityIdentifier?() == "vault-openai-key" }, "OpenAI secure entry must be visible")
         try capture("ready")

@@ -20,6 +20,8 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
     @Published private(set) var ownCode: String?
     @Published private(set) var pending: [VaultDevice] = []
     @Published private(set) var hasRemote = false
+    /// This Mac's own, not yet approved, access request is registered remotely.
+    @Published private(set) var requestPending = false
     @Published private(set) var savedAt: Date?
     @Published var recoveryCode: String?
     @Published private(set) var account: VaultAccount?
@@ -66,6 +68,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         self.account = account; local = nil; remote = nil; recoveryCode = nil
         authenticationExpired = false
         hasKey = false; hasOpenAIKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
+        requestPending = false
         VaultKeychain.setActive(server: server, userID: account?.userID)
         status = account == nil ? "Sign in to use encrypted API keys." : "Load the vault, or import your key to create it."
         if account != nil { beginLocalRestore() }
@@ -110,6 +113,7 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
         generation = UUID(); taskSession.invalidateAndCancel()
         operationID = nil; busy = false; restoringLocal = false; localReady = false
         account = nil; hasKey = false; hasOpenAIKey = false; unlocked = false; hasRemote = false; ownCode = nil; pending = []; savedAt = nil; error = nil
+        requestPending = false
         recoveryCode = nil; local = nil; remote = nil
         VaultKeychain.setActive(server: server, userID: nil)
     }
@@ -174,9 +178,10 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
             remote = record; hasRemote = true
             let ownID = try local?.deviceID
             pending = snapshot.devices.filter { $0.grant == nil && $0.id != ownID }
+            requestPending = snapshot.devices.contains { $0.id == ownID && $0.grant == nil }
         } else {
             guard local?.cached == nil else { throw VaultFailure.message("Your existing vault is missing remotely. It will not be silently replaced.") }
-            remote = nil; hasRemote = false; pending = []
+            remote = nil; hasRemote = false; pending = []; requestPending = false
         }
         return snapshot
     }
@@ -271,7 +276,8 @@ private final class VaultRedirectBlocker: NSObject, URLSessionTaskDelegate {
                 account: account, token: token)
             guard device.id == (try value.deviceID), device.publicKey == publicKey else { throw VaultFailure.message("Device request identity mismatch.") }
             self.ownCode = device.verificationCode
-            self.status = "Request sent. Compare this code on your trusted Mac, then Load here."
+            self.requestPending = device.grant == nil
+            self.status = "Request sent. Approve this code on your trusted Mac; sync continues automatically."
         }
     }
     func approve(_ device: VaultDevice, verificationCode: String) async {

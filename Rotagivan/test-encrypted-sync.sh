@@ -15,6 +15,13 @@ xcrun swiftc Rotagivan/EncryptedSettingsCore.swift Rotagivan/EncryptedPreference
 "$test_dir/SettingsPersistenceTests"
 swift build --package-path YAML -c release --product ConfigurationYAML
 yaml_build=$(swift build --package-path YAML -c release --show-bin-path)
+common=(Rotagivan/Models.swift Rotagivan/AppOverrides.swift Rotagivan/CursorResponse.swift Rotagivan/ScrollResponse.swift Rotagivan/TrackpadDistance.swift Rotagivan/SwipeDirectionClassification.swift Rotagivan/CredentialWorker.swift)
+xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
+  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/EncryptedSettingsCore.swift \
+  Rotagivan/SyncConfigurationCodec.swift Rotagivan/Tests/SyncCodecTests.swift \
+  -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncCodecTests"
+"$test_dir/SyncCodecTests"
 sources=()
 while IFS= read -r name; do
   sources+=("Rotagivan/$name")

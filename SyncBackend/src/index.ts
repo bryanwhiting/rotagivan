@@ -54,13 +54,16 @@ function emailValue(value: unknown): string {
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HTTPError(400, 'Enter a valid email address.');
   return email;
 }
-function json(value: unknown, status = 200): Response {
+function json(value: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return Response.json(value, { status, headers: {
     'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
     'Strict-Transport-Security': 'max-age=31536000',
-    ...(status === 429 ? { 'Retry-After': '60' } : {})
+    ...(status === 429 ? { 'Retry-After': '60' } : {}), ...extra
   }});
 }
+// The settings revision doubles as a strong ETag so idle clients can poll
+// cheaply: an unchanged document costs one small 304 instead of a 1 MB body.
+const etag = (revision: number) => `"${revision}"`;
 // Global, atomic counters complement the per-location native rate limiter.
 async function limit(env: Env, key: string, maximum: number): Promise<void> {
   const now = seconds();
@@ -136,8 +139,13 @@ async function route(request: Request, env: Env): Promise<Response> {
     return issueSession(env, { ...user, auth_version: stored.auth_version + 1 });
   }
   if (request.method === 'GET' && path === '/v1/settings') {
-    const row = await env.DB.prepare('SELECT yaml,revision,updated_at AS updatedAt FROM settings WHERE user_id=?').bind(user.id).first();
-    return json(row ?? { yaml: null, revision: 0, updatedAt: null });
+    const row = await env.DB.prepare('SELECT yaml,revision,updated_at AS updatedAt FROM settings WHERE user_id=?').bind(user.id).first<{ yaml: string; revision: number; updatedAt: number }>();
+    const revision = row?.revision ?? 0;
+    const match = request.headers.get('if-none-match');
+    if (match && match.split(',').map(v => v.trim()).includes(etag(revision))) {
+      return new Response(null, { status: 304, headers: { 'Cache-Control': 'no-store', 'ETag': etag(revision) } });
+    }
+    return json(row ?? { yaml: null, revision: 0, updatedAt: null }, 200, { 'ETag': etag(revision) });
   }
   if (request.method === 'PUT' && path === '/v1/settings') {
     const input = await body(request, MAX_YAML * 2);
@@ -151,7 +159,7 @@ async function route(request: Request, env: Env): Promise<Response> {
           WHERE user_id=? AND revision=? AND (yaml NOT GLOB 'rota-e2ee-settings-v1:*' OR ? GLOB 'rota-e2ee-settings-v1:*')`)
           .bind(input.yaml,updatedAt,user.id,input.baseRevision,input.yaml).run();
     if (!result.meta.changes) throw new HTTPError(409, 'Settings changed or require encrypted sync. Update Rotagivan and retry.');
-    return json({ revision: input.baseRevision + 1, updatedAt });
+    return json({ revision: input.baseRevision + 1, updatedAt }, 200, { 'ETag': etag(input.baseRevision + 1) });
   }
   throw new HTTPError(404, 'Not found.');
 }

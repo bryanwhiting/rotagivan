@@ -1,18 +1,33 @@
 import Foundation
 
-enum EncryptedSyncFailure: Error {
+enum EncryptedSyncFailure: Error, LocalizedError {
     case inactive, invalidRemote, rollback, legacyMigrationRequired, raced, tooLarge
+    var errorDescription: String? {
+        switch self {
+        case .inactive: return "Sync stopped because the account changed on this Mac."
+        case .invalidRemote: return "The cloud copy of your settings could not be read with this Mac’s key. Nothing was changed."
+        case .rollback: return "The server returned an older copy of your settings than this Mac already synced. Nothing was changed. If this persists, use “Re-sync from cloud” under Privacy & recovery."
+        case .legacyMigrationRequired: return "The cloud copy was saved by an older Rotagivan. Sync once from a Mac running the current version."
+        case .raced: return "Another Mac is saving at the same moment. Retrying shortly."
+        case .tooLarge: return "Your settings exceed the 1 MB sync limit."
+        }
+    }
 }
 
 struct EncryptedCloudSnapshot: Sendable {
     var ciphertext: String?
     var revision: Int64
+    /// A conditional fetch confirmed the known revision is still current; no
+    /// body was transferred. `ciphertext` is nil and `revision` is the known one.
+    var unchanged = false
 }
 
 /// The transport only handles opaque ciphertext and CAS revisions. A 409 must
 /// become `raced`; never retry an overwrite without fetching and merging first.
+/// `fetch` receives the already-acknowledged encrypted revision, if any, so the
+/// transport may ask the server for "changed since" instead of the full body.
 struct EncryptedSyncTransport: Sendable {
-    var fetch: @Sendable () async throws -> EncryptedCloudSnapshot
+    var fetch: @Sendable (Int64?) async throws -> EncryptedCloudSnapshot
     var compareAndSwap: @Sendable (String, Int64) async throws -> EncryptedCloudSnapshot
 }
 
@@ -28,7 +43,12 @@ struct EncryptedSyncState: Codable, Equatable, Sendable {
 /// A new instance is required for a different account/key. No factory settings,
 /// Keychain prompts, action execution or plaintext export happen in this actor.
 actor EncryptedAutoSync {
-    enum Result: Equatable { case synchronized, queued }
+    enum Result: Equatable {
+        case synchronized, queued
+        /// Local edits collided with a concurrent change so badly that the merged
+        /// document was invalid; the cloud document was adopted instead.
+        case synchronizedDroppingLocalConflict
+    }
     private static let prefix = "rota-e2ee-settings-v1:"
     private static let maximumWireBytes = 1_048_576
     private let key: Data
@@ -68,6 +88,9 @@ actor EncryptedAutoSync {
     }
 
     func snapshot() -> EncryptedSyncState { state }
+
+    /// Local edits not yet acknowledged by the cloud.
+    var hasPendingEdits: Bool { state.journal != state.acknowledged }
 
     /// All changes are locally durable before a debounce can send them.
     func edit(_ updates: [String: Data?]) throws {
@@ -130,33 +153,60 @@ actor EncryptedAutoSync {
             running = false
             if active, requested { scheduleDebounce() }
         }
+        var droppedLocalConflict = false
         // Bound contention work. Another debounce/poll retries after this budget.
         for _ in 0..<4 {
             requested = false
-            let remote = try await transport.fetch()
+            // Only an acknowledged *encrypted* revision is safe to skip: a legacy
+            // plaintext revision must still be re-read and migrated.
+            let known: Int64? = state.migrated && state.highestCloudRevision > 0 ? state.highestCloudRevision : nil
+            let remote = try await transport.fetch(known)
             try checkActive()
             guard remote.revision >= state.highestCloudRevision else { throw EncryptedSyncFailure.rollback }
             let peer: EncryptedSettingsJournal
-            if let wire = remote.ciphertext {
+            let encryptedRemote: Bool
+            if remote.unchanged {
+                guard let known, remote.revision == known, remote.ciphertext == nil else { throw EncryptedSyncFailure.invalidRemote }
+                peer = state.acknowledged
+                encryptedRemote = true
+            } else if let wire = remote.ciphertext {
                 peer = try decode(wire, revision: remote.revision)
+                encryptedRemote = wire.hasPrefix(Self.prefix)
             } else {
                 guard remote.revision == 0, state.highestCloudRevision == 0 else {
                     throw EncryptedSyncFailure.rollback
                 }
                 peer = EncryptedSettingsJournal()
+                encryptedRemote = true
             }
             if remote.revision > 0, remote.revision == state.highestCloudRevision,
                peer != state.acknowledged { throw EncryptedSyncFailure.rollback }
             // Use state *after* the fetch: edits during the await are included.
             var merged = state
             try merged.journal.merge(peer)
-            try validate(merged.journal)
+            do { try validate(merged.journal) } catch {
+                // Concurrent edits can combine into a document that no longer
+                // validates (for example a field edited here inside a profile
+                // deleted on another Mac). Retrying the same merge forever would
+                // stall sync for every Mac. The cloud document validated when its
+                // writer uploaded it, so adopt it and report the dropped edits.
+                // The discarded local stamps were never uploaded, so no other
+                // Mac can hold them; the peer's clock is a safe continuation.
+                var adopted = merged
+                adopted.journal = peer
+                try validate(adopted.journal)
+                merged = adopted
+                droppedLocalConflict = true
+            }
             merged.highestCloudRevision = remote.revision
             merged.acknowledged = peer
-            merged.migrated = merged.migrated || (remote.ciphertext?.hasPrefix(Self.prefix) ?? false)
+            merged.migrated = merged.migrated || (encryptedRemote && remote.revision > 0)
             try persist(merged)
             state = merged
-            if merged.journal == peer, remote.ciphertext?.hasPrefix(Self.prefix) ?? true { lastFailure = nil; return .synchronized }
+            if merged.journal == peer, encryptedRemote {
+                lastFailure = nil
+                return droppedLocalConflict ? .synchronizedDroppingLocalConflict : .synchronized
+            }
             guard remote.revision < Int64.max else { throw EncryptedSyncFailure.invalidRemote }
             let submitted = merged.journal
             let wire = try encode(submitted, revision: remote.revision + 1)
@@ -173,7 +223,10 @@ actor EncryptedAutoSync {
             acknowledged.migrated = true
             try persist(acknowledged)
             state = acknowledged
-            if acknowledged.journal == submitted { lastFailure = nil; return .synchronized }
+            if acknowledged.journal == submitted {
+                lastFailure = nil
+                return droppedLocalConflict ? .synchronizedDroppingLocalConflict : .synchronized
+            }
             requested = true
         }
         throw EncryptedSyncFailure.raced

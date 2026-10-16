@@ -66,6 +66,17 @@ enum SyncConfigurationCodec {
             try insert(JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed), path: path[...], into: &root)
         }
         guard !root.isEmpty else { return nil }
+        if var profiles = root["profiles"] as? [String: [String: Any]], !profiles.isEmpty {
+            // A profile deleted on one Mac leaves tombstones for every field; a
+            // concurrent edit on another Mac can resurrect a single orphan field.
+            // Such a fragment is not a profile. Treat the deletion as final rather
+            // than failing to decode (which would stall every Mac's sync).
+            profiles = profiles.filter { id, profile in
+                profile["id"] as? String == id && profile["name"] != nil &&
+                    profile["settings"] is [String: Any] && profile["shortcuts"] is [String: Any]
+            }
+            root["profiles"] = profiles
+        }
         if let profiles = root["profiles"] as? [String: [String: Any]], !profiles.isEmpty {
             let savedOrder = root.removeValue(forKey: "profileOrder") as? [String] ?? []
             let order = savedOrder.filter { profiles[$0] != nil } + profiles.keys.filter { !savedOrder.contains($0) }.sorted()

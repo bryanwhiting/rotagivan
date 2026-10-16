@@ -1,5 +1,9 @@
 # Automatic encrypted sync
 
+See [sync-design.md](sync-design.md) for the audit of this design, the
+reconciliation loop (conditional polls, event triggers, backoff), automatic
+device enrolment and the invalid-merge fallback added on `feature/sync-redesign`.
+
 Settings → Sync & backup → Account & Sync is the single entry point. Sign in, unlock
 this Mac once if needed, and settings and API keys transfer automatically. Add
 OpenRouter and/or OpenAI in the API keys card; blank fields preserve saved keys.

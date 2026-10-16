@@ -2,8 +2,17 @@ import CryptoKit
 import Foundation
 import SQLite3
 
-enum EncryptedSettingsError: Error {
+enum EncryptedSettingsError: Error, LocalizedError {
     case invalidEnvelope, staleRevision, unsafePath, databaseFailure, exhaustedClock
+    var errorDescription: String? {
+        switch self {
+        case .invalidEnvelope: return "Encrypted settings could not be verified with this Mac’s key."
+        case .staleRevision: return "Encrypted settings changed on disk while saving."
+        case .unsafePath: return "The encrypted settings location is not a private regular file."
+        case .databaseFailure: return "The encrypted settings database could not be written."
+        case .exhaustedClock: return "The sync change counter is exhausted."
+        }
+    }
 }
 
 /// A purpose-separated, authenticated envelope; no setting names or keys are

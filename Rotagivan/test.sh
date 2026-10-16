@@ -219,6 +219,12 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
   Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/SyncStorageTests.swift \
   -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncStorageTests"
 "$test_dir/SyncStorageTests"
+xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
+  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/EncryptedSettingsCore.swift \
+  Rotagivan/SyncConfigurationCodec.swift Rotagivan/Tests/SyncCodecTests.swift \
+  -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncCodecTests"
+"$test_dir/SyncCodecTests"
 for test in ManualSyncTests CredentialLifecycleTests SettingsSyncActionTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \

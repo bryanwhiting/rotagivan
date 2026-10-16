@@ -42,6 +42,7 @@ struct RotagivanApp: App {
             }
             LocalUsageTracker.shared.start()
             sync.start()
+            UpdateChecker.shared.start()
             // Explicit local maintenance action, never a startup sync default.
             // Emits only a non-secret receipt; private material remains Keychain-only.
             if ProcessInfo.processInfo.arguments.contains("--initialize-voice-vault") {
@@ -82,6 +83,7 @@ struct RotagivanApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Rotagivan") { showRotaAboutPanel() }
+                Button("Check for Updates…") { UpdateChecker.shared.checkNow() }
             }
         }
 
@@ -260,6 +262,8 @@ struct NavigatorPanel: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }.buttonStyle(.link)
                 Button("About…") { showRotaAboutPanel() }.buttonStyle(.link)
+                Button("Updates…") { UpdateChecker.shared.checkNow() }.buttonStyle(.link)
+                    .help("Check for Updates")
                 Spacer()
                 if store.settings.enabled {
                     Button("Reconnect") { trusted = AXIsProcessTrusted(); hid.stop(); hid.start() }

@@ -69,6 +69,26 @@ it('prevents old clients from downgrading encrypted settings to plaintext', asyn
   expect(await (await call('settings','GET',undefined,a.token)).json()).toMatchObject({yaml:first,revision:2});
   expect((await call('settings','PUT',{yaml:'rota-e2ee-settings-v1:opaque-next',baseRevision:2},a.token)).status).toBe(200);
 });
+it('answers unchanged polls with 304 and a revision ETag, never a body', async () => {
+  const a = await register();
+  const empty = await call('settings','GET',undefined,a.token);
+  expect(empty.headers.get('etag')).toBe('"0"');
+  const unchanged = await SELF.fetch('https://sync.test/v1/settings', { headers: {
+    'CF-Connecting-IP': crypto.randomUUID(), Authorization: `Bearer ${a.token}`, 'If-None-Match': '"0"' } });
+  expect(unchanged.status).toBe(304);
+  expect(await unchanged.text()).toBe('');
+  expect(unchanged.headers.get('cache-control')).toBe('no-store');
+  const put = await call('settings','PUT',{yaml:'rota-e2ee-settings-v1:opaque',baseRevision:0},a.token);
+  expect(put.headers.get('etag')).toBe('"1"');
+  const stale = await SELF.fetch('https://sync.test/v1/settings', { headers: {
+    'CF-Connecting-IP': crypto.randomUUID(), Authorization: `Bearer ${a.token}`, 'If-None-Match': '"0", "7"' } });
+  expect(stale.status).toBe(200);
+  expect(stale.headers.get('etag')).toBe('"1"');
+  expect(await stale.json()).toMatchObject({yaml:'rota-e2ee-settings-v1:opaque',revision:1});
+  // A conditional request never bypasses authentication.
+  const anonymous = await SELF.fetch('https://sync.test/v1/settings', { headers: { 'If-None-Match': '"1"' } });
+  expect(anonymous.status).toBe(401);
+});
 it('revokes sessions at logout and expiry', async () => {
   const a = await register();
   expect((await call('logout','POST',{},a.token)).status).toBe(200);

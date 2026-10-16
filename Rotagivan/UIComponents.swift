@@ -410,12 +410,8 @@ struct RotaMenuButton<Content: View>: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
         .font(.system(size: RotaTokens.fontSize(controlSize), weight: .medium))
-        .padding(.leading, kind == .icon ? 0 : RotaTokens.Space.m + 1)
-        .padding(.trailing, kind == .icon ? 0 : 23)
-        .frame(minWidth: kind == .icon ? RotaTokens.controlHeight(controlSize) : nil,
-               minHeight: RotaTokens.controlHeight(controlSize))
+        .modifier(RotaMenuSizing(icon: kind == .icon, height: RotaTokens.controlHeight(controlSize)))
         .overlay(alignment: .trailing) {
             if kind != .icon {
                 Image(systemName: "chevron.down")
@@ -438,6 +434,23 @@ struct RotaMenuButton<Content: View>: View {
         .opacity(enabled ? 1 : 0.5)
         .help(help ?? title)
         .accessibilityLabel(accessibilityTitle ?? title)
+    }
+}
+
+/// Text menus hug their title; icon menus fill a square-ish hit target so the
+/// whole chip (not only the glyph) opens the menu.
+private struct RotaMenuSizing: ViewModifier {
+    let icon: Bool
+    let height: CGFloat
+    func body(content: Content) -> some View {
+        if icon {
+            content.frame(width: max(28, height + 4), height: height)
+        } else {
+            content.fixedSize()
+                .padding(.leading, RotaTokens.Space.m + 1)
+                .padding(.trailing, 23)
+                .frame(minHeight: height)
+        }
     }
 }
 
@@ -703,6 +716,9 @@ struct RotaCard<Content: View, Accessory: View>: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: RotaTokens.Radius.l, style: .continuous).fill(RotaTokens.cardFill))
         .overlay(RoundedRectangle(cornerRadius: RotaTokens.Radius.l, style: .continuous).strokeBorder(Color.primary.opacity(0.09)))
+        // A container boundary, like GroupBox: identifiers applied around a
+        // card never overwrite the identifiers of the controls inside it.
+        .accessibilityElement(children: .contain)
     }
 }
 

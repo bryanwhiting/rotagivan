@@ -6,6 +6,8 @@ struct ChromeRecentTab: Hashable, Sendable {
     let tabIndex: Int
     let title: String
     let url: String
+    var profileName: String? = nil
+    var profileIsEstimated = false
     var id: String { "chrome-tab:\(windowIndex):\(tabIndex):\(url)" }
 }
 

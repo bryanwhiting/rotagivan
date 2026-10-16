@@ -14,7 +14,8 @@ import SwiftUI
         for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps, .mediaControls] {
             let host = NSHostingView(rootView: BuiltInHUDDefaultEditor(store: store, group: group,
                 chromeTabsProvider: { (1...8).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
-                    title: "Preview tab \($0)", url: "https://example.test/preview/\($0)") } })
+                    title: "Preview tab \($0)", url: "https://example.test/preview/\($0)",
+                    profileName: $0.isMultiple(of: 2) ? "Work" : "Home") } })
                 .padding(24).frame(width: 720, height: 620).background(Color(nsColor: .windowBackgroundColor)))
             let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
                 styleMask: [.titled], backing: .buffered, defer: false)
@@ -36,7 +37,8 @@ import SwiftUI
             settings: workspaceSettings.projected(layerID: workspaceLayer), theme: workspaceSettings.resolvedTheme,
             dictionary: [], groupPath: [], layerName: "Google Chrome Tabs",
             chromeTabsProvider: { (1...8).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
-                title: "Workspace tab \($0)", url: "https://example.test/workspace/\($0)") } },
+                title: "Workspace tab \($0)", url: "https://example.test/workspace/\($0)",
+                profileName: $0.isMultiple(of: 2) ? "Work" : "Home") } },
             rootSettings: workspaceSettings, selectedLayerID: workspaceLayer,
             selection: .constant(.up), onBack: {}, onDrag: { _, _ in }, onDrop: { _, _ in }, workspace: true)
             .frame(width: 720, height: 620))
@@ -57,7 +59,8 @@ import SwiftUI
         controller.contextIsValid = { true }
         ChromeTabRecency.shared.record(ChromeRecentTab(windowIndex: 1, tabIndex: 3,
             title: "Fixture tab 3", url: "https://example.test/3"))
-        controller.chromeTabsProvider = { (1...20).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0, title: "Fixture tab \($0)", url: "https://example.test/\($0)") } }
+        controller.chromeTabsProvider = { (1...20).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
+            title: "Fixture tab \($0)", url: "https://example.test/\($0)", profileName: "Work") } }
         var configuration = AppExplorerSettings()
         let layer = configuration.assignBuiltIn(.chromeTabs, at: .right)!
         controller.configuration = { configuration }
@@ -70,6 +73,7 @@ import SwiftUI
         precondition(controller.displayedLayerID == layer)
         precondition(controller.displayedEntries.count == 8)
         precondition(controller.displayedEntries.first?.chromeTab?.tabIndex == 1)
+        precondition(controller.displayedEntries.first?.chromeTab?.profileName == "Work")
         precondition(controller.displayedEntries.first?.direction == .left)
         precondition(controller.displayedEntries.first?.isActiveApp == true)
         precondition(controller.displayedEntries.dropFirst().first?.chromeTab?.tabIndex == 3)

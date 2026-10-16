@@ -2613,6 +2613,9 @@ struct AppExplorerView: View {
             innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: model.theme.isFloating ? 2 : 11,
             halfAngle: 180 / Double(model.slotCount) - 2, roundedRim: model.theme.isFloating)
         let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
+        let chromeProfileDescription = entry?.chromeTab.map { tab in
+            tab.profileName.map { $0 + (tab.profileIsEstimated ? " (estimated)" : "") } ?? "unknown"
+        }
         return Button { onSelect(direction) } label: {
             ZStack {
                 ExplorerSectorChrome(theme: model.theme, shape: shape, selected: selected,
@@ -2633,7 +2636,13 @@ struct AppExplorerView: View {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
                         Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: model.theme.isFloating ? .semibold : .medium))
-                            .lineLimit(entry.shortcut == nil ? 2 : 3).multilineTextAlignment(.center)
+                            .lineLimit(entry.chromeTab == nil ? (entry.shortcut == nil ? 2 : 3) : 1).multilineTextAlignment(.center)
+                        if let tab = entry.chromeTab, let profile = tab.profileName {
+                            Text(profile + (tab.profileIsEstimated ? "?" : ""))
+                                .font(.system(size: 7, weight: .medium))
+                                .foregroundStyle(accent)
+                                .lineLimit(1)
+                        }
                         if entry.isActiveApp {
                             Text("ACTIVE").font(.system(size: 7, weight: .bold))
                                 .foregroundStyle(Color.orange)
@@ -2648,7 +2657,7 @@ struct AppExplorerView: View {
                         Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
                 }
-                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: model.slotCount > 8 ? 40 : 50)
+                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: entry?.chromeTab == nil ? (model.slotCount > 8 ? 40 : 50) : 56)
                 .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(0.85)) : Color.primary)
                 .shadow(color: model.theme.isFloating ? .black.opacity(0.8) : .clear, radius: 1, y: 1)
                 .position(point)
@@ -2662,8 +2671,9 @@ struct AppExplorerView: View {
         .anchorPreference(key: ExplorerTileAnchors.self, value: .rect(CGRect(x: point.x - 26, y: point.y - 24, width: 52, height: 48))) {
             isPreview ? [direction: $0] : [:]
         }
-        .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
-        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")\(entry?.isActiveApp == true ? ", Active app" : "")")
+        .help(chromeProfileDescription.map { "\(entry?.name ?? "Chrome tab") · Chrome profile: \($0)" }
+            ?? (entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot")))
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")\(chromeProfileDescription.map { ", Chrome profile: \($0)" } ?? "")\(entry?.isActiveApp == true ? ", Active app" : "")")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .animation(feedback, value: selected)
     }

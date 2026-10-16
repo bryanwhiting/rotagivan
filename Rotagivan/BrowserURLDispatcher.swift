@@ -5,17 +5,31 @@ import SQLite3
 /// Use it only to order open tabs that Rotagivan has not observed being focused.
 /// No history rows are stored by Rotagivan or included in settings sync.
 enum ChromeLocalHistory {
+    struct ProfileVisit {
+        let name: String
+        let timestamp: Int64
+        let isEstimated: Bool
+    }
+
     static var profileRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
     }
 
     static func lastVisits(for tabs: [ChromeRecentTab], profileRoot: URL = profileRoot) -> [String: Int64] {
+        profileVisits(for: tabs, profileRoot: profileRoot).mapValues(\.timestamp)
+    }
+
+    /// Chrome's scripting interface does not identify a tab's profile. Associate
+    /// open URLs with the profiles whose local History contains them. A URL in
+    /// multiple profiles is explicitly marked as an estimate.
+    static func profileVisits(for tabs: [ChromeRecentTab], profileRoot: URL = profileRoot) -> [String: ProfileVisit] {
         let urls = Array(Set(tabs.map(\.url).filter { !$0.isEmpty }))
         guard !urls.isEmpty,
               let profiles = try? FileManager.default.contentsOfDirectory(at: profileRoot,
                   includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [:] }
-        var visits: [String: Int64] = [:]
+        let names = profileNames(at: profileRoot)
+        var visits: [String: ProfileVisit] = [:]
         for profile in profiles where profile.lastPathComponent == "Default" || profile.lastPathComponent.hasPrefix("Profile ") {
             let history = profile.appendingPathComponent("History")
             guard FileManager.default.fileExists(atPath: history.path) else { continue }
@@ -25,10 +39,29 @@ enum ChromeLocalHistory {
             let uri = history.absoluteString
             if let rows = read(uri: uri + "?mode=ro", urls: urls)
                 ?? read(uri: uri + "?immutable=1", urls: urls) {
-                for (url, time) in rows { visits[url] = max(visits[url] ?? 0, time) }
+                let name = names[profile.lastPathComponent] ?? profile.lastPathComponent
+                for (url, time) in rows {
+                    if let old = visits[url] {
+                        visits[url] = ProfileVisit(name: time > old.timestamp ? name : old.name,
+                            timestamp: max(time, old.timestamp), isEstimated: true)
+                    } else {
+                        visits[url] = ProfileVisit(name: name, timestamp: time, isEstimated: false)
+                    }
+                }
             }
         }
         return visits
+    }
+
+    private static func profileNames(at root: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: root.appendingPathComponent("Local State")),
+              let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let profile = document["profile"] as? [String: Any],
+              let cache = profile["info_cache"] as? [String: [String: Any]] else { return [:] }
+        return cache.compactMapValues { item in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            return name
+        }
     }
 
     private static func read(uri: String, urls: [String]) -> [String: Int64]? {
@@ -259,7 +292,14 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
             guard fields.count == 4, let window = Int(fields[0]), let tab = Int(fields[1]) else { return nil }
             return ChromeRecentTab(windowIndex: window, tabIndex: tab, title: String(fields[2]), url: String(fields[3]))
         }
-        return ChromeLocalHistory.historyFirst(tabs, lastVisits: ChromeLocalHistory.lastVisits(for: tabs))
+        let visits = ChromeLocalHistory.profileVisits(for: tabs)
+        let enriched = tabs.map { tab -> ChromeRecentTab in
+            var tab = tab
+            tab.profileName = visits[tab.url]?.name
+            tab.profileIsEstimated = visits[tab.url]?.isEstimated ?? false
+            return tab
+        }
+        return ChromeLocalHistory.historyFirst(enriched, lastVisits: visits.mapValues(\.timestamp))
     }
 
     static func activeTab() -> ChromeRecentTab? {

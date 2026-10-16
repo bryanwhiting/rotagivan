@@ -88,12 +88,33 @@ import SQLite3
             INSERT INTO visits VALUES (1, 5), (1, 10), (2, 20);
             """, nil, nil, nil) == SQLITE_OK)
         sqlite3_close(historyDB)
+        let workProfile = historyRoot.appendingPathComponent("Profile 2", isDirectory: true)
+        try FileManager.default.createDirectory(at: workProfile, withIntermediateDirectories: true)
+        precondition(sqlite3_open(workProfile.appendingPathComponent("History").path, &historyDB) == SQLITE_OK)
+        precondition(sqlite3_exec(historyDB, """
+            CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT);
+            CREATE TABLE visits(url INTEGER, visit_time INTEGER);
+            INSERT INTO urls VALUES (1, 'https://fixture.test/older');
+            INSERT INTO visits VALUES (1, 4);
+            """, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(historyDB)
+        let localState = ["profile": ["info_cache": ["Default": ["name": "Home"],
+                                                      "Profile 2": ["name": "Work"]]]]
+        try JSONSerialization.data(withJSONObject: localState).write(to: historyRoot.appendingPathComponent("Local State"))
         let historyTabs = [
             ChromeRecentTab(windowIndex: 1, tabIndex: 1, title: "Active", url: "https://fixture.test/active"),
             ChromeRecentTab(windowIndex: 1, tabIndex: 2, title: "Older", url: "https://fixture.test/older"),
             ChromeRecentTab(windowIndex: 1, tabIndex: 3, title: "Newer", url: "https://fixture.test/newer")]
         let historyVisits = ChromeLocalHistory.lastVisits(for: historyTabs, profileRoot: historyRoot)
         precondition(historyVisits["https://fixture.test/older"] == 10 && historyVisits["https://fixture.test/newer"] == 20)
+        let profileVisits = ChromeLocalHistory.profileVisits(for: historyTabs, profileRoot: historyRoot)
+        precondition(profileVisits["https://fixture.test/newer"]?.name == "Home")
+        precondition(profileVisits["https://fixture.test/newer"]?.isEstimated == false)
+        precondition(profileVisits["https://fixture.test/older"]?.name == "Home")
+        precondition(profileVisits["https://fixture.test/older"]?.isEstimated == true,
+            "A URL seen in multiple profiles must not be presented as an exact match")
+        precondition(profileVisits["https://fixture.test/active"] == nil,
+            "Never invent a profile for an unrecorded tab")
         precondition(ChromeLocalHistory.historyFirst(historyTabs, lastVisits: historyVisits).map(\.title) == ["Active", "Newer", "Older"],
             "Only open tabs are ranked; the current tab stays first")
 

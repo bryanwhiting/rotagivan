@@ -30,6 +30,12 @@ reconstruct exact past switching. History is read locally and read-only; tab URL
 visit timestamps, and the lightweight focus history are never saved or synced by
 Rotagivan. The reader includes live WAL data when available and falls back to a
 nonblocking on-disk checkpoint read if Chrome holds the database lock.
+The Chrome tab tiles also show profile names from Chrome's local `Local State`
+metadata, matched to open URLs through each profile's read-only History. Chrome's
+AppleScript tab interface does not report a profile ID, so a name followed by `?`
+means the URL appeared in more than one profile and the most recent visit was
+used as a best guess. Tabs without a matching history visit have no profile
+label. These names are never saved or synced by Rotagivan.
 
 Only the default layout and assigned layer settings are saved/synced. Live tab
 titles and URLs remain transient on this Mac. The Chrome settings preview reads

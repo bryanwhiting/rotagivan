@@ -45,6 +45,9 @@ struct SyncSettingsView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            Button("Download latest") { NSWorkspace.shared.open(URL(string: "https://rota.silvermine.dev/download/latest")!) }
+                                .help("Download the newest Rotagivan release from rota.silvermine.dev")
+                                .accessibilityIdentifier("sync-download-latest")
                             Button("Sync now") { Task { await sync.save() } }
                                 .accessibilityIdentifier("sync-save").disabled(sync.busy)
                         }

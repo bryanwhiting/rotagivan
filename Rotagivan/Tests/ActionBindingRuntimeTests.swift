@@ -697,22 +697,25 @@ private final class BindingPoster: GestureEventPosting {
         for layer in builtInMap.holdLayers! {
             builtInController.showLayer(layer.id, waitingForLift: false)
             precondition(builtInController.displayedLayerID == layer.id)
-            precondition(builtInController.displayedHUDMap.count == 4,
+            precondition(builtInController.displayedHUDMap.count == HUDLayerBuiltIn.allCases.count,
                 "Built-in HUDs retain their surrounding map")
-            switch layer.builtIn! {
-            case .mediaControls:
+            // Placed media becomes an editable copy without a built-in tag.
+            switch layer.builtIn {
+            case .mediaControls?, nil:
                 precondition(builtInController.displayedEntries.count == 6)
                 builtInController.process(report(true))
                 builtInController.process(report(false))
                 precondition(builtInMedia == [.playPause])
-            case .actions:
+            case .actions?:
                 precondition(builtInController.displayedEntries.count == 8)
                 precondition(builtInController.displayedEntries.allSatisfy { $0.shortcut != nil })
-            case .windowManager:
+            case .windowManager?:
                 precondition(!builtInController.displayedEntries.isEmpty)
                 precondition(builtInController.displayedEntries.contains { $0.tilingDirection != nil })
-            case .recentApps:
+            case .recentApps?, .recentAppsAndTabs?:
                 precondition(builtInController.displayedEntries.allSatisfy { $0.bundleID != nil })
+            case .chromeTabs?:
+                break
             }
             // Default inverted motion back toward Main from each assigned position.
             let position = builtInMap.resolvedHUDPositions[layer.id]!

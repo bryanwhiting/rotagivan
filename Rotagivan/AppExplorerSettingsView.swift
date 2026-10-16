@@ -366,7 +366,9 @@ struct AppExplorerSettingsView: View {
         ExplorerHUDSettingsPreview(settings: settings, theme: store.settings.appExplorer?.resolvedTheme ?? settings.resolvedTheme,
             dictionary: store.settings.resolvedHotkeyDictionary, groupPath: groupPath,
             layerName: baseSettings.holdLayers?.first { $0.id == selectedLayerID }?.name ?? scopeTitle,
-            rootSettings: workspaceMap ?? baseSettings, selectedLayerID: workspaceMap == nil ? selectedLayerID : workspaceLayerID,
+            // A standalone Window Manager editor shows only its own HUD, not the
+            // surrounding layer map; the HUD workspace passes workspaceMap for that.
+            rootSettings: workspaceMap ?? (windowManagerOnly && !workspace ? nil : baseSettings), selectedLayerID: workspaceMap == nil ? selectedLayerID : workspaceLayerID,
             onSelectLayer: onWorkspaceLayer ?? { id in selectedLayerID = id; groupPath = [] },
             onAddLayer: onWorkspaceAddLayer ?? { position in addHUD(at: position) },
             selection: $previewSelection, onBack: { if !groupPath.isEmpty { groupPath.removeLast() } },

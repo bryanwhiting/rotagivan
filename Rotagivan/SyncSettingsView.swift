@@ -10,6 +10,7 @@ struct SyncSettingsView: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmNewPassword = ""
+    @State private var confirmingResync = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -35,16 +36,26 @@ struct SyncSettingsView: View {
                     } else if sync.account != nil {
                         Label(sync.syncStatus, systemImage: sync.error == nil ? "checkmark.icloud" : "icloud.slash")
                             .font(.title3.weight(.medium)).accessibilityIdentifier("sync-status")
-                        Text("Your settings and API keys sync automatically across your trusted Macs. Everything is encrypted before it leaves this Mac.")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Your settings and API keys sync automatically across your trusted Macs. Everything is encrypted before it leaves this Mac; edits here reach your other Mac within about a minute.")
                             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack {
-                            if let date = sync.lastSave {
-                                Text("Last synced " + date.formatted(date: .omitted, time: .shortened))
+                            if let date = sync.lastChecked ?? sync.lastSave {
+                                Text("Last checked " + date.formatted(date: .omitted, time: .shortened))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Sync now") { Task { await sync.save() } }
                                 .accessibilityIdentifier("sync-save").disabled(sync.busy)
+                        }
+                        if let notice = sync.conflictNotice {
+                            Label(notice, systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                        }
+                        let enrollment = VaultEnrollmentView(vault: sync.vault)
+                        if enrollment.needsApproval || (sync.vault.unlocked && !sync.vault.pending.isEmpty) {
+                            Divider()
+                            enrollment.accessibilityIdentifier("sync-enrollment")
                         }
                     } else {
                         Text("Sign in to keep settings and API keys in sync on your Macs.").foregroundStyle(.secondary)
@@ -56,7 +67,7 @@ struct SyncSettingsView: View {
                                 let submitted = password; password = ""; confirmation = ""
                                 Task {
                                     await sync.authenticate(email: email, password: submitted, create: creating)
-                                    await sync.synchronizeAutomatically()
+                                    await sync.synchronizeAutomatically(trigger: .manual)
                                 }
                             }.buttonStyle(.borderedProminent)
                                 .disabled(sync.busy || email.isEmpty || password.count < 12 || (creating && confirmation != password))
@@ -70,20 +81,32 @@ struct SyncSettingsView: View {
                     }
                     DisclosureGroup("Privacy & recovery") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Settings are encrypted in local storage and in the cloud. Your account password alone cannot decrypt them.")
-                            Text("On a new Mac, sign in and use your recovery code or approve it from a trusted Mac below. Update your other Macs before using automatic sync.")
+                            Text("Settings are encrypted in local storage and in the cloud. Your account password alone cannot decrypt them; only Macs you approve (or your recovery code) hold the key.")
+                            Text("On a new Mac, sign in: it shows a code to approve from a trusted Mac. Keep the recovery code from the API keys card in your password manager.")
                             Text("Usage history, permissions, and device-only options stay on this Mac. Files you explicitly export are readable; keep them private.")
+                            if sync.account != nil, sync.credentialsReady, sync.vault.unlocked {
+                                Button("Re-sync from cloud…") { confirmingResync = true }
+                                    .accessibilityIdentifier("sync-resync")
+                                    .disabled(sync.busy)
+                                    .confirmationDialog("Replace this Mac’s sync state with the cloud copy?", isPresented: $confirmingResync, titleVisibility: .visible) {
+                                        Button("Re-sync from cloud", role: .destructive) { Task { await sync.resyncFromCloud() } }
+                                        Button("Cancel", role: .cancel) {}
+                                    } message: {
+                                        Text("Use this if sync is stuck. Settings that only exist on this Mac are replaced by the cloud copy; an encrypted backup of this Mac’s current settings is kept first.")
+                                    }
+                            }
                         }.font(.caption).foregroundStyle(.secondary).padding(.top, 8)
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             }
             if sync.credentialsReady, sync.account != nil {
                 CredentialVaultView(vault: sync.vault, onUnlocked: {
-                    Task { await sync.synchronizeAutomatically() }
+                    Task { await sync.synchronizeAutomatically(trigger: .manual) }
                 }).accessibilityIdentifier("sync-separate-vault")
             }
         }
         .textFieldStyle(.roundedBorder)
+        .onAppear { Task { await sync.synchronizeAutomatically(trigger: .manual) } }
         .sheet(isPresented: $changingPassword, onDismiss: clearPasswords) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Change password").font(.headline)

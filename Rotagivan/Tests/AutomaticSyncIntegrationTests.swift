@@ -6,6 +6,8 @@ import SwiftUI
     var settings = CloudSettings(yaml: nil, revision: 0, updatedAt: nil)
     var vault: VaultRecord
     var settingsPuts = 0
+    var requests = 0
+    var notModified = 0
     var offline = false
     let master = VaultCrypto.randomMaster()
     let account = SyncAccount(token: "fixture-session", userID: "fixture-user", email: "fixture@example.test", expiresAt: 2_000_000_000)
@@ -22,13 +24,17 @@ import SwiftUI
     func call(_ request: URLRequest) throws -> (Data, URLResponse) {
         precondition(request.url?.host == "fixture.test", "No live network in tests")
         if offline { throw URLError(.notConnectedToInternet) }
+        requests += 1
         let data: Data
         var code = 200
         if request.url!.path == "/v1/vault" {
             precondition(request.httpMethod == "GET")
             data = try JSONEncoder().encode(VaultRemote(vault: vault, devices: []))
         } else if request.httpMethod == "GET" {
-            data = try JSONEncoder().encode(settings)
+            // Match the real backend: a matching If-None-Match is a bodyless 304.
+            if request.value(forHTTPHeaderField: "If-None-Match") == "\"\(settings.revision)\"" {
+                notModified += 1; code = 304; data = Data()
+            } else { data = try JSONEncoder().encode(settings) }
         } else {
             let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
             let ciphertext = body["yaml"] as! String
@@ -116,6 +122,17 @@ import SwiftUI
         let previousPuts = cloud.settingsPuts
         await a.synchronizeAutomatically(); await b.synchronizeAutomatically()
         precondition(cloud.settingsPuts == previousPuts, "Unchanged settings do not upload")
+        // Triggers: a non-portable change (window focus, enable switch) costs no
+        // request; an idle poll is one conditional GET answered 304 and skips
+        // the vault refresh while this Mac already holds the key.
+        let idleRequests = cloud.requests, idle304 = cloud.notModified
+        work.settings.enabled.toggle()
+        await a.synchronizeAutomatically(trigger: .localChange)
+        precondition(cloud.requests == idleRequests, "A local change without portable differences must not touch the network")
+        await a.synchronizeAutomatically(trigger: .poll)
+        precondition(cloud.requests == idleRequests + 1 && cloud.notModified == idle304 + 1 && cloud.settingsPuts == previousPuts,
+                     "An idle poll is a single conditional settings GET answered 304")
+        precondition(a.error == nil && a.syncStatus == "Up to date" && a.pollDelay == SettingsSync.pollInterval)
         work.settings.normal.cursorSpeed += 0.03
         home.settings.precision.cursorSpeed += 0.04
         await a.synchronizeAutomatically(); await b.synchronizeAutomatically(); await a.synchronizeAutomatically()
@@ -126,9 +143,11 @@ import SwiftUI
         work.settings.normal.cursorSpeed += 0.01
         await a.synchronizeAutomatically()
         precondition(a.error != nil)
+        precondition(a.pollDelay > SettingsSync.pollInterval, "Failures back off the poll")
+        precondition(a.error!.hasPrefix("Sync paused. Your local settings are safe."), a.error!)
         cloud.offline = false
         await a.synchronizeAutomatically(); await b.synchronizeAutomatically()
-        precondition(a.error == nil && b.error == nil)
+        precondition(a.error == nil && b.error == nil && a.pollDelay == SettingsSync.pollInterval)
         try check(projected(work).syncFingerprint() == projected(home).syncFingerprint(), "Offline changes retry without manual load")
         precondition(!FileManager.default.fileExists(atPath: root.appendingPathComponent("work/legacy/settings.yaml").path))
         if CommandLine.arguments.count > 1 {
@@ -150,6 +169,6 @@ import SwiftUI
         await a.prepareToQuit(); await b.prepareToQuit()
         let disk = try Data(contentsOf: root.appendingPathComponent("work/settings.sqlite"))
         precondition(disk.range(of: Data("cursorSpeed".utf8)) == nil)
-        print("PASS AutomaticSyncIntegrationTests: legacy migration, new Mac download, independent edits, offline retry, encrypted transport and local storage")
+        print("PASS AutomaticSyncIntegrationTests: legacy migration, new Mac download, independent edits, no-op local changes, conditional idle polls, backoff, offline retry, encrypted transport and local storage")
     }
 }

@@ -134,8 +134,33 @@ struct AppExplorerRecents {
     }
 
     func ordered(available: [String], excluding: Set<String>, limit: Int = 8) -> [String] {
+        Array(mostRecentFirst(available: available, excluding: excluding).prefix(max(0, min(16, limit))))
+    }
+
+    func mostRecentFirst(available: [String], excluding: Set<String> = []) -> [String] {
         let allowed = Set(available).subtracting(excluding)
         var seen = Set<String>()
-        return Array((identifiers + available).filter { allowed.contains($0) && seen.insert($0).inserted }.prefix(max(0, min(16, limit))))
+        return (identifiers + available).filter { allowed.contains($0) && seen.insert($0).inserted }
+    }
+}
+
+enum RecentPlace<Tab: Equatable>: Equatable { case app(String), tab(Tab) }
+
+/// One most-recent-first list of apps and Chrome tabs. Chrome appears only as its
+/// tabs. Stamps come from one shared clock; unstamped places keep their input order.
+enum RecentPlaces {
+    static let chromeBundleID = "com.google.Chrome"
+    /// `apps` arrive in MRU order and `tabs` with Chrome's selected tab first.
+    /// The current place (the active app, or Chrome's selected tab) always leads.
+    static func merged<Tab: Equatable>(apps: [String], tabs: [Tab], active: String?,
+                                       appStamp: (String) -> UInt64?, tabStamp: (Tab) -> UInt64?) -> [RecentPlace<Tab>] {
+        let current: RecentPlace<Tab>? = active == chromeBundleID ? tabs.first.map { .tab($0) }
+            : active.flatMap { apps.contains($0) ? .app($0) : nil }
+        let candidates = apps.filter { $0 != chromeBundleID }.map { (RecentPlace<Tab>.app($0), appStamp($0) ?? 0) }
+            + tabs.map { (RecentPlace<Tab>.tab($0), tabStamp($0) ?? 0) }
+        let rest = candidates.enumerated().filter { $0.element.0 != current }.sorted { lhs, rhs in
+            lhs.element.1 == rhs.element.1 ? lhs.offset < rhs.offset : lhs.element.1 > rhs.element.1
+        }.map(\.element.0)
+        return (current.map { [$0] } ?? []) + rest
     }
 }

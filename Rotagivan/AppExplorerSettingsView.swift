@@ -33,7 +33,7 @@ struct BuiltInHUDDefaultEditor: View {
         var result = AppExplorerSettings()
         result.slotCount = layout.slotCount
         result.favorites = layout.favorites
-        if !group.hasEditableDefaults && group != .chromeTabs {
+        if !group.hasEditableDefaults && !group.showsChromeTabs {
             let slots = group == .recentApps ? ExplorerSlot.slots(layout.slotCount).sorted {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             } : ExplorerSlot.slots(layout.slotCount)
@@ -45,6 +45,9 @@ struct BuiltInHUDDefaultEditor: View {
         return result
     }
     private var chromePreviewEntries: [ExplorerEntry]? {
+        if group == .recentAppsAndTabs {
+            return chromeTabsLoaded ? AppExplorerController.previewRecentPlaceEntries(tabs: chromeTabs, count: layout.slotCount) : []
+        }
         guard group == .chromeTabs else { return nil }
         let slots = ExplorerSlot.slots(layout.slotCount).sorted {
             ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
@@ -60,7 +63,7 @@ struct BuiltInHUDDefaultEditor: View {
         }
     }
     private func loadChromeTabs() async {
-        guard group == .chromeTabs else { return }
+        guard group.showsChromeTabs else { return }
         let provider = chromeTabsProvider
         let tabs = await Task.detached(priority: .userInitiated) { provider() }.value
         chromeTabs = ChromeTabRecency.shared.ranked(tabs)
@@ -80,20 +83,21 @@ struct BuiltInHUDDefaultEditor: View {
                     var next = layout; next.slotCount = count; save(next)
                 })) { ForEach(2...16, id: \.self) { Text("\($0)").tag($0) } }.frame(width: 130)
                 Spacer()
-                if group == .chromeTabs {
+                if group.showsChromeTabs {
                     Button("Refresh tabs") { Task { await loadChromeTabs() } }
                 }
                 Button("Restore original…") { restoring = true }.accessibilityIdentifier("builtin-hud-restore")
             }
             Text(group.hasEditableDefaults ? "Click a tile to edit the default. New \(group.title) HUDs use this layout; existing copies stay unchanged."
-                : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
+                : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : group == .recentAppsAndTabs ? "Running apps and Chrome tabs" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
                 .font(.callout).foregroundStyle(.secondary)
             ExplorerHUDSettingsPreview(settings: preview, theme: settings.resolvedTheme,
                 dictionary: store.settings.resolvedHotkeyDictionary, groupPath: [], layerName: group.title,
                 liveEntries: chromePreviewEntries,
                 liveMessage: group == .chromeTabs ? (chromeTabsLoaded
                     ? (chromeTabs.isEmpty ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation." : "Most recently used Chrome tabs · active tab on the left")
-                    : "Loading Chrome tabs…") : nil,
+                    : "Loading Chrome tabs…")
+                    : group == .recentAppsAndTabs ? (chromeTabsLoaded ? "Most recent app or Chrome tab on the left · the rest continue clockwise" : "Loading Chrome tabs…") : nil,
                 selection: $selection, onBack: {}, onDrag: { _, _ in }, onDrop: { source, target in
                     guard group.hasEditableDefaults, let target else { return }
                     var next = preview
@@ -717,6 +721,8 @@ struct AppExplorerSettingsView: View {
                             Text("The active app is outlined on the left. Other recent apps start at top-left and continue clockwise.")
                         } else if builtIn == .chromeTabs {
                             Text("Open Chrome tabs fill this HUD. Swipe to a tab and lift to focus it. Allow Google Chrome under Privacy & Security → Automation if requested.")
+                        } else if builtIn == .recentAppsAndTabs {
+                            Text(builtInDescription(builtIn))
                         } else {
                             Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
                         }
@@ -758,6 +764,7 @@ struct AppExplorerSettingsView: View {
                     Text("Assigned favorites").tag(AppExplorerMode.favorites)
                     Text("Recent apps").tag(AppExplorerMode.recent)
                     Text("Chrome tabs").tag(AppExplorerMode.chromeTabs)
+                    Text("Apps & tabs").tag(AppExplorerMode.recentAppsAndTabs)
                 }.pickerStyle(.segmented)
             }
             if !compact {
@@ -1939,6 +1946,7 @@ extension AppExplorerSettingsView {
                             Text("Assigned tiles").tag(AppExplorerMode.favorites)
                             Text("Recent apps").tag(AppExplorerMode.recent)
                             Text("Chrome tabs").tag(AppExplorerMode.chromeTabs)
+                            Text("Recent apps & tabs").tag(AppExplorerMode.recentAppsAndTabs)
                         }.labelsHidden()
                     }
                 }
@@ -1983,6 +1991,7 @@ extension AppExplorerSettingsView {
         switch builtIn {
         case .recentApps: return "Running apps fill this HUD. The active app is outlined on the left; other recent apps start at top-left and continue clockwise."
         case .chromeTabs: return "Open Chrome tabs fill this HUD. Swipe to a tab and lift to focus it. Allow Google Chrome under Privacy & Security → Automation if requested."
+        case .recentAppsAndTabs: return "Recent apps and individual Chrome tabs share one most-recent-first list, so you can get back to where you were. The current app or tab is outlined on the left; the rest start at top-left and continue clockwise. Chrome itself appears only as its tabs."
         case .windowManager: return "Window positions, full screen, minimize and close."
         case .mediaControls: return "Volume, mute, previous/next track, and play/pause. Single tap plays or pauses."
         case .actions: return ExplorerReservedGroup.actions.summary
@@ -2264,8 +2273,12 @@ struct ExplorerHUDSettingsPreview: View {
     private var chromePreviewKey: String? {
         guard liveEntries == nil else { return nil }
         let builtIn = groupPath.isEmpty ? rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn : nil
-        guard settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs else { return nil }
+        guard settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs || mixed(builtIn) else { return nil }
         return (selectedLayerID?.uuidString ?? "group") + ":" + groupPath.map(\.rawValue).joined(separator: "/")
+    }
+
+    private func mixed(_ builtIn: HUDLayerBuiltIn?) -> Bool {
+        settings.favorite(at: groupPath)?.isRecentAppsAndTabsGroup == true || builtIn == .recentAppsAndTabs
     }
 
     var body: some View {
@@ -2345,12 +2358,19 @@ struct ExplorerHUDSettingsPreview: View {
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
         let builtIn = groupPath.isEmpty ? rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn : nil
         let chrome = settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs
-        model.showingRecents = settings.favorite(at: groupPath)?.isDynamicGroup == true || builtIn == .recentApps || chrome || liveEntries != nil
+        let places = mixed(builtIn)
+        model.showingRecents = settings.favorite(at: groupPath)?.isDynamicGroup == true || builtIn == .recentApps || chrome || places || liveEntries != nil
         model.selected = model.showingRecents ? nil : selection
         if model.showingRecents {
             if let liveEntries {
                 model.entries = liveEntries
                 model.message = liveMessage
+                return
+            }
+            if places {
+                let loaded = chromeLoadedKey == chromePreviewKey
+                model.entries = loaded ? AppExplorerController.previewRecentPlaceEntries(tabs: chromePreviewTabs, count: model.slotCount) : []
+                model.message = !loaded ? "Loading Chrome tabs…" : "Most recent app or Chrome tab on the left · the rest continue clockwise"
                 return
             }
             if chrome {

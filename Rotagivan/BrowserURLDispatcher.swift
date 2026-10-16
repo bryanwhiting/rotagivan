@@ -110,13 +110,16 @@ enum ChromeLocalHistory {
     }
 }
 
-/// In-memory tab focus order. This is HUD state, not Screen Time data: it is
-/// never written to disk or included in settings sync.
+/// In-memory tab focus and app activation order on one shared clock, so apps and
+/// tabs compare directly. This is HUD state, not Screen Time data: it is never
+/// written to disk or included in settings sync.
 @MainActor final class ChromeTabRecency {
     static let shared = ChromeTabRecency()
     private var visits: [String: UInt64] = [:]
+    private var appVisits: [String: UInt64] = [:]
     private var clock: UInt64 = 0
     private var timer: Timer?
+    private var activation: NSObjectProtocol?
     private var sampling = false
     private func key(_ tab: ChromeRecentTab) -> String { tab.url.isEmpty ? tab.id : tab.url }
 
@@ -127,9 +130,37 @@ enum ChromeLocalHistory {
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+        if let app = NSWorkspace.shared.frontmostApplication { recordApp(app) }
+        activation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main) { notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            MainActor.assumeIsolated { ChromeTabRecency.shared.recordApp(app) }
+        }
     }
 
-    func stop() { timer?.invalidate(); timer = nil }
+    func stop() {
+        timer?.invalidate(); timer = nil
+        if let activation { NSWorkspace.shared.notificationCenter.removeObserver(activation) }
+        activation = nil
+    }
+
+    func recordApp(_ app: NSRunningApplication) {
+        guard app.activationPolicy == .regular, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let identifier = app.bundleIdentifier else { return }
+        recordApp(identifier)
+    }
+
+    func recordApp(_ identifier: String) {
+        guard identifier != "local.rotagivan" else { return }
+        clock &+= 1
+        appVisits[identifier] = clock
+        if appVisits.count > 512 { appVisits = [identifier: clock] }
+        // Stamp the selected tab now rather than at the next two-second sample.
+        if identifier == RecentPlaces.chromeBundleID { sampleIfChromeIsActive() }
+    }
+
+    func stamp(app identifier: String) -> UInt64? { appVisits[identifier] }
+    func stamp(tab: ChromeRecentTab) -> UInt64? { visits[key(tab)] }
 
     private func sampleIfChromeIsActive() {
         guard !sampling, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.google.Chrome" else { return }
@@ -152,9 +183,10 @@ enum ChromeLocalHistory {
     }
 
     /// The first tab is Chrome's currently selected tab; ties retain tab-strip order.
+    /// The selected tab is only a fresh visit while Chrome is frontmost.
     func ranked(_ tabs: [ChromeRecentTab]) -> [ChromeRecentTab] {
         guard let active = tabs.first else { return [] }
-        record(active)
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == RecentPlaces.chromeBundleID { record(active) }
         return [active] + tabs.dropFirst().enumerated().sorted { lhs, rhs in
             let left = visits[key(lhs.element)] ?? 0
             let right = visits[key(rhs.element)] ?? 0

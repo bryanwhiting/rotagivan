@@ -569,23 +569,32 @@ struct ConfigurationLibrary: Codable {
 }
 
 enum AppExplorerMode: String, Codable, CaseIterable {
-    case favorites, recent, chromeTabs
-    var title: String { self == .favorites ? "Favorites" : self == .recent ? "Recent apps" : "Google Chrome Tabs" }
+    case favorites, recent, chromeTabs, recentAppsAndTabs
+    var title: String {
+        switch self {
+        case .favorites: return "Favorites"
+        case .recent: return "Recent apps"
+        case .chromeTabs: return "Google Chrome Tabs"
+        case .recentAppsAndTabs: return "Recent apps & tabs"
+        }
+    }
     var alternate: Self { self == .favorites ? .recent : .favorites }
 }
 
 /// Reserved catalog entries are always available. Assigned instances use the
 /// existing group/shortcut schema, so exports and older saved groups stay intact.
 enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
-    case windowManager, recentApps, actions, chromeTabs, mediaControls
+    case windowManager, recentApps, actions, chromeTabs, recentAppsAndTabs, mediaControls
     var id: Self { self }
     var hasEditableDefaults: Bool { self == .actions || self == .mediaControls }
+    var showsChromeTabs: Bool { self == .chromeTabs || self == .recentAppsAndTabs }
     var title: String {
         switch self {
         case .windowManager: return "Window Manager"
         case .recentApps: return "Recent Apps"
         case .actions: return "Actions"
         case .chromeTabs: return "Google Chrome Tabs"
+        case .recentAppsAndTabs: return "Recent Apps & Tabs"
         case .mediaControls: return "Media Controls"
         }
     }
@@ -595,6 +604,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .recentApps: return "clock.arrow.circlepath"
         case .actions: return "command"
         case .chromeTabs: return "rectangle.on.rectangle"
+        case .recentAppsAndTabs: return "clock.arrow.2.circlepath"
         case .mediaControls: return "playpause.fill"
         }
     }
@@ -604,6 +614,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .recentApps: return "Running apps, ordered by most recently used."
         case .actions: return "Copy, Paste, Cut, Undo, Redo, Select All, Find and Save."
         case .chromeTabs: return "Open tabs from Google Chrome. Choose a tile to focus that existing tab."
+        case .recentAppsAndTabs: return "Recent apps and individual Chrome tabs in one list, most recently used first."
         case .mediaControls: return "Play/pause, previous and next track, volume and mute."
         }
     }
@@ -617,6 +628,8 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recent)
         case .chromeTabs:
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .chromeTabs, slotCount: 8)
+        case .recentAppsAndTabs:
+            return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recentAppsAndTabs, slotCount: 8)
         case .mediaControls:
             return AppExplorerFavorite(direction: slot, name: title, children: HUDLayerTemplate.mediaControls.favorites, slotCount: 8)
         case .actions:
@@ -943,7 +956,7 @@ enum HUDLayerTemplate: String, CaseIterable, Identifiable {
 }
 
 enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
-    case recentApps, actions, windowManager, mediaControls, chromeTabs
+    case recentApps, actions, windowManager, mediaControls, chromeTabs, recentAppsAndTabs
     var id: Self { self }
     var title: String {
         switch self {
@@ -952,6 +965,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
         case .chromeTabs: return "Google Chrome Tabs"
+        case .recentAppsAndTabs: return "Recent Apps & Tabs"
         }
     }
     var symbol: String {
@@ -961,6 +975,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .windowManager: return "rectangle.split.2x2"
         case .mediaControls: return "playpause.fill"
         case .chromeTabs: return "rectangle.on.rectangle"
+        case .recentAppsAndTabs: return "clock.arrow.2.circlepath"
         }
     }
 }
@@ -1053,7 +1068,8 @@ struct AppExplorerFavorite: Codable, Equatable {
     var isPureGroup: Bool { isGroup && !hasPrimaryDestination }
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
     var isChromeTabsGroup: Bool { isGroup && groupMode == .chromeTabs }
-    var isDynamicGroup: Bool { isRecentGroup || isChromeTabsGroup }
+    var isRecentAppsAndTabsGroup: Bool { isGroup && groupMode == .recentAppsAndTabs }
+    var isDynamicGroup: Bool { isRecentGroup || isChromeTabsGroup || isRecentAppsAndTabsGroup }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {

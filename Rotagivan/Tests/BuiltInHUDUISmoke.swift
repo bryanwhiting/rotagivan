@@ -11,7 +11,7 @@ import SwiftUI
         let store = SettingsStore(defaults: defaults)
         store.settings.enabled = false
         store.settings.appExplorer = AppExplorerSettings()
-        for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps, .mediaControls] {
+        for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps, .recentAppsAndTabs, .mediaControls] {
             let host = NSHostingView(rootView: BuiltInHUDDefaultEditor(store: store, group: group,
                 chromeTabsProvider: { (1...8).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
                     title: "Preview tab \($0)", url: "https://example.test/preview/\($0)",
@@ -89,6 +89,31 @@ import SwiftUI
         controller.changeWindowPage(-1)
         precondition(controller.displayedEntries.first?.chromeTab?.tabIndex == 9)
         controller.dismiss()
-        print("Built-in HUD preview and Chrome runtime passed; synthetic tabs only, no tab activated")
+        var placesConfiguration = AppExplorerSettings()
+        let placesLayer = placesConfiguration.assignBuiltIn(.recentAppsAndTabs, at: .right)!
+        controller.configuration = { placesConfiguration }
+        controller.show(waitingForLift: false)
+        precondition(controller.navigateHUD(.next))
+        let placesDeadline = Date().addingTimeInterval(4)
+        while !controller.displayedEntries.contains(where: { $0.chromeTab != nil }), Date() < placesDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        precondition(controller.displayedLayerID == placesLayer)
+        precondition(controller.displayedEntries.count == 8)
+        precondition(controller.displayedEntries.first?.direction == .left && controller.displayedEntries.first?.isActiveApp == true)
+        precondition(controller.displayedEntries.allSatisfy { $0.chromeTab != nil || $0.bundleID != RecentPlaces.chromeBundleID },
+            "Chrome appears only as its tabs")
+        let firstPage = controller.displayedEntries.map(\.name)
+        controller.changeWindowPage(1)
+        precondition(controller.displayedEntries.map(\.name) != firstPage && controller.displayedEntries.allSatisfy { !$0.isActiveApp })
+        var tabs = Set<String>()
+        controller.changeWindowPage(-1)
+        for _ in 0..<12 {
+            tabs.formUnion(controller.displayedEntries.compactMap { $0.chromeTab?.url })
+            controller.changeWindowPage(1)
+        }
+        precondition(tabs.count == 20, "Every Chrome tab is reachable by paging")
+        controller.dismiss()
+        print("Built-in HUD preview, Chrome and Recent Apps & Tabs runtime passed; synthetic tabs only, no tab activated")
     }
 }

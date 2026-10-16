@@ -73,6 +73,12 @@ import SQLite3
         var compileError: NSDictionary?
         let script = NSAppleScript(source: ChromeBookmarkTabs.script(url: url.absoluteString, preferredTab: ""))!
         precondition(script.compileAndReturnError(&compileError), "Chrome script must compile: \(String(describing: compileError))")
+        let rowScript = NSAppleScript(source: """
+            return "1" & \(ChromeBookmarkTabs.appleScriptFieldSeparator) & "2" & \(ChromeBookmarkTabs.appleScriptFieldSeparator) & "Title" & \(ChromeBookmarkTabs.appleScriptFieldSeparator) & "https://fixture.test/"
+            """)!
+        var rowError: NSDictionary?
+        precondition(rowScript.executeAndReturnError(&rowError).stringValue == "1\t2\tTitle\thttps://fixture.test/",
+            "Chrome's AppleScript rows must contain real tab delimiters, not the Chrome tab class")
 
         let historyRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("Rotagivan-ChromeHistory-\(UUID().uuidString)", isDirectory: true)

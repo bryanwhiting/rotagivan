@@ -236,6 +236,9 @@ enum ChromeLocalHistory {
 /// history. The serial queue makes rapid repeat opens observe the previous result.
 final class ChromeBookmarkTabs: @unchecked Sendable {
     static let shared = ChromeBookmarkTabs()
+    // Inside `tell application "Google Chrome"`, `tab` resolves to Chrome's
+    // tab class, not AppleScript's tab character. Use the explicit character.
+    static let appleScriptFieldSeparator = "(ASCII character 9)"
     private let queue = DispatchQueue(label: "Rotagivan.ChromeBookmarkTabs", qos: .userInitiated)
     private var lastTabs: [String: String] = [:] // queue-confined, never synced
     typealias Runner = (String) -> (tabID: String?, error: Int?)
@@ -269,7 +272,7 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
                         set t to tab ti of w
                         set tabTitle to title of t
                         set tabURL to URL of t
-                        set rowText to (wi as text) & tab & (ti as text) & tab & tabTitle & tab & tabURL & linefeed
+                        set rowText to (wi as text) & \(appleScriptFieldSeparator) & (ti as text) & \(appleScriptFieldSeparator) & tabTitle & \(appleScriptFieldSeparator) & tabURL & linefeed
                         if wi is 1 and ti is activeIndex then
                             set activeOutput to rowText
                         else
@@ -310,7 +313,7 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
                 set w to front window
                 set ti to active tab index of w
                 set t to tab ti of w
-                return "1" & tab & (ti as text) & tab & (title of t) & tab & (URL of t)
+                return "1" & \(appleScriptFieldSeparator) & (ti as text) & \(appleScriptFieldSeparator) & (title of t) & \(appleScriptFieldSeparator) & (URL of t)
             end tell
         on error
             return ""

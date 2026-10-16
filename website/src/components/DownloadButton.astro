@@ -1,0 +1,44 @@
+---
+// Download CTA. The link always works (/download/latest redirects to the
+// newest DMG); version and size are filled in from /latest.json when present.
+interface Props {
+  label?: string;
+  showMeta?: boolean;
+  variant?: "primary" | "small";
+}
+const { label = "Download for macOS", showMeta = true, variant = "primary" } = Astro.props;
+---
+
+<div class="download-cta" data-download>
+  <a class:list={["button", { small: variant === "small" }]} href="/download/latest" data-download-link>
+    {label}
+    <span aria-hidden="true">↓</span>
+  </a>
+  {
+    showMeta && (
+      <p class="download-meta" data-download-meta>
+        Free download · macOS 13 or later
+      </p>
+    )
+  }
+</div>
+
+<script>
+  type Manifest = { version: string; build: string; size?: number; minimumOS?: string; architectures?: string[] };
+  const nodes = document.querySelectorAll<HTMLElement>("[data-download-meta]");
+  if (nodes.length) {
+    fetch("/latest.json", { cache: "no-cache" })
+      .then((r) => (r.ok ? (r.json() as Promise<Manifest>) : null))
+      .then((m) => {
+        if (!m) return;
+        const parts = [`Version ${m.version} (${m.build})`];
+        if (m.size) parts.push(`${(m.size / 1048576).toFixed(1)} MB`);
+        if (m.minimumOS) parts.push(`macOS ${m.minimumOS}+`);
+        if (m.architectures?.length) {
+          parts.push(m.architectures.join(" + ").replace("arm64", "Apple silicon").replace("x86_64", "Intel"));
+        }
+        nodes.forEach((n) => (n.textContent = parts.join(" · ")));
+      })
+      .catch(() => {});
+  }
+</script>

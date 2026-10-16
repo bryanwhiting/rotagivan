@@ -1,0 +1,47 @@
+---
+// "Buy Voice mode" button. Posts to the Worker's /api/checkout and follows the
+// returned Stripe Checkout URL; shows a calm message when payments are not
+// configured yet.
+interface Props {
+  label?: string;
+  secondary?: boolean;
+}
+const { label = "Get Voice mode", secondary = false } = Astro.props;
+---
+
+<div class="checkout" data-checkout>
+  <button class:list={["button", { secondary }]} type="button" data-checkout-button>
+    {label} <span aria-hidden="true">↗</span>
+  </button>
+  <p class="checkout-status fineprint" data-checkout-status role="status" aria-live="polite"></p>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-checkout]").forEach((root) => {
+    const button = root.querySelector<HTMLButtonElement>("[data-checkout-button]")!;
+    const status = root.querySelector<HTMLElement>("[data-checkout-status]")!;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      status.textContent = "Opening secure checkout…";
+      try {
+        const response = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        const body = await response.json().catch(() => ({}));
+        if (response.ok && body.url) {
+          window.location.assign(body.url);
+          return;
+        }
+        status.textContent =
+          body.error === "payments_not_configured"
+            ? "Voice mode purchases open soon."
+            : "Checkout could not start. Please try again in a moment.";
+      } catch {
+        status.textContent = "Checkout could not start. Check your connection and try again.";
+      }
+      button.disabled = false;
+    });
+  });
+</script>

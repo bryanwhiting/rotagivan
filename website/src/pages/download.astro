@@ -1,104 +1,132 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import DownloadButton from "../components/DownloadButton.astro";
 ---
 
 <Layout
-  title="Release & setup — Rotagivan"
-  description="Follow Rotagivan’s path to a customer-ready Mac release and learn how installation, permissions, and your first workflow will work."
+  title="Download Rotagivan for Mac"
+  description="Download the latest Rotagivan for macOS. Open the disk image, drag Rotagivan to Applications, and grant Accessibility."
 >
   <div class="wrap">
     <section class="page-hero">
-      <p class="eyebrow">YOUR MAC. YOUR NEXT MOVE.</p>
+      <p class="eyebrow">DOWNLOAD</p>
       <h1>
-        Less setup.
+        Rotagivan
         <br />
-        <em>More possibility.</em>
+        <em>for Mac.</em>
       </h1>
       <p class="lede">
-        A Mac app should start with a download, not a development environment.
-        That’s the experience we’re preparing.
+        One disk image. Drag it to Applications, open it, and Rotagivan settles
+        into your menu bar.
       </p>
-    </section>
-    <div class="notice">
-      <strong>Public download coming soon.</strong>
-      <br />
-      Rotagivan is in development. A signed, notarized customer release and
-      verified system requirements are not available yet. In the meantime, you
-      can explore the browser demo.
-    </div>
-    <section class="setup-grid" aria-label="Planned customer setup">
-      <article>
-        <span class="step-number">01 / INSTALL</span>
-        <h2>Download. Open.</h2>
-        <p>
-          The planned release will arrive as a Mac download. Move Rotagivan into
-          Applications and launch it. No compiler or personal signing
-          certificate required.
-        </p>
-      </article>
-      <article>
-        <span class="step-number">02 / CONNECT</span>
-        <h2>Give it permission.</h2>
-        <p>
-          Allow Accessibility so Rotagivan can run your chosen actions.
-          Depending on your input setup, macOS may also ask for Input
-          Monitoring. Voice features require microphone permission.
-        </p>
-      </article>
-      <article>
-        <span class="step-number">03 / MAKE IT YOURS</span>
-        <h2>Start with one move.</h2>
-        <p>
-          Add your favorite app to the HUD, give it a hotkey or gesture, and try
-          it. Build up your workspace one useful action at a time.
-        </p>
-      </article>
-    </section>
-    <div class="download-state">
-      <h2>Feel it before you install it.</h2>
-      <p>
-        Explore the wheel, tile a demo window, and play a sample workflow.
-        Nothing changes on your computer.
-      </p>
-      <div class="button-row">
-        <a class="button" href="/#playground">
-          Open the interactive demo
-        </a>
-        <a class="quiet-link" href="/pricing/">
-          View pricing status
-        </a>
+      <div class="button-row" style="justify-content:center;margin-top:36px">
+        <DownloadButton />
       </div>
-    </div>
+    </section>
+
+    <ol class="install-steps" aria-label="Install steps">
+      <li>
+        <span>
+          Open <b>Rotagivan.dmg</b> from your Downloads and drag
+          <b>Rotagivan</b> onto the <b>Applications</b> folder.
+        </span>
+      </li>
+      <li data-gatekeeper-step>
+        <span>
+          Open Rotagivan from Applications.
+          <small data-gatekeeper-note>
+            The first time, macOS may say it can't verify the developer —
+            this early build isn't notarized by Apple yet. Click <b>Done</b>,
+            open <b>System Settings → Privacy &amp; Security</b>, and click
+            <b>Open Anyway</b> next to Rotagivan. You only do this once.
+          </small>
+        </span>
+      </li>
+      <li>
+        <span>
+          Allow <b>Accessibility</b> when asked so Rotagivan can run your
+          actions and arrange windows.
+          <small>
+            Depending on your setup, macOS may also ask for Input Monitoring.
+            Voice mode asks for the microphone only when you first use it.
+          </small>
+        </span>
+      </li>
+      <li>
+        <span>
+          Add your favorite app to the HUD, give it a hotkey or gesture, and try
+          it.
+          <small>
+            Rotagivan checks for new versions and offers the download when one
+            is ready. To update, drag the new version over the old one.
+          </small>
+        </span>
+      </li>
+    </ol>
+
+    <p class="release-facts" data-release-facts hidden></p>
+
     <section class="faq">
       <h2>A little clarity.</h2>
       <details open>
-        <summary>Which Macs will it support?</summary>
+        <summary>Which Macs does it support?</summary>
         <p>
-          The app currently targets macOS 13 or later in its bundle metadata.
-          The public support range and available processor architectures will be
-          published after release testing. Apple trackpad support remains
-          experimental; Navigator testing has focused on Voyager.
+          macOS 13 or later. The download page lists the processor types each
+          build includes. Apple trackpad support is experimental; ZSA Navigator
+          testing has focused on Voyager.
         </p>
       </details>
       <details>
         <summary>Why does it need Accessibility?</summary>
         <p>
-          Rotagivan uses macOS permissions to send configured inputs and manage
-          windows. You control those grants in System Settings → Privacy &
-          Security. Signing the app does not grant these permissions
-          automatically.
+          Rotagivan uses macOS permissions to send the inputs you configure and
+          to move windows. You stay in control of those grants in System
+          Settings → Privacy &amp; Security.
         </p>
       </details>
       <details>
         <summary>What stays local, and what goes online?</summary>
         <p>
-          Keyboard, gesture, and HUD actions run on your Mac. Opening a website
-          uses your browser’s network connection. Voice sends audio and command
-          data to configured cloud providers, and account sync transfers
-          settings when you explicitly save or load them. Those optional
-          services have separate setup.
+          Keyboard, gesture and HUD actions run on your Mac. Voice mode sends
+          audio and command text to the provider you configure. Account sync
+          uploads your settings when you sign in; API keys are end-to-end
+          encrypted. The update check downloads a small version file from this
+          site.
+        </p>
+      </details>
+      <details>
+        <summary>How do I verify the download?</summary>
+        <p>
+          Every release lists its SHA-256 checksum above and in
+          <a class="quiet-link" href="/latest.json">latest.json</a>. Run
+          <code>shasum -a 256 ~/Downloads/Rotagivan-*.dmg</code> and compare.
         </p>
       </details>
     </section>
   </div>
 </Layout>
+
+<script>
+  fetch("/latest.json", { cache: "no-cache" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((m) => {
+      if (!m) return;
+      if (m.notarized) document.querySelector("[data-gatekeeper-note]")?.remove();
+      const facts = document.querySelector<HTMLElement>("[data-release-facts]");
+      if (!facts) return;
+      const date = m.publishedAt ? new Date(m.publishedAt).toLocaleDateString() : "";
+      facts.innerHTML = "";
+      const add = (label: string, value: string) => {
+        const line = document.createElement("div");
+        const code = document.createElement("code");
+        code.textContent = value;
+        line.append(`${label}: `, code);
+        facts.append(line);
+      };
+      add("Latest", `${m.version} (build ${m.build})${date ? ` · ${date}` : ""}`);
+      add("SHA-256", m.sha256);
+      if (m.zip?.url) add("Zip download", new URL(m.zip.url, location.href).pathname);
+      facts.hidden = false;
+    })
+    .catch(() => {});
+</script>

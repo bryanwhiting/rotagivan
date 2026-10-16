@@ -1,105 +1,73 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import PricingCards from "../components/PricingCards.astro";
 ---
 
 <Layout
   title="Pricing — Rotagivan"
-  description="Explore Rotagivan before release. Try the interactive demo today; app pricing and public download details are coming soon."
+  description="Rotagivan is free to download. Voice mode is an optional paid add-on."
 >
   <div class="wrap">
     <section class="page-hero">
-      <p class="eyebrow">MORE FLOW. FEWER EXTRA STEPS.</p>
+      <p class="eyebrow">PRICING</p>
       <h1>
-        A small change.
+        Free to download.
         <br />
-        <em>A different kind of day.</em>
+        <em>Voice when you want it.</em>
       </h1>
       <p class="lede">
-        Try the feeling first. Rotagivan is still in development; app pricing
-        will be announced before public release.
+        The launcher, Window Manager, macros, gestures and sync are free. Voice
+        mode is the one paid feature.
       </p>
     </section>
-    <section class="pricing-layout" aria-label="Availability and pricing">
-      <article class="price-card">
-        <span class="pill-label">EXPLORE TODAY</span>
-        <h2>The interactive demo</h2>
-        <p class="price">Free to try.</p>
-        <p>Get a feel for your new command center, right in the browser.</p>
-        <ul>
-          <li>Eight interactive HUD commands</li>
-          <li>A guided workflow you can replay</li>
-          <li>No download or account needed</li>
-          <li>Works with mouse, touch, or keyboard</li>
-        </ul>
-        <a class="button secondary" href="/#playground">
-          Try the demo
-        </a>
-      </article>
-      <article class="price-card featured">
-        <span class="pill-label">IN DEVELOPMENT</span>
-        <h2>Rotagivan for Mac</h2>
-        <p class="price">Pricing coming soon.</p>
-        <p>Your apps, gestures, and routines brought together on your Mac.</p>
-        <ul>
-          <li>Custom HUD layers and app groups</li>
-          <li>Keyboard shortcuts and trackpad actions</li>
-          <li>Multi-step macros and window controls</li>
-          <li>Profiles for your different workflows</li>
-        </ul>
-        <a class="button" href="/download/">
-          See release & setup details
-        </a>
-        <p class="fineprint">
-          Not available to purchase yet. Optional voice services require
-          separate provider credentials and may incur provider charges.
-        </p>
-      </article>
+    <section aria-label="Plans">
+      <PricingCards />
     </section>
     <section class="faq">
       <p class="eyebrow">A FEW THINGS TO KNOW</p>
       <h2>Before your next move.</h2>
       <details>
-        <summary>Can I buy or download Rotagivan today?</summary>
+        <summary>What do I get for free?</summary>
         <p>
-          Public checkout and a customer-ready download are not available yet.
-          The interactive demo is available now, with no signup. This page will
-          show the price and purchase terms when the release is ready.
+          Everything except Voice mode: the radial HUD, Window Manager, Chrome
+          tabs and Recent Apps HUDs, macros and keybindings, profiles and
+          layers, per-app overrides, ZSA Navigator gestures and tuning, and
+          settings sync.
         </p>
       </details>
       <details>
-        <summary>Is the demo the full app?</summary>
+        <summary>How does Voice mode work?</summary>
         <p>
-          No. The demo simulates a handful of workflows inside your browser. The
-          native Mac app connects actions to real apps and inputs after you
-          configure it and grant the required permissions.
+          Start voice from the HUD or its hotkey and say a short command.
+          Rotagivan transcribes it with your configured provider (OpenAI, or
+          OpenRouter/xAI), ranks your own registered actions, and shows the top
+          three. Nothing runs until you confirm. Voice mode uses your own API
+          key, so provider usage is billed by that provider.
+        </p>
+      </details>
+      <details>
+        <summary>How do I unlock Voice mode after paying?</summary>
+        <p>
+          Checkout is handled securely by Stripe. Afterwards you get a license
+          key; paste it into Rotagivan to unlock Voice mode on up to three of
+          your Macs. The app re-checks the license periodically and keeps
+          working offline in between.
         </p>
       </details>
       <details>
         <summary>Do I need a ZSA Navigator?</summary>
         <p>
-          The app supports keyboard hotkeys and is built around ZSA Navigator
-          touch input. Apple trackpad gesture actions are experimental and
-          require an explicit opt-in. Hardware support will be documented with
-          the public release.
+          No. Every HUD and action can be reached with keyboard hotkeys. The
+          app is built around ZSA Navigator touch input, and Apple trackpad
+          gesture actions are available experimentally.
         </p>
       </details>
       <details>
-        <summary>How do the voice features work?</summary>
+        <summary>Is the website demo the full app?</summary>
         <p>
-          Voice is optional. It requires provider credentials; audio is sent for
-          transcription through OpenRouter/xAI, and command text and action
-          descriptions are sent to Jev for matching. You review and confirm a
-          suggestion by default. The website demo does not access your
-          microphone.
-        </p>
-      </details>
-      <details>
-        <summary>Will customers need developer tools?</summary>
-        <p>
-          No. The intended public release is a signed, notarized Mac download.
-          Customers will install the app and grant macOS permissions during
-          setup. Local signing and source builds are part of development, not
-          the customer experience.
+          No. The demo simulates a handful of workflows inside your browser.
+          The Mac app connects actions to your real apps and inputs once you
+          grant the macOS permissions it asks for.
         </p>
       </details>
     </section>

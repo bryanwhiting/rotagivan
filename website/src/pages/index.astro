@@ -1,6 +1,57 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import Demo from "../components/Demo.astro";
+import DownloadButton from "../components/DownloadButton.astro";
+import PricingCards from "../components/PricingCards.astro";
+
+const features = [
+  {
+    icon: "ϟ",
+    title: "A radial HUD launcher",
+    body: "Swipe, tap or press a hotkey and a wheel of your apps, websites and actions appears under your fingers. Nest groups four levels deep and pick a theme, from native Classic to Starburst Air glass.",
+  },
+  {
+    icon: "▥",
+    title: "Window Manager",
+    body: "Tile the front window into halves, thirds or quarters, fill the desktop, toggle full screen, minimize or close — from the HUD or from hotkeys you assign.",
+  },
+  {
+    icon: "◈",
+    title: "Chrome tabs at a glance",
+    body: "A built-in HUD of your open Google Chrome tabs, most recent first, with each site's favicon and Chrome profile name. Pick one to jump straight to it.",
+  },
+  {
+    icon: "⌕",
+    title: "Recent apps and type-to-find",
+    body: "Switch to recently used apps from the wheel, or start typing to search apps, macros and actions and run the match with a single Return.",
+  },
+  {
+    icon: "⌘",
+    title: "Macros and keybindings",
+    body: "Chain up to 32 keystroke and Open app steps into a named macro. One searchable organizer shows every key, gesture and conflict across your setup.",
+  },
+  {
+    icon: "◎",
+    title: "Profiles, layers and app overrides",
+    body: "Keep separate setups for work and play, with layers you switch on the fly and gestures that change depending on the app in front of you.",
+  },
+  {
+    icon: "⌁",
+    title: "Gestures for ZSA Navigator",
+    body: "Drives the Navigator touchpad directly: taps, swipes, double-tap-then-swipe combinations, tunable pointer and scroll curves, and timing calibration. Apple trackpad gestures are available experimentally.",
+  },
+  {
+    icon: "≋",
+    title: "Voice mode",
+    body: "Say “open Slack” or “pause music”. Rotagivan matches what you said against your own actions and shows the best three — nothing runs until you confirm.",
+    paid: true,
+  },
+  {
+    icon: "⇅",
+    title: "Sync between your Macs",
+    body: "Sign in to carry your profiles, HUDs and macros to another Mac. API keys travel end-to-end encrypted, unlocked only on Macs you approve.",
+  },
+];
 ---
 
 <Layout
@@ -29,14 +80,11 @@ import Demo from "../components/Demo.astro";
         motion.
       </p>
       <div class="button-row">
-        <a class="button" href="#playground">
-          Feel the flow <span aria-hidden="true">↗</span>
-        </a>
-        <a class="quiet-link" href="/download/">
-          Meet Rotagivan
+        <DownloadButton />
+        <a class="quiet-link" href="#playground">
+          Feel the flow first <span aria-hidden="true">↗</span>
         </a>
       </div>
-      <p class="hero-note">Built for macOS · Designed around you</p>
     </div>
     <div class="hero-demo" id="playground">
       <Demo />
@@ -53,9 +101,10 @@ import Demo from "../components/Demo.astro";
         <strong>So many possibilities.</strong>
       </span>
       <span>App launching</span>
-      <span>Custom gestures</span>
       <span>Window control</span>
-      <span>Multi-step macros</span>
+      <span>Chrome tabs</span>
+      <span>Macros</span>
+      <span>Voice</span>
     </div>
   </div>
   <section class="section wrap" id="how-it-works">
@@ -98,10 +147,40 @@ import Demo from "../components/Demo.astro";
       </article>
     </div>
   </section>
+  <section class="section wrap" id="features">
+    <div class="section-heading">
+      <p class="eyebrow">02 / WHAT'S INSIDE</p>
+      <h2>
+        One wheel.
+        <br />
+        <span class="muted">Everything within a flick.</span>
+      </h2>
+      <p>
+        Rotagivan is a native Mac app that lives in your menu bar. Everything
+        below is in the app you download today.
+      </p>
+    </div>
+    <div class="feature-grid">
+      {
+        features.map((f) => (
+          <article class:list={{ paid: f.paid }}>
+            <span class="feature-icon" aria-hidden="true">
+              {f.icon}
+            </span>
+            <h3>
+              {f.title}
+              {f.paid && <span class="tag">PAID</span>}
+            </h3>
+            <p>{f.body}</p>
+          </article>
+        ))
+      }
+    </div>
+  </section>
   <section class="feature-section wrap">
     <div class="feature-card wide">
       <div>
-        <p class="eyebrow">02 / LESS BUSYWORK</p>
+        <p class="eyebrow">03 / LESS BUSYWORK</p>
         <h2>
           One action.
           <br />A whole head start.
@@ -186,7 +265,7 @@ import Demo from "../components/Demo.astro";
   </section>
   <section class="section wrap compatibility">
     <div>
-      <p class="eyebrow">03 / FIND YOUR SETUP</p>
+      <p class="eyebrow">04 / FIND YOUR SETUP</p>
       <h2>
         Built around
         <br />
@@ -226,12 +305,27 @@ import Demo from "../components/Demo.astro";
         <div>
           <h3>A voice when you want it.</h3>
           <p>
-            Speak a command, review a suggestion, and confirm. Optional cloud
-            voice features require provider credentials.
+            Speak a command, review the suggestions, and confirm. Voice mode
+            is a paid add-on and uses your own OpenRouter or OpenAI API key.
           </p>
         </div>
       </article>
     </div>
+  </section>
+  <section class="section wrap home-pricing" id="pricing">
+    <div class="section-heading">
+      <p class="eyebrow">05 / PRICING</p>
+      <h2>
+        Free to download.
+        <br />
+        <span class="muted">Add your voice when you want it.</span>
+      </h2>
+      <p>
+        The launcher, window manager, macros, gestures and sync are free.
+        Voice mode is the one paid feature.
+      </p>
+    </div>
+    <PricingCards />
   </section>
   <section class="closing wrap">
     <p class="eyebrow">LESS BETWEEN YOU AND YOUR NEXT IDEA.</p>
@@ -241,15 +335,14 @@ import Demo from "../components/Demo.astro";
       <em>your best move.</em>
     </h2>
     <div class="button-row">
-      <a class="button" href="#playground">
-        Take the wheel <span aria-hidden="true">↗</span>
-      </a>
-      <a class="quiet-link" href="/pricing/">
-        Explore pricing
+      <DownloadButton showMeta={false} />
+      <a class="quiet-link" href="/download/">
+        Install guide
       </a>
     </div>
     <p class="fineprint">
-      Rotagivan is in development. Public release details are coming soon.
+      An independent Mac utility, in active development. Rotagivan checks for
+      new versions and lets you know when one is ready.
     </p>
   </section>
 </Layout>

@@ -9,7 +9,10 @@
     "preview": "astro preview --host 127.0.0.1",
     "check": "astro check",
     "deploy": "npm run build && node scripts/cloudflare.mjs deploy",
-    "deploy:check": "npm run build && wrangler deploy --dry-run"
+    "deploy:check": "npm run build && wrangler deploy --dry-run",
+    "test": "node --test --no-warnings test/*.test.js",
+    "db:migrate": "node scripts/cloudflare.mjs d1 migrations apply rotagivan-licenses --remote",
+    "license:keys": "node scripts/generate-license-keys.mjs"
   },
   "dependencies": {
     "astro": "7.3.5"

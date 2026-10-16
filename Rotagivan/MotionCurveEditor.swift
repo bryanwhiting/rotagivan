@@ -29,7 +29,7 @@ struct MotionCurveEditor: View {
             HStack {
                 Text("Smooth response").font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Menu {
+                RotaMenuButton("Presets", kind: .field) {
                     Button("Constant speed (no acceleration)") {
                         var value = c
                         value.fineGain = MotionProfile.normal.cursorSpeed
@@ -56,13 +56,12 @@ struct MotionCurveEditor: View {
                         Divider()
                         Button("Undo preset") { curve = previous; beforePreset = nil }
                     }
-                } label: { Text("Presets") }
-                .menuStyle(.borderlessButton).fixedSize()
+                }
             }
             HStack {
                 Text("Sensitivity ↑ · √ scale").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Live", isOn: $showLivePreview).toggleStyle(.switch).controlSize(.mini)
+                Toggle("Live", isOn: $showLivePreview).toggleStyle(.rotaSwitch).controlSize(.mini)
                     .font(.caption).help("Show one-finger Navigator cursor motion in the active layer. Two-finger scrolling and native Apple pointer motion are not plotted. Turning Live off does not change cursor response.")
             }
             responseGraph
@@ -102,12 +101,10 @@ struct MotionCurveEditor: View {
             Text("Smoothing reduces moment-to-moment sensitivity changes. Higher feels softer but responds more slowly.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider()
-            DisclosureGroup("Falloff after lift", isExpanded: $showRelease) {
+            RotaDisclosure("Falloff after lift", isExpanded: $showRelease) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker("Falloff motion", selection: $fastRelease) {
-                        Text("Fine").tag(false)
-                        Text("Fast").tag(true)
-                    }.pickerStyle(.segmented)
+                    RotaSegmented("Falloff motion", selection: $fastRelease,
+                        options: [RotaOption("Fine", value: false), RotaOption("Fast", value: true)], fill: true)
                     releaseGraph
                     HStack {
                         Text("Lift · 0 ms")

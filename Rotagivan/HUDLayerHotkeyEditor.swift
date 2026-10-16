@@ -133,7 +133,7 @@ struct HUDLayerHotkeyEditor: View {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { _ = saveDraft() }
-                .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(!valid)
+                .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(!valid)
             }
         }
         .padding(22)

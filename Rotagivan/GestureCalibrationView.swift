@@ -8,7 +8,7 @@ struct TapCalibrationSettingsView: View {
     private var reference: ProfileGestures { store.gestures(for: store.defaultProfileID, device: device) }
 
     var body: some View {
-        GroupBox {
+        RotaCard("Shared timing practice", systemImage: "stopwatch") {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Practice with one finger. Double- and triple-tap rhythm applies to one- and two-finger taps across every layer in \(store.activeConfigurationName). Swipe practice tunes one-finger families; tune two-finger swipe families below.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -22,7 +22,7 @@ struct TapCalibrationSettingsView: View {
                      ? "Complete 10 tries, then Apply to save the median across current and future layers."
                      : "Enable and connect the selected trackpad to capture 10 tries. You can still adjust timing below.")
                     .font(.caption).foregroundStyle(.secondary)
-                DisclosureGroup("Timing adjustments (milliseconds)") {
+                RotaDisclosureSection("Timing adjustments (milliseconds)") {
                     VStack(spacing: 10) {
                         timing("Double-tap delay", key: \.doubleTapInterval, fallback: reference.gestures.resolvedDoubleTapInterval, range: 50...600)
                         timing("Triple tap · first gap", key: \.tripleTapFirstInterval, fallback: reference.gestures.resolvedTripleTapFirstInterval, range: 50...600)
@@ -35,8 +35,8 @@ struct TapCalibrationSettingsView: View {
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(.top, 10)
                 }
-            }.padding(10)
-        } label: { Label("Shared timing practice", systemImage: "stopwatch") }
+            }
+        }
     }
 
     private func calibrate(_ title: String, mode: GestureCalibrationMode) -> some View {
@@ -311,7 +311,7 @@ struct GestureCalibrationView: View {
             Button("Cancel", action: onCancel)
                 .keyboardShortcut(.cancelAction)
             Button("Apply", action: onApply)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                 .disabled(!session.isComplete || session.cancellationReason != nil)
         }
     }

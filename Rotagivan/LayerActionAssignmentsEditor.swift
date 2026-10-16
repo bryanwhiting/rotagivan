@@ -223,7 +223,7 @@ private struct LayerActionAssignmentRow: View {
                 Image(systemName: "trash")
                     .frame(width: 20, height: 20)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.rotaIcon)
             .foregroundStyle(.secondary)
             .help(globalBinding == nil ? "Remove \(trigger.title)" :
                 "Remove global assignment and reveal this layer’s action")
@@ -271,7 +271,7 @@ private struct LayerActionValueMenu: View {
     }
 
     var body: some View {
-        Menu {
+        RotaMenuButton(title, systemImage: symbol, kind: .field, accessibilityTitle: "Assigned action: \(title)") {
             Section("Keyboard") {
                 Button("Record a shortcut…") { showingRecorder = true }
                 if !dictionary.isEmpty {
@@ -316,30 +316,7 @@ private struct LayerActionValueMenu: View {
                     Button("Right click") { choose(.rightClick) }
                 }
             }
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: symbol)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-                Text(title)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(Color.primary.opacity(0.11), lineWidth: 1)
-            }
-            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .accessibilityLabel("Assigned action: \(title)")
         .accessibilityIdentifier("layer-action-value-menu")
         .popover(isPresented: $showingRecorder, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 12) {
@@ -404,20 +381,11 @@ struct AddLayerActionSheet: View {
 
             VStack(spacing: 0) {
                 selectionRow(number: "1", title: "Gesture") {
-                    Picker("Gesture", selection: $tap) {
-                        Section("Tap") {
-                            ForEach(AppGestureTrigger.baseTapTriggers) { trigger in
-                                Text(trigger.title).tag(trigger)
-                            }
-                        }
-                        Section("Two-finger swipe") {
-                            Text(AppGestureTrigger.twoFingerLeft.title).tag(AppGestureTrigger.twoFingerLeft)
-                            Text(AppGestureTrigger.twoFingerRight.title).tag(AppGestureTrigger.twoFingerRight)
-                            Text(AppGestureTrigger.twoFingerUp.title).tag(AppGestureTrigger.twoFingerUp)
-                            Text(AppGestureTrigger.twoFingerDown.title).tag(AppGestureTrigger.twoFingerDown)
-                        }
-                    }
-                    .labelsHidden()
+                    RotaSelect("Gesture", selection: $tap, options:
+                        AppGestureTrigger.baseTapTriggers.map { RotaOption($0.title, value: $0, section: "Tap") } +
+                        [AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown]
+                            .map { RotaOption($0.title, value: $0, section: "Two-finger swipe") },
+                        showsTitle: false, fill: true)
                     .frame(width: 220)
                     .onChange(of: tap) { _, value in
                         if !AppGestureTrigger.swipeCapableTapTriggers.contains(value) {
@@ -431,7 +399,7 @@ struct AddLayerActionSheet: View {
                 Divider().padding(.leading, 42)
                 selectionRow(number: "2", title: "Swipe (optional)") {
                     Toggle("Add swipe", isOn: $swipeEnabled)
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(.rotaCheckbox)
                         .disabled(!canSwipe || standaloneSwipe)
                         .onChange(of: swipeEnabled) { _, enabled in
                             guard enabled, action != .none, action != .shortcut, action != .appExplorer else { return }
@@ -444,12 +412,8 @@ struct AddLayerActionSheet: View {
                         HStack {
                             Text("Swipe with")
                             Spacer()
-                            Picker("Swipe fingers", selection: $swipeFingers) {
-                                Text("One finger").tag(1)
-                                Text("Two fingers").tag(2)
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
+                            RotaSegmented("Swipe fingers", selection: $swipeFingers,
+                                options: [RotaOption("One finger", value: 1), RotaOption("Two fingers", value: 2)], fill: true)
                             .frame(width: 220)
                         }
                         .padding(.horizontal, 12)
@@ -458,12 +422,9 @@ struct AddLayerActionSheet: View {
                     HStack {
                         Text("Direction")
                         Spacer()
-                        Picker("Swipe direction", selection: $direction) {
-                            ForEach(SwipeDirection.allCases, id: \.self) { direction in
-                                Label(direction.title, systemImage: direction.symbolName).tag(direction)
-                            }
-                        }
-                        .labelsHidden()
+                        RotaSelect("Swipe direction", selection: $direction,
+                            options: SwipeDirection.allCases.map { RotaOption($0.title, value: $0, systemImage: $0.symbolName) },
+                            showsTitle: false, fill: true)
                         .frame(width: 220)
                     }
                     .padding(.horizontal, 12)
@@ -504,7 +465,7 @@ struct AddLayerActionSheet: View {
                 Button(existing.contains(trigger) ? "Replace" : "Add") {
                     onSave(trigger, action, shortcut)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.rotaPrimary)
                 .disabled(!canSave)
                 .accessibilityIdentifier("save-layer-action")
             }
@@ -627,7 +588,7 @@ struct LayerSwipeRecognitionEditor: View {
                     .foregroundStyle(count == 0 ? Color.secondary : Color.accentColor)
             }
             if showTiming {
-                Stepper(value: Binding(get: {
+                RotaStepper(value: Binding(get: {
                     settings.wrappedValue.resolvedWindow * 1_000
                 }, set: { value in
                     settings.wrappedValue.swipeWindow = value / 1_000
@@ -644,7 +605,7 @@ struct LayerSwipeRecognitionEditor: View {
                 explanation: "Minimum straight-line movement before the direction is recognized."
             )
             if showQuickDuration {
-                Stepper(value: Binding(get: {
+                RotaStepper(value: Binding(get: {
                     settings.wrappedValue.resolvedFastDuration * 1_000
                 }, set: { value in
                     settings.wrappedValue.fastSwipeDuration = value / 1_000

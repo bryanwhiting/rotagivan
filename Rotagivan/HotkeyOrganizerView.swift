@@ -60,7 +60,7 @@ struct ActionVocabularyEditor: View {
                 Button("Clear") { text = "" }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { onSave(text); dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Save") { onSave(text); dismiss() }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
             }
         }.padding(24).frame(width: 540)
     }
@@ -136,7 +136,7 @@ struct HotkeyOrganizerView: View {
             HStack {
                 TextField("Search actions, apps or shortcuts", text: $search).textFieldStyle(.roundedBorder)
                 addActionMenu
-                Menu("Options") {
+                RotaMenuButton("Options", systemImage: "slider.horizontal.3") {
                     Picker("View", selection: $tab) {
                         Text("Actions").tag("Dictionary")
                         Text("Conflicts").tag("Conflicts")
@@ -146,7 +146,7 @@ struct HotkeyOrganizerView: View {
                     Divider()
                     Button("Application settings…") { managingOverrides = true }
                     Toggle("Show action IDs", isOn: $showActionIDs)
-                }.fixedSize().accessibilityIdentifier("actions-options")
+                }.accessibilityIdentifier("actions-options")
             }
             if tab != "Dictionary" {
                 HStack {
@@ -155,19 +155,16 @@ struct HotkeyOrganizerView: View {
                     Button("Back to actions") { tab = "Dictionary" }
                 }
             }
-            DisclosureGroup("Find an assignment by hotkey or gesture") {
+            RotaDisclosureSection("Find an assignment by hotkey or gesture") {
               VStack(alignment: .leading, spacing: 10) {
             searchControls
             HStack {
-                Picker("Layer", selection: Binding(get: { selectedLayer }, set: { layer = $0 })) {
-                    ForEach(store.profiles, id: \.id) { Text($0.name).tag($0.id) }
-                }
-                Picker("Device", selection: $device) {
-                    ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
+                RotaSelect("Layer", selection: Binding(get: { selectedLayer }, set: { layer = $0 }),
+                    options: store.profiles.map { RotaOption($0.name, value: $0.id) })
+                RotaSelect("Device", selection: $device, values: GestureDevice.allCases) { $0.title }
                 Spacer()
                 if searchShortcut != nil || tapFilter != nil || !search.isEmpty {
-                    Button("Clear search") { clearSearch() }.buttonStyle(.link)
+                    Button("Clear search") { clearSearch() }.buttonStyle(.rotaLink)
                 }
             }
                 Text("Layer and device apply to gesture assignments and conflict checks, not the action catalog.")
@@ -177,7 +174,7 @@ struct HotkeyOrganizerView: View {
             if searchShortcut != nil || tapFilter != nil {
                 HStack {
                     Label(searchShortcut?.readableCombination ?? tapFilter?.title ?? "", systemImage: "line.3.horizontal.decrease.circle")
-                    Button("Clear filter") { clearSearch() }.buttonStyle(.link)
+                    Button("Clear filter") { clearSearch() }.buttonStyle(.rotaLink)
                 }
             }
             if let error = keys.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
@@ -222,13 +219,13 @@ struct HotkeyOrganizerView: View {
         .sheet(item: $overrideRow) { row in
             VStack(alignment: .leading) {
                 AppOverridesView(store: store, initialBundleID: row.appBundleID ?? "com.google.Chrome")
-                HStack { Spacer(); Button("Done") { overrideRow = nil }.keyboardShortcut(.defaultAction) }
+                HStack { Spacer(); Button("Done") { overrideRow = nil }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary) }
             }.padding(24).frame(width: 720, height: 580)
         }
         .sheet(isPresented: $managingOverrides) {
             VStack(alignment: .leading) {
                 AppOverridesView(store: store)
-                HStack { Spacer(); Button("Done") { managingOverrides = false }.keyboardShortcut(.defaultAction) }
+                HStack { Spacer(); Button("Done") { managingOverrides = false }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary) }
             }.padding(24).frame(width: 720, height: 580)
         }
         .sheet(item: $editingBinding) { binding in
@@ -291,20 +288,18 @@ struct HotkeyOrganizerView: View {
             ShortcutRecorder(title: searchShortcut?.readableCombination ?? "Press hotkey to find…") { shortcut in
                 searchShortcut = shortcut; search = ""; tapFilter = nil; selectedKeyCode = shortcut.keyCode; tab = "Assignments"
             }.frame(width: 170, height: 26)
-            Menu {
+            RotaMenuButton(tapFilter?.title ?? "Find tap action", systemImage: "hand.tap", kind: .field) {
                 Button("Any tap or gesture") { tapFilter = nil }
                 Divider()
                 ForEach(AppGestureTrigger.allCases, id: \.self) { trigger in
                     Button(trigger.title) { tapFilter = trigger; searchShortcut = nil; selectedKeyCode = nil; search = ""; tab = "Assignments" }
                 }
-            } label: {
-                Label(tapFilter?.title ?? "Find tap action", systemImage: "hand.tap")
-            }.fixedSize()
+            }
         }
     }
 
     private var addActionMenu: some View {
-        Menu {
+        RotaMenuButton("Add action", systemImage: "plus") {
             Button("Add keyboard action or macro") { beginNewAction() }
                 .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
             Button("Add application hotkey…") { chooseApplicationHotkey() }
@@ -312,8 +307,7 @@ struct HotkeyOrganizerView: View {
                 .disabled(store.settings.resolvedApplicationCommands.count >= 500)
                 .accessibilityIdentifier("application-command-add")
             Button("Add assignment…") { assign(.hudLayer(nil)) }
-        } label: { Label("Add action", systemImage: "plus") }
-        .fixedSize()
+        }
     }
 
     private func clearSearch() {
@@ -355,16 +349,14 @@ struct HotkeyOrganizerView: View {
         let visible = snapshot?.filtered(group: actionGroupFilter, subgroup: actionSubgroupFilter, search: search) ?? []
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Picker("Group", selection: $actionGroupFilter) {
-                    Text("All groups").tag("All groups")
-                    ForEach(snapshot?.groups ?? [], id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().frame(width: 180).accessibilityLabel("Action group")
+                RotaSelect("Action group", selection: $actionGroupFilter,
+                    options: [RotaOption("All groups", value: "All groups")] + (snapshot?.groups ?? []).map { RotaOption($0, value: $0) },
+                    showsTitle: false, fill: true).frame(width: 180)
                 .onChange(of: actionGroupFilter) { _ in actionSubgroupFilter = "All subgroups" }
                 if !(snapshot?.subgroups[actionGroupFilter] ?? []).isEmpty {
-                Picker("Subgroup", selection: $actionSubgroupFilter) {
-                    Text("All subgroups").tag("All subgroups")
-                    ForEach(snapshot?.subgroups[actionGroupFilter] ?? [], id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().frame(width: 180).accessibilityLabel("Action subgroup")
+                RotaSelect("Action subgroup", selection: $actionSubgroupFilter,
+                    options: [RotaOption("All subgroups", value: "All subgroups")] + (snapshot?.subgroups[actionGroupFilter] ?? []).map { RotaOption($0, value: $0) },
+                    showsTitle: false, fill: true).frame(width: 180)
                 }
                 Spacer()
                 Text("\(visible.count) actions").foregroundStyle(.secondary)
@@ -391,7 +383,7 @@ struct HotkeyOrganizerView: View {
                     Button { vocabularyRow = row } label: {
                         Text(row.keywords.isEmpty ? "Add keywords…" : row.keywords)
                             .lineLimit(2).help(row.keywords.isEmpty ? "Teach voice alternative phrases for this action" : row.keywords)
-                    }.buttonStyle(.link)
+                    }.buttonStyle(.rotaLink)
                 }.width(min: 115, ideal: 170)
                 TableColumn("Output / keybindings") { row in
                     HStack(spacing: 6) {
@@ -402,14 +394,14 @@ struct HotkeyOrganizerView: View {
                         }
                         Spacer(minLength: 0)
                         Button("Assign hotkey…") { assign(row.action) }
-                            .buttonStyle(.bordered).controlSize(.small).fixedSize()
+                            .buttonStyle(.rotaSecondary).controlSize(.small).fixedSize()
                             .disabled(row.isAppScoped)
                             .help(row.isAppScoped
                                 ? "This action belongs to an application. Manage its application overrides to assign an app-specific shortcut."
                                 : "Assign a keyboard shortcut or trackpad gesture to \(row.name)")
                             .accessibilityLabel("Assign hotkey or gesture to \(row.name)")
                             .accessibilityIdentifier("assign-action-hotkey-\(row.id)")
-                        Menu {
+                        RotaMenuButton("Manage \(row.name)", systemImage: "ellipsis", kind: .icon) {
                             Button("Edit voice keywords…") { vocabularyRow = row }
                             if let id = row.customCommandID,
                                let command = store.settings.resolvedApplicationCommands.first(where: { $0.id == id }) {
@@ -443,9 +435,7 @@ struct HotkeyOrganizerView: View {
                                 Button("Edit action…") { editing = macro }
                                 Button("Remove action…", role: .destructive) { deleting = macro }
                             }
-                        } label: { Image(systemName: "ellipsis") }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                        .accessibilityLabel("Manage \(row.name)")
+                        }
                     }
                 }.width(min: 135, ideal: 200)
             }
@@ -729,14 +719,16 @@ struct NamedHotkeyEditor: View {
                 Button("Add keystroke") { updateSteps(entry.resolvedSequence + [.key(RecordedShortcut(keyCode: 36, modifiers: 0, keyLabel: "Return"))]) }
                 Button("Add open app…") { chooseApp() }
             }.disabled(entry.resolvedSequence.count >= 32)
-            Stepper("Delay between steps: \(entry.resolvedDelay) ms", value: Binding(get: { entry.resolvedDelay }, set: { entry.stepDelayMilliseconds = $0 }), in: 0...2000, step: 25)
+            RotaStepper(value: Binding(get: { entry.resolvedDelay }, set: { entry.stepDelayMilliseconds = $0 }), in: 0...2000, step: 25) {
+                Text("Delay between steps: \(entry.resolvedDelay) ms")
+            }
             Text("Open app launches or activates it before the next keystroke. App-only actions are supported. Playback stops if opening fails or focus changes unexpectedly.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { entry.name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines); updateSteps(entry.resolvedSequence); onSave(entry) }
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                     .disabled(!entry.isValid || activationConflict)
             }
         }.padding(24).frame(width: 590)

@@ -277,7 +277,7 @@ struct ActionPickerModal: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Use action", action: confirm).buttonStyle(.borderedProminent)
+                Button("Use action", action: confirm).buttonStyle(.rotaPrimary)
                     .keyboardShortcut(.defaultAction).disabled(selected?.isValid != true)
                     .accessibilityIdentifier("action-picker-confirm")
             }.padding(20)

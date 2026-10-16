@@ -68,11 +68,7 @@ struct CalibrationSettingsView: View {
                 .tracking(1.3)
                 .foregroundStyle(.secondary)
             HStack(spacing: 14) {
-                Picker("Trackpad", selection: $device) {
-                    ForEach(GestureDevice.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 340)
+                RotaSegmented("Trackpad", selection: $device, values: GestureDevice.allCases) { $0.title }
 
                 Label("Default tap layer", systemImage: "hand.tap")
                     .font(.callout.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)

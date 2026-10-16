@@ -24,7 +24,7 @@ struct BindingTriggerPicker: View {
             }
             .frame(minWidth: 145, minHeight: 27)
             if allowsGestures {
-                Menu {
+                RotaMenuButton(trigger.gesture?.title ?? "Trackpad tap or swipe", systemImage: "hand.tap", kind: .field) {
                     Button("Keyboard shortcut") { trigger = BindingTrigger() }
                     Divider()
                     ForEach(AppGestureTrigger.baseTapTriggers) { gesture in
@@ -40,11 +40,7 @@ struct BindingTriggerPicker: View {
                             Button(gestureLabel(gesture)) { trigger = BindingTrigger(gesture: gesture) }
                         }
                     }
-                } label: {
-                    Label(trigger.gesture?.title ?? "Trackpad tap or swipe", systemImage: "hand.tap")
-                        .lineLimit(1)
                 }
-                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .accessibilityLabel("\(title): \(trigger.title)")
@@ -73,9 +69,8 @@ struct BindingActionPicker: View {
                     .font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Spacer(minLength: 6)
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            }.padding(8)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.1)))
+            }.padding(.horizontal, 8).padding(.vertical, 6)
+                .background(RotaControlChrome())
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .help("Search and choose an action")
@@ -145,7 +140,7 @@ struct BindingEditor: View {
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { saveDraft() }
-                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                     .disabled(!binding.trigger.isValid || !binding.action.isValid || collision || !validKey)
             }
         }

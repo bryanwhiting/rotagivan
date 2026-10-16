@@ -104,7 +104,7 @@ struct CredentialVaultView: View {
     @State private var showRecovery = false
     private var unavailable: Bool { vault.busy || !vault.localReady || vault.restoringLocal || vault.account == nil }
     var body: some View {
-        GroupBox {
+        RotaCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("API keys", systemImage: "key").font(.headline)
@@ -165,7 +165,7 @@ struct CredentialVaultView: View {
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent).disabled(apiKey.isEmpty && openAIKey.isEmpty)
+                    .buttonStyle(.rotaPrimary).disabled(apiKey.isEmpty && openAIKey.isEmpty)
                     Text("Saved keys download automatically.").font(.caption).foregroundStyle(.secondary)
                 }.disabled(unavailable)
                 }
@@ -173,7 +173,7 @@ struct CredentialVaultView: View {
                     Text("Keys download once this Mac is approved (see Account & Sync above).").font(.caption).foregroundStyle(.secondary)
                 }
                 if vault.account != nil && vault.localReady {
-                  DisclosureGroup("Recovery & advanced") {
+                  RotaDisclosureSection("Recovery & advanced") {
                     VStack(alignment: .leading, spacing: 10) {
                     Button("Import OpenRouter from ~/.env") { Task { await vault.save(importEnvironment: true) } }
                         .disabled(unavailable)
@@ -189,7 +189,7 @@ struct CredentialVaultView: View {
                 Text("Keys are end-to-end encrypted. Saved values are never displayed here.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let error = vault.error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .onDisappear { apiKey = ""; openAIKey = ""; vault.recoveryCode = nil }
         .onChange(of: vault.unlocked) { ready in if ready { onUnlocked?() } }

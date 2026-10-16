@@ -17,7 +17,7 @@ struct ConfigurationSettingsView: View {
     private static let backupKey = "configuration.previous.v1"
 
     var body: some View {
-        DisclosureGroup {
+        RotaDisclosureSection {
           VStack(alignment: .leading, spacing: 12) {
             Text("Export or import a local settings file. This is separate from cloud sync; API keys and Mac permissions are never included.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -94,7 +94,7 @@ struct ConfigurationSettingsView: View {
                     perform { candidate = try AppConfiguration.parse(text) }
                 }
                 Button("Replace configuration…") { confirmImport = true }
-                    .disabled(candidate == nil).keyboardShortcut(.defaultAction)
+                    .disabled(candidate == nil).keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
             }
         }
         .padding(24).frame(width: 620, height: 510)

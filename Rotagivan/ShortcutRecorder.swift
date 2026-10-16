@@ -97,7 +97,8 @@ struct TapActionEditor: View {
                         .accessibilityLabel("Choose action for \(title)")
                         .accessibilityIdentifier("gesture-action-picker")
                 }
-                Menu {
+                RotaMenuButton("\(title) action options", systemImage: "chevron.down", kind: .icon,
+                               help: "Set a shortcut manually or clear this assignment") {
                     Button("Set shortcut manually…") {
                         if action == .shortcut, let shortcut, shortcut.isPhysicalShortcut { draft = shortcut }
                         else if action == .optionF19 { draft = RecordedShortcut(keyCode: 80, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), keyLabel: "F19") }
@@ -108,17 +109,9 @@ struct TapActionEditor: View {
                     if !keyboardOnly {
                         Button("Nothing") { action = .none; if shortcutsOnly { shortcut = nil } }
                     }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 28, height: 26)
-                        .contentShape(Rectangle())
                 }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
-                    .controlSize(.regular).frame(width: 32, height: 26)
-                    .accessibilityLabel("\(title) action options")
+                    .frame(width: 32, height: 26)
                     .accessibilityIdentifier("gesture-action-menu")
-                    .help("Set a shortcut manually or clear this assignment")
             }
         }
         .popover(isPresented: $showManual) {
@@ -126,9 +119,8 @@ struct TapActionEditor: View {
                 Text("\(title) shortcut").font(.headline)
                 Text("Choose a combination without pressing it. Useful when another app already owns the shortcut.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Picker("Key", selection: $draft.keyCode) {
-                    ForEach(keys, id: \.1) { name, code in Text(name).tag(UInt16(code)) }
-                }
+                RotaSelect("Key", selection: $draft.keyCode,
+                    options: keys.map { RotaOption($0.0, value: UInt16($0.1)) }, fill: true)
                 HStack {
                     modifier("⌃", flag: .control, name: "Control")
                     modifier("⌥", flag: .option, name: "Option")
@@ -137,13 +129,13 @@ struct TapActionEditor: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Cancel") { showManual = false }
+                    Button("Cancel") { showManual = false }.buttonStyle(.rotaSecondary)
                     Button("Save") {
                         draft.keyLabel = keys.first { $0.1 == UInt32(draft.keyCode) }?.0 ?? draft.keyLabel
                         shortcut = draft
                         action = .shortcut
                         showManual = false
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.rotaPrimary)
                 }
             }.padding(18).frame(width: 300)
         }
@@ -165,7 +157,7 @@ struct TapActionEditor: View {
         Toggle(title, isOn: Binding(get: { draft.modifiers & UInt64(flag.rawValue) != 0 }, set: { enabled in
             if enabled { draft.modifiers |= UInt64(flag.rawValue) }
             else { draft.modifiers &= ~UInt64(flag.rawValue) }
-        })).toggleStyle(.button).help(name).accessibilityLabel(name)
+        })).toggleStyle(.rotaChip).help(name).accessibilityLabel(name)
     }
 
     private func choose(_ tap: TapAction) {

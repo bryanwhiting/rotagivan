@@ -84,13 +84,12 @@ struct ApplicationCommandEditor: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Application").font(.headline)
-                Picker("Application", selection: $command.bundleID) {
-                    Text("Choose an application…").tag("")
-                    if !command.bundleID.isEmpty && !appChoices.contains(where: { $0.bundleID == command.bundleID }) {
-                        Text(command.appName + " (not installed)").tag(command.bundleID)
-                    }
-                    ForEach(appChoices, id: \.bundleID) { app in Text(app.name).tag(app.bundleID) }
-                }.labelsHidden().accessibilityIdentifier("application-command-app")
+                RotaSelect("Application", selection: $command.bundleID, options:
+                    [RotaOption("Choose an application…", value: "")] +
+                    (!command.bundleID.isEmpty && !appChoices.contains(where: { $0.bundleID == command.bundleID })
+                        ? [RotaOption(command.appName + " (not installed)", value: command.bundleID)] : []) +
+                    appChoices.map { RotaOption($0.name, value: $0.bundleID) }, showsTitle: false, fill: true)
+                    .accessibilityIdentifier("application-command-app")
                     .onChange(of: command.bundleID) { bundleID in
                         command.appName = appChoices.first { $0.bundleID == bundleID }?.name ?? command.appName
                     }
@@ -108,16 +107,15 @@ struct ApplicationCommandEditor: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Output").font(.headline)
-                Picker("Output", selection: $output) {
-                    Text("Send shortcut").tag("Shortcut")
-                    Text("Open URL").tag("URL")
-                }.pickerStyle(.segmented).accessibilityIdentifier("application-command-output")
+                RotaSegmented("Output", selection: $output,
+                    options: [RotaOption("Send shortcut", value: "Shortcut"), RotaOption("Open URL", value: "URL")], fill: true)
+                    .accessibilityIdentifier("application-command-output")
                 if output == "Shortcut" {
                     HStack {
                         ShortcutRecorder(title: shortcut?.readableCombination ?? "Record shortcut…") { shortcut = $0 }
                             .frame(width: 205, height: 30).accessibilityIdentifier("application-command-shortcut")
                         if shortcut != nil {
-                            Button("Clear") { shortcut = nil }.buttonStyle(.link)
+                            Button("Clear") { shortcut = nil }.buttonStyle(.rotaLink)
                                 .accessibilityIdentifier("application-command-clear-shortcut")
                         }
                     }
@@ -142,7 +140,7 @@ struct ApplicationCommandEditor: View {
                     .accessibilityIdentifier("application-command-cancel")
                 Spacer()
                 Button("Save command") { guard validation == nil else { return }; onSave(draft) }
-                    .keyboardShortcut(.defaultAction).disabled(validation != nil)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(validation != nil)
                     .accessibilityIdentifier("application-command-save")
             }
         }.padding(24).frame(width: 560)

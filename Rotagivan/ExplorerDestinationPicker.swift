@@ -72,7 +72,7 @@ struct ExplorerDestinationPicker: View {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Button(webURL == nil ? "Add app" : "Add URL", action: save)
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary)
                     .disabled(webURL == nil ? selectedApp == nil : urlName.trimmingCharacters(in: .whitespacesAndNewlines).count > 512)
             }
         }.padding(22).frame(width: 540)
@@ -169,12 +169,8 @@ struct ExplorerBookmarkImporter: View {
                     .background(.quaternary, in: Capsule())
             }
 
-            Picker("Browser", selection: $source) {
-                ForEach(BrowserBookmarkSource.allCases) { browser in
-                    Label(browser.title, systemImage: browser.symbol).tag(browser)
-                }
-            }
-            .pickerStyle(.segmented)
+            RotaSegmented("Browser", selection: $source,
+                options: BrowserBookmarkSource.allCases.map { RotaOption($0.title, value: $0, systemImage: $0.symbol) }, fill: true)
 
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -237,7 +233,7 @@ struct ExplorerBookmarkImporter: View {
                         return
                     }
                 }
-                .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(selection.isEmpty)
+                .keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(selection.isEmpty)
             }
         }
         .padding(22).frame(width: 680, height: 620)

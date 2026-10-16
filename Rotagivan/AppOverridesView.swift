@@ -42,7 +42,7 @@ struct AppOverridesView: View {
                     Button("Remove app") {
                         store.settings.appOverrides = apps.filter { $0.bundleID != selected }
                         selected = store.settings.resolvedAppOverrides.first?.bundleID ?? ""
-                    }.buttonStyle(.link)
+                    }.buttonStyle(.rotaLink)
                 }
                 Text(app.bundleID).font(.caption.monospaced()).foregroundStyle(.tertiary)
                 VStack(spacing: 14) {
@@ -65,11 +65,11 @@ struct AppOverridesView: View {
                         Text("All tap and swipe actions inherit from the active layer.")
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Menu {
+                    RotaMenuButton("Override an action", systemImage: "plus") {
                         ForEach(AppGestureTrigger.allCases.filter { trigger in !app.bindings.contains { $0.trigger == trigger } }) { trigger in
                             Button(trigger.title) { update { $0.bindings.append(AppGestureBinding(trigger: trigger)) } }
                         }
-                    } label: { Label("Override an action", systemImage: "plus") }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(18)

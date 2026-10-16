@@ -123,6 +123,10 @@ final class VoiceAudioBuffer: @unchecked Sendable {
     var noteDictation: NoteDictationSession?
     private var deliveredFinal = false
     @Published var selected: ExplorerSlot = .up
+    /// Set by the controller before results arrive. While `autoSelecting`, the
+    /// top final match runs after a short countdown unless the user steers away.
+    var autoSelect = false
+    @Published private(set) var autoSelecting = false
     private var microphone: VoiceAudioCapturing?
     var microphoneAdmission = VoiceMicrophoneAdmission.shared
     private var microphoneLease: UUID?
@@ -372,14 +376,21 @@ final class VoiceAudioBuffer: @unchecked Sendable {
             finalDeadline = nil; timer?.invalidate(); timer = nil
             phase = .ready
             selected = decision.noMatch ? .left : .up
-            message = decision.noMatch ? "No confident match. Alternatives shown for reference; nothing will run. Swipe left to cancel." : "Swipe to an action and lift to run · swipe left to cancel"
+            autoSelecting = autoSelect && !decision.noMatch && selectedMatch != nil
+            message = decision.noMatch ? "No confident match · nothing will run. Swipe left to cancel."
+                : autoSelecting ? "Running “\(selectedMatch!.record.title)” · swipe left or Esc to cancel"
+                : "Swipe to an action and lift to run · swipe left to cancel"
             if !decision.noMatch, selectedMatch != nil { onFinalMatch?() }
         } else {
-            message = "Preview candidates · still listening. Finish speaking to choose an action."
+            message = "Preview · finish speaking to choose"
         }
     }
     func select(_ direction: ExplorerSlot) {
-        if [.up, .right, .down, .left].contains(direction) { selected = direction }
+        guard [.up, .right, .down, .left].contains(direction) else { return }
+        if autoSelecting, direction != selected {
+            autoSelecting = false; message = "Swipe to an action and lift to run · swipe left to cancel"
+        }
+        selected = direction
     }
     func fail(_ error: Error) {
         generation = UUID(); preparation?.cancel(); preparation = nil
@@ -390,7 +401,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         operation?.cancel(); queued = nil; finalDeadline = nil; finalPending = false; lastProvisionalTranscript = nil
         cloud?.close(); cloud = nil
         waveform = Array(repeating: 0, count: 48)
-        decision = nil; phase = .failed
+        decision = nil; phase = .failed; autoSelecting = false
         message = (error as? VoiceError)?.errorDescription ?? "Voice service unavailable. Check your connection and try again. Nothing was run."
     }
     func cancel() {
@@ -403,7 +414,7 @@ final class VoiceAudioBuffer: @unchecked Sendable {
         timer?.invalidate(); timer = nil
         cloud?.close(); cloud = nil
         waveform = Array(repeating: 0, count: 48)
-        phase = .cancelled; decision = nil; transcript = ""; catalog = []
+        phase = .cancelled; decision = nil; transcript = ""; catalog = []; autoSelecting = false
     }
 }
 
@@ -447,11 +458,12 @@ struct VoiceHUDView: View {
         var opaque: Bool
         var matches: [String]
         var noMatch: Bool
+        var autoSelecting: Bool
     }
     private var wheelState: WheelState {
         WheelState(phase: session.phase, selected: session.selected, theme: theme, opaque: opaque,
             matches: session.decision?.matches.map { "\($0.id)|\($0.record.title)|\($0.probability)" } ?? [],
-            noMatch: session.decision?.noMatch ?? true)
+            noMatch: session.decision?.noMatch ?? true, autoSelecting: session.autoSelecting)
     }
     var body: some View {
         ZStack {
@@ -459,7 +471,7 @@ struct VoiceHUDView: View {
             VStack(spacing: 0) {
                 header.frame(height: 72).background { floatingReadoutSurface }
                 Spacer(minLength: 0)
-                footer.frame(width: 418, height: 86).background { floatingReadoutSurface }
+                footer.frame(width: 418, height: 60).background { floatingReadoutSurface }
             }.padding(26)
         }
         .frame(width: 470, height: 520)
@@ -475,12 +487,19 @@ struct VoiceHUDView: View {
         }
     }
     private var header: some View {
-        VStack(spacing: 5) {
-            HStack {
-                Label(session.phase == .listening ? "Listening" : "Voice mode",
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Label(session.phase == .listening ? "Listening" : session.transcript.isEmpty ? "Voice" : "Heard",
                     systemImage: session.phase == .listening ? "mic.fill" : "waveform")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.accent)
-                Spacer()
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(theme.accent)
+                HStack(spacing: 1.5) {
+                    ForEach(0..<48, id: \.self) { index in
+                        Capsule().fill(theme.accent.opacity(0.85))
+                            .frame(width: 2, height: max(2, min(12, (session.waveform.indices.contains(index) ? session.waveform[index] : 0) * 12)))
+                    }
+                }.frame(height: 12).opacity(session.phase == .listening ? 1 : 0).accessibilityElement(children: .ignore)
+                    .accessibilityLabel(session.phase == .listening ? "Microphone audio activity" : "Microphone idle")
+                Spacer(minLength: 0)
                 TemporaryIntentionControl(store: session.noteStore, compact: true,
                     speech: session.noteDictation,
                     admission: session.microphoneAdmission,
@@ -490,33 +509,25 @@ struct VoiceHUDView: View {
                     .buttonStyle(.plain).frame(width: 24, height: 24)
                     .accessibilityLabel("Cancel voice mode").accessibilityIdentifier("voice.cancel")
             }
-            Text(session.transcript.isEmpty ? "Say an action, such as “open Slack”" : session.transcript)
-                .font(.system(size: 12, weight: .medium)).multilineTextAlignment(.center)
-                .lineLimit(2).frame(height: 30)
+            Text(session.transcript.isEmpty ? "Say an action, such as “open Slack”" : "“\(session.transcript)”")
+                .font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                .opacity(session.transcript.isEmpty ? 0.6 : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Transcription: " + (session.transcript.isEmpty ? "No speech recognized yet" : session.transcript))
-            HStack(spacing: 3) {
-                ForEach(0..<48, id: \.self) { index in
-                    Capsule().fill(theme.accent.opacity(session.phase == .listening ? 0.85 : 0.18))
-                        .frame(width: 3, height: session.phase == .listening
-                            ? max(2, min(14, (session.waveform.indices.contains(index) ? session.waveform[index] : 0) * 14)) : 2)
-                }
-            }.frame(height: 14).accessibilityElement(children: .ignore)
-                .accessibilityLabel(session.phase == .listening ? "Microphone audio activity" : "Microphone idle")
-        }
+        }.padding(.horizontal, 10)
     }
     private var footer: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             Text(session.phase == .cancelled ? "Voice cancelled. Nothing was run." : session.message)
-                .font(.system(size: 11)).multilineTextAlignment(.center).lineLimit(4)
-                .frame(height: 48).accessibilityIdentifier("voice.status")
-            Text(session.decision.map {
-                "Confidence \(Int(($0.confidence * 100).rounded()))% · \($0.shortlisted ? "Finalist scores" : "Action match scores")"
-            } ?? "Swipe and lift to choose · swipe left to cancel")
-                .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 12)
-            Text("Audio → OpenRouter / xAI · Text + actions → Jev\nAudio and transcript are not saved by Rotagivan.")
-                .font(.system(size: 8)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                .frame(height: 22)
-        }
+                .font(.system(size: 11, weight: session.autoSelecting ? .semibold : .regular))
+                .foregroundStyle(session.autoSelecting ? theme.accent : Color.primary)
+                .multilineTextAlignment(.center).lineLimit(3)
+                .accessibilityIdentifier("voice.status")
+            if !session.autoSelect, let decision = session.decision {
+                Text("Confidence \(Int((decision.confidence * 100).rounded()))%\(decision.shortlisted ? " · finalist scores" : "")")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        }.padding(.horizontal, 10)
     }
     private var wheel: some View {
         let center = CGPoint(x: 209, y: 155)
@@ -566,7 +577,8 @@ struct VoiceHUDView: View {
             case .failed, .cancelled: return "Try again"
             }
         }()
-        let title = direction == .left ? "Cancel / Ignore" : (match?.record.title ?? placeholder)
+        let title = direction == .left ? "Cancel" : (match?.record.title ?? placeholder)
+        let running = selected && session.autoSelecting
         return Button {
             if direction == .left { onExit() }
             else { session.select(direction); onConfirm() }
@@ -574,13 +586,16 @@ struct VoiceHUDView: View {
             ZStack {
                 ExplorerSectorChrome(theme: theme, shape: shape, selected: selected, available: available, opaque: opaque)
                 VStack(spacing: 3) {
-                    Image(systemName: direction == .left ? "xmark" : "bolt.fill")
-                        .font(.system(size: 16, weight: .light)).foregroundStyle(theme.accent)
-                    Text(title).font(.system(size: 10, weight: .medium))
+                    if direction == .left {
+                        Image(systemName: "xmark").font(.system(size: 15, weight: .light)).foregroundStyle(theme.accent)
+                    }
+                    Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
                         .lineLimit(3).multilineTextAlignment(.center)
-                    Text(match.map { "\(Int(($0.probability * 100).rounded()))% · \(session.phase == .ready ? (session.decision?.noMatch == true ? "Not selected" : "Match") : "Preview")" }
-                        ?? (direction == .left ? "Nothing will run" : ["Best match", "Second match", "Third match"][index ?? 0]))
-                        .font(.system(size: 8)).foregroundStyle(theme.accent)
+                        .opacity(match == nil && direction != .left && direction != .up ? 0 : 1)
+                    if let match {
+                        Text((running ? "Running · " : "") + "\(Int((match.probability * 100).rounded()))%")
+                            .font(.system(size: 9, weight: running ? .semibold : .regular)).foregroundStyle(theme.accent)
+                    }
                 }.frame(width: 84, height: 72).position(point)
                     .foregroundStyle(theme.isHUD ? Color.white.opacity(available || match != nil ? 0.95 : 0.7) : Color.primary)
             }.frame(width: 418, height: 310).contentShape(shape)

@@ -4,9 +4,10 @@ Tap the microphone in the **Main HUD** (or make a single center tap) to enter vo
 
 1. Say a short command, such as “Slack”, “open Slack”, or “pause music”.
 2. Rotagivan stops recording after a short pause, or when you tap **Finish** / press Space or Enter. Recordings are capped at 12 seconds.
-3. Jev ranks registered actions. The best match is at the top, second on the right, third at the bottom, and **Exit / Ignore** on the left.
-4. Swipe or use arrow keys to select. **Space or Enter executes the selected action only after the final result is ready.** Releasing a swipe never executes it. Clicking an option selects it; the Run button is an alternative confirmation.
-5. Escape / the close button returns to the regular HUD. Listen again starts a new utterance.
+3. Jev ranks registered actions. The HUD shows what it heard at the top, the best match at the top of the wheel, second on the right, third at the bottom, and **Cancel** on the left.
+4. **Auto-select** (Settings → Voice mode, on by default): the best match is highlighted and runs after about 0.7 seconds. Swipe left or press Escape to cancel, or swipe/arrow to another match to stop the countdown and choose it instead. Tapping the center runs the highlighted match immediately.
+5. With Auto-select off, nothing runs on its own: swipe to one of the top three and lift to run it, or swipe left to cancel. Arrow keys select and Space or Enter executes **only after the final result is ready**. Clicking an option runs it; the center Run button is an alternative confirmation. The confidence line is shown only in this mode.
+6. Escape / the close button returns to the regular HUD. Listen again starts a new utterance.
 
 The transcript updates from short, coalesced audio uploads, not a true word-by-word streaming connection. While recording, Space/Enter finishes recording; wait for matching to finish before confirming an action.
 
@@ -35,7 +36,7 @@ Jev allows 255 choices. Catalogs exceeding 254 actions are evaluated in batches 
 
 ## Verification
 
-`Rotagivan/Tests/VoiceTests.swift` covers literal credential parsing, ID allowlisting, score validation, no-match behavior, WAV encoding and recording limits, denied/cancelled permission, transcription-to-match flow with fake services, swipe selection, explicit keyboard confirmation, removed actions, and rendering. It does not use the real microphone.
+`Rotagivan/Tests/VoiceTests.swift` covers literal credential parsing, ID allowlisting, score validation, no-match behavior, WAV encoding and recording limits, denied/cancelled permission, transcription-to-match flow with fake services, swipe selection, explicit keyboard confirmation, auto-select countdown/cancellation/takeover, removed actions, and rendering. It does not use the real microphone.
 
 An explicit `--live /path/to/synthetic.wav` test mode uses the configured key to transcribe synthetic speech and verify it maps to the registered Slack action. It does not execute the action.
 

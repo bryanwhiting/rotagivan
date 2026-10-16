@@ -1123,10 +1123,11 @@ struct AppExplorerSettings: Codable, Equatable {
     var centerCursorOnAppSwitch: Bool? = nil
     var slotCount: Int? = nil
     var windowManager: ExplorerWindowSettings? = nil
-    var voiceAutoDecide: Bool? = nil
-    var resolvedVoiceAutoDecide: Bool { voiceAutoDecide ?? false }
+    var voiceAutoDecide: Bool? = nil // Retired immediate-run toggle; kept for lossless imports. See voiceAutoSelect.
     var voiceAutoStart: Bool? = nil
     var resolvedVoiceAutoStart: Bool { voiceAutoStart ?? false }
+    var voiceAutoSelect: Bool? = nil
+    var resolvedVoiceAutoSelect: Bool { voiceAutoSelect ?? true }
     var swipeDirection: HUDSwipeDirection? = nil
     var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
     var invertPickerDirection: Bool? = nil

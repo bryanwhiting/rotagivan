@@ -335,7 +335,7 @@ private struct WorkspaceViewportProbe: ViewModifier {
                         "Ordinary settings page must retain its top alignment at \(size): inset \(topInset)")
                 }
                 if section == "Voice mode" {
-                    for id in ["voice-auto-start", "voice-auto-decide"] {
+                    for id in ["voice-auto-start", "voice-auto-select"] {
                         let element = find(id, in: ordinaryHost)
                         let visible = panel.convertToScreen(ordinaryHost.convert(ordinaryHost.bounds, to: nil))
                         precondition(visible.contains(frame(element)), "Voice controls must be visible at the supported width")

@@ -66,6 +66,9 @@ extension AppExplorerPresenting {
     private let model = ExplorerModel()
     private var voicePreparation: Task<Void, Never>?
     private var voiceSwipeMatchID: String?
+    private var voiceAutoSelection: Task<Void, Never>?
+    /// Long enough to read what was heard and picked, short enough to feel automatic.
+    var voiceAutoSelectDelay: TimeInterval = 0.7
     var voiceCatalog: (() -> [VoiceRegisteredAction])?
     var prepareVoice: ((VoiceSession, [VoiceRegisteredAction]) -> Void)?
     var displayedVoiceSession: VoiceSession? { model.voiceSession }
@@ -1645,11 +1648,18 @@ extension AppExplorerPresenting {
             // Includes learned vocabulary and descriptions, not just stable IDs.
             return snapshot == self.currentVoiceCatalog()
         }
+        voice.autoSelect = configuration().resolvedVoiceAutoSelect
         voice.onFinalMatch = { [weak self, weak voice] in
-            guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
-                  self.contextIsValid?() != false,
-                  self.configuration().resolvedVoiceAutoDecide == true else { return }
-            self.confirmVoiceAction()
+            guard let self, let voice, self.isVisible, self.model.voiceSession === voice, voice.autoSelecting else { return }
+            self.voiceAutoSelection?.cancel()
+            let delay = UInt64(max(0, self.voiceAutoSelectDelay) * 1_000_000_000)
+            self.voiceAutoSelection = Task { @MainActor [weak self, weak voice] in
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                      voice.autoSelecting, voice.phase == .ready, self.contextIsValid?() != false else { return }
+                self.voiceAutoSelection = nil
+                self.confirmVoiceAction()
+            }
         }
         model.voiceSession = voice
         input = makeSelection(waitingForLift: contactIsDown)
@@ -1673,6 +1683,7 @@ extension AppExplorerPresenting {
             onEditingChanged?(model.isEditing)
         }
         voicePreparation?.cancel(); voicePreparation = nil
+        voiceAutoSelection?.cancel(); voiceAutoSelection = nil
         model.voiceSession?.cancel(); model.voiceSession = nil
         input = makeSelection(waitingForLift: contactIsDown)
         deadline = Date().addingTimeInterval(15)

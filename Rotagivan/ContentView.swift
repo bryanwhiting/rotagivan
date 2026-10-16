@@ -14,7 +14,7 @@ struct VoiceModeSettingsView: View {
                 Picker("Voice provider", selection: $localProvider) {
                     ForEach(LauncherVoiceProvider.allCases) { Text($0.label).tag($0.rawValue) }
                 }.accessibilityIdentifier("voice-provider")
-                Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Press Return once to confirm and run the selected action. Auto-decide applies only to OpenRouter/Jev.")
+                Text("OpenAI streams speech to text using gpt-live-transcribe; words search local apps and menus. Press Return once to confirm and run the selected action. Auto-select applies only to OpenRouter/Jev, which sends audio to OpenRouter / xAI and text plus action names to Jev; Rotagivan does not save audio or transcripts.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Start listening when HUD opens", isOn: Binding(
                     get: { store.settings.appExplorer?.resolvedVoiceAutoStart ?? false },
@@ -26,15 +26,15 @@ struct VoiceModeSettingsView: View {
                     .accessibilityIdentifier("voice-auto-start")
                 Text("Off by default. When enabled, opening the main HUD requests microphone access and starts listening automatically.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("Auto-decide", isOn: Binding(
-                    get: { store.settings.appExplorer?.resolvedVoiceAutoDecide ?? false },
+                Toggle("Auto-select", isOn: Binding(
+                    get: { store.settings.appExplorer?.resolvedVoiceAutoSelect ?? true },
                     set: { enabled in
                         var settings = store.settings.appExplorer ?? AppExplorerSettings()
-                        settings.voiceAutoDecide = enabled
+                        settings.voiceAutoSelect = enabled
                         store.settings.appExplorer = settings
                     }))
-                    .accessibilityIdentifier("voice-auto-decide")
-                Text("Off by default: swipe to a match and lift to run it, or click its HUD tile. Swipe left to cancel. Space or Enter also work. When on, the highest-ranked final match runs immediately without confirmation. No-match results never run.")
+                    .accessibilityIdentifier("voice-auto-select")
+                Text("On by default: the HUD shows what it heard and the top matches, then runs the best match after a moment. Swipe left or press Escape to cancel, or swipe to another match to pick it instead. Turn off to always choose from the top three yourself: swipe to a match and lift to run, or swipe left to cancel. No-match results never run.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Assign Activate voice mode and edit voice keywords in Actions.")
                     .font(.caption).foregroundStyle(.secondary)

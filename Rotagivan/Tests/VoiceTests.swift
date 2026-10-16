@@ -666,7 +666,7 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         VaultKeychain.setActive(server: vaultServer, userID: nil)
 
         let controller = AppExplorerController(defaults: defaults)
-        controller.configuration = { AppExplorerSettings() }
+        controller.configuration = { AppExplorerSettings(voiceAutoSelect: false) }
         var initialFrontApp = "com.apple.finder"
         controller.frontmostPID = { 4242 }; controller.frontmostBundleID = { initialFrontApp }
         controller.contextIsValid = { true }
@@ -864,7 +864,7 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         // every result, inversion, failures, retry, and readiness races.
         let gestureController = AppExplorerController(defaults: defaults)
         var pickerInverted = false
-        gestureController.configuration = { AppExplorerSettings(invertPickerDirection: pickerInverted) }
+        gestureController.configuration = { AppExplorerSettings(voiceAutoSelect: false, invertPickerDirection: pickerInverted) }
         gestureController.frontmostPID = { 4242 }
         gestureController.frontmostBundleID = { "com.apple.finder" }
         gestureController.contextIsValid = { true }
@@ -927,31 +927,58 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
             "Swipe execution must revalidate the action catalog")
         gestureController.dismiss(); gestureCatalog = catalog
 
-        precondition(!AppExplorerSettings().resolvedVoiceAutoDecide)
+        precondition(AppExplorerSettings().resolvedVoiceAutoSelect, "Auto-select defaults on")
+        let legacy = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(#"{"favorites":[],"defaultMode":"favorites","voiceAutoDecide":false}"#.utf8))
+        precondition(legacy.resolvedVoiceAutoSelect, "Older configurations decode with auto-select on")
         var automatic = AppExplorerSettings()
-        automatic.voiceAutoDecide = true
-        let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(automatic))
-        precondition(restored.resolvedVoiceAutoDecide)
+        let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(AppExplorerSettings(voiceAutoSelect: false)))
+        precondition(!restored.resolvedVoiceAutoSelect)
+        automatic.voiceAutoSelect = true
         controller.configuration = { automatic }
+        controller.voiceAutoSelectDelay = 0.15
         controller.prepareVoice = { voice, _ in voice.receive(decision, final: false) }
         controller.show(waitingForLift: false); controller.beginVoiceMode()
         precondition(executed.count == 2, "Partial results never auto-execute")
         let automaticSession = controller.displayedVoiceSession!
         automaticSession.receive(decision, final: true)
         automaticSession.receive(decision, final: true)
+        precondition(executed.count == 2 && automaticSession.autoSelecting && automaticSession.selected == .up &&
+            automaticSession.message.contains(slack.title),
+            "Auto-select shows the chosen top match before running it")
+        try await Task.sleep(nanoseconds: 400_000_000)
+        precondition(executed.count == 3 && executed.last == slack.action, "Auto-select runs the best final action once")
+        controller.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        precondition(controller.processLayerKey(key(53)))
+        try await Task.sleep(nanoseconds: 400_000_000)
+        precondition(executed.count == 3 && controller.isVisible && controller.displayedVoiceSession == nil, "Escape cancels a pending auto-select")
+        controller.beginVoiceMode()
+        controller.displayedVoiceSession!.select(.left)
+        precondition(controller.displayedVoiceSession?.autoSelecting == false)
+        controller.displayedVoiceSession!.select(.right)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        precondition(executed.count == 3 && controller.displayedVoiceSession?.selected == .right,
+            "Steering to another tile stops the countdown and waits for a manual choice")
+        precondition(controller.processLayerKey(key(36)))
         try await Task.sleep(nanoseconds: 80_000_000)
-        precondition(executed.count == 3 && executed.last == slack.action, "Auto-decide runs the best final action once")
+        precondition(executed.count == 4 && executed.last == mute.action, "A manual choice still runs after taking over")
         controller.prepareVoice = { voice, _ in voice.receive(noMatch, final: true) }
         controller.show(waitingForLift: false); controller.beginVoiceMode()
-        precondition(executed.count == 3 && controller.displayedVoiceSession != nil, "Auto-decide must not execute no-match")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        precondition(executed.count == 4 && controller.displayedVoiceSession != nil, "Auto-select must not execute no-match")
         controller.dismiss()
-        controller.prepareVoice = { voice, _ in
-            available = [mute, pause]
-            voice.receive(decision, final: true)
-        }
+        controller.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
         controller.show(waitingForLift: false); controller.beginVoiceMode()
-        precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Auto-decide revalidates removed IDs")
+        available = [mute, pause]
+        try await Task.sleep(nanoseconds: 300_000_000)
+        precondition(executed.count == 4 && controller.displayedVoiceSession?.phase == .failed, "Auto-select revalidates removed IDs")
         controller.dismiss(); available = catalog
+        controller.prepareVoice = { voice, _ in voice.receive(decision, final: true) }
+        controller.show(waitingForLift: false); controller.beginVoiceMode()
+        controller.dismiss()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        precondition(executed.count == 4, "Dismissing the HUD cancels a pending auto-select")
+        controller.voiceAutoSelectDelay = 0.7
         // Activation is one ordinary action, regardless of binding or tile input.
         let activation = BindingAction.command(.activateVoiceMode)
         let activationKey = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
@@ -987,7 +1014,7 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         precondition(!AppExplorerSettings().resolvedVoiceAutoStart)
         activationSettings.voiceAutoStart = true
         let restoredAutoStart = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(activationSettings))
-        precondition(restoredAutoStart.resolvedVoiceAutoStart && !restoredAutoStart.resolvedVoiceAutoDecide)
+        precondition(restoredAutoStart.resolvedVoiceAutoStart && restoredAutoStart.resolvedVoiceAutoSelect)
         controller.show(waitingForLift: false)
         precondition(starts == 4 && controller.displayedVoiceSession != nil, "Main HUD opening auto-starts only when opted in")
         controller.show(waitingForLift: false)
@@ -1006,7 +1033,7 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         levels.clear()
         precondition(levels.waveform().allSatisfy { $0 == 0 })
 
-        controller.configuration = { AppExplorerSettings() }
+        controller.configuration = { AppExplorerSettings(voiceAutoSelect: false) }
         let scoped = VoiceActionRegistry.slackDefaults.first { $0.title == "Activity" }!
         var frontApp = "com.tinyspeck.slackmacgap"
         controller.frontmostBundleID = { frontApp }
@@ -1017,7 +1044,7 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         controller.show(waitingForLift: false); controller.beginVoiceMode()
         frontApp = "com.apple.finder"
         controller.confirmVoiceAction()
-        precondition(executed.count == 3 && controller.displayedVoiceSession?.phase == .failed, "Application actions cannot execute after switching apps")
+        precondition(executed.count == 4 && controller.displayedVoiceSession?.phase == .failed, "Application actions cannot execute after switching apps")
         controller.dismiss()
 
         // Custom command IDs are stable while their output changes. Revalidate

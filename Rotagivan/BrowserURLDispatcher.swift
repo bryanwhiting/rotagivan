@@ -1,4 +1,81 @@
 import AppKit
+import SQLite3
+
+/// Chrome History records navigations, not switches to an already-open tab.
+/// Use it only to order open tabs that Rotagivan has not observed being focused.
+/// No history rows are stored by Rotagivan or included in settings sync.
+enum ChromeLocalHistory {
+    static var profileRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
+    }
+
+    static func lastVisits(for tabs: [ChromeRecentTab], profileRoot: URL = profileRoot) -> [String: Int64] {
+        let urls = Array(Set(tabs.map(\.url).filter { !$0.isEmpty }))
+        guard !urls.isEmpty,
+              let profiles = try? FileManager.default.contentsOfDirectory(at: profileRoot,
+                  includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [:] }
+        var visits: [String: Int64] = [:]
+        for profile in profiles where profile.lastPathComponent == "Default" || profile.lastPathComponent.hasPrefix("Profile ") {
+            let history = profile.appendingPathComponent("History")
+            guard FileManager.default.fileExists(atPath: history.path) else { continue }
+            // Prefer the live read-only connection (which includes WAL data).
+            // Chrome can hold an exclusive lock; immutable reads the on-disk
+            // checkpoint without waiting or copying private history files.
+            let uri = history.absoluteString
+            if let rows = read(uri: uri + "?mode=ro", urls: urls)
+                ?? read(uri: uri + "?immutable=1", urls: urls) {
+                for (url, time) in rows { visits[url] = max(visits[url] ?? 0, time) }
+            }
+        }
+        return visits
+    }
+
+    private static func read(uri: String, urls: [String]) -> [String: Int64]? {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(uri, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK,
+              let database else { if database != nil { sqlite3_close(database) }; return nil }
+        defer { sqlite3_close(database) }
+        sqlite3_busy_timeout(database, 100)
+        var result: [String: Int64] = [:]
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for start in stride(from: 0, to: urls.count, by: 200) {
+            let chunk = Array(urls[start..<min(start + 200, urls.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let query = """
+                SELECT urls.url, MAX(visits.visit_time)
+                FROM urls JOIN visits ON visits.url = urls.id
+                WHERE urls.url IN (\(placeholders))
+                GROUP BY urls.url
+                """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK,
+                  let statement else { if statement != nil { sqlite3_finalize(statement) }; return nil }
+            for (offset, url) in chunk.enumerated() {
+                _ = url.withCString { sqlite3_bind_text(statement, Int32(offset + 1), $0, -1, transient) }
+            }
+            var status = sqlite3_step(statement)
+            while status == SQLITE_ROW {
+                if let text = sqlite3_column_text(statement, 0) {
+                    result[String(cString: text)] = sqlite3_column_int64(statement, 1)
+                }
+                status = sqlite3_step(statement)
+            }
+            sqlite3_finalize(statement)
+            guard status == SQLITE_DONE else { return nil }
+        }
+        return result
+    }
+
+    static func historyFirst(_ tabs: [ChromeRecentTab], lastVisits: [String: Int64]) -> [ChromeRecentTab] {
+        guard let active = tabs.first else { return [] }
+        return [active] + tabs.dropFirst().enumerated().sorted { lhs, rhs in
+            let left = lastVisits[lhs.element.url] ?? 0
+            let right = lastVisits[rhs.element.url] ?? 0
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }.map(\.element)
+    }
+}
 
 /// In-memory tab focus order. This is HUD state, not Screen Time data: it is
 /// never written to disk or included in settings sync.
@@ -177,11 +254,12 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
         guard let script = NSAppleScript(source: source) else { return [] }
         let result = script.executeAndReturnError(&error)
         guard error == nil, let text = result.stringValue, !text.isEmpty else { return [] }
-        return text.split(whereSeparator: \.isNewline).compactMap { line in
+        let tabs: [ChromeRecentTab] = text.split(whereSeparator: \.isNewline).compactMap { line in
             let fields = line.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false)
             guard fields.count == 4, let window = Int(fields[0]), let tab = Int(fields[1]) else { return nil }
             return ChromeRecentTab(windowIndex: window, tabIndex: tab, title: String(fields[2]), url: String(fields[3]))
         }
+        return ChromeLocalHistory.historyFirst(tabs, lastVisits: ChromeLocalHistory.lastVisits(for: tabs))
     }
 
     static func activeTab() -> ChromeRecentTab? {

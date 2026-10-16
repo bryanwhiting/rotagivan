@@ -114,6 +114,7 @@ rustc --edition 2021 -O --crate-type cdylib "$script_dir/RustSearch/search.rs" -
 codesign --force --sign "$signing_identity" "$app_dir/Contents/Resources/librota_search.dylib"
 xcrun swiftc -O -parse-as-library \
   -I "$yaml_build/Modules" -I "$yaml_build" -L "$yaml_build" -lConfigurationYAML \
+  -lsqlite3 \
   -I "$yaml_dir/.build/checkouts/Yams/Sources/CYaml/include" \
   -framework AppKit \
   -framework CoreServices \

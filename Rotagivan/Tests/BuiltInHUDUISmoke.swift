@@ -30,6 +30,29 @@ import SwiftUI
             }
             panel.orderOut(nil); panel.close()
         }
+        var workspaceSettings = AppExplorerSettings()
+        let workspaceLayer = workspaceSettings.assignBuiltIn(.chromeTabs, at: .right)!
+        let workspaceHost = NSHostingView(rootView: ExplorerHUDSettingsPreview(
+            settings: workspaceSettings.projected(layerID: workspaceLayer), theme: workspaceSettings.resolvedTheme,
+            dictionary: [], groupPath: [], layerName: "Google Chrome Tabs",
+            chromeTabsProvider: { (1...8).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
+                title: "Workspace tab \($0)", url: "https://example.test/workspace/\($0)") } },
+            rootSettings: workspaceSettings, selectedLayerID: workspaceLayer,
+            selection: .constant(.up), onBack: {}, onDrag: { _, _ in }, onDrop: { _, _ in }, workspace: true)
+            .frame(width: 720, height: 620))
+        let workspacePanel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        workspacePanel.isReleasedWhenClosed = false
+        workspacePanel.contentView = workspaceHost; workspacePanel.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        workspaceHost.layoutSubtreeIfNeeded()
+        if let destination = CommandLine.arguments.dropFirst().first,
+           let bitmap = workspaceHost.bitmapImageRepForCachingDisplay(in: workspaceHost.bounds) {
+            workspaceHost.cacheDisplay(in: workspaceHost.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to:
+                URL(fileURLWithPath: destination).appendingPathComponent("workspace-chromeTabs.png"))
+        }
+        workspacePanel.orderOut(nil); workspacePanel.close()
         let controller = AppExplorerController(defaults: defaults)
         controller.contextIsValid = { true }
         ChromeTabRecency.shared.record(ChromeRecentTab(windowIndex: 1, tabIndex: 3,

@@ -1,4 +1,5 @@
 import AppKit
+import SQLite3
 
 @main struct BrowserURLDispatcherTests {
     @MainActor static func main() async throws {
@@ -72,6 +73,29 @@ import AppKit
         var compileError: NSDictionary?
         let script = NSAppleScript(source: ChromeBookmarkTabs.script(url: url.absoluteString, preferredTab: ""))!
         precondition(script.compileAndReturnError(&compileError), "Chrome script must compile: \(String(describing: compileError))")
+
+        let historyRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Rotagivan-ChromeHistory-\(UUID().uuidString)", isDirectory: true)
+        let historyProfile = historyRoot.appendingPathComponent("Default", isDirectory: true)
+        try FileManager.default.createDirectory(at: historyProfile, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: historyRoot) }
+        var historyDB: OpaquePointer?
+        precondition(sqlite3_open(historyProfile.appendingPathComponent("History").path, &historyDB) == SQLITE_OK)
+        precondition(sqlite3_exec(historyDB, """
+            CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT);
+            CREATE TABLE visits(url INTEGER, visit_time INTEGER);
+            INSERT INTO urls VALUES (1, 'https://fixture.test/older'), (2, 'https://fixture.test/newer');
+            INSERT INTO visits VALUES (1, 5), (1, 10), (2, 20);
+            """, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(historyDB)
+        let historyTabs = [
+            ChromeRecentTab(windowIndex: 1, tabIndex: 1, title: "Active", url: "https://fixture.test/active"),
+            ChromeRecentTab(windowIndex: 1, tabIndex: 2, title: "Older", url: "https://fixture.test/older"),
+            ChromeRecentTab(windowIndex: 1, tabIndex: 3, title: "Newer", url: "https://fixture.test/newer")]
+        let historyVisits = ChromeLocalHistory.lastVisits(for: historyTabs, profileRoot: historyRoot)
+        precondition(historyVisits["https://fixture.test/older"] == 10 && historyVisits["https://fixture.test/newer"] == 20)
+        precondition(ChromeLocalHistory.historyFirst(historyTabs, lastVisits: historyVisits).map(\.title) == ["Active", "Newer", "Older"],
+            "Only open tabs are ranked; the current tab stays first")
 
         let suite = "Rotagivan.BrowserDispatch.\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: suite)!

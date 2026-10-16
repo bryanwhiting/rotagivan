@@ -148,7 +148,7 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
-  Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift)
+  Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift -lsqlite3)
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
   Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ActionTableTests.swift \
@@ -231,7 +231,7 @@ while IFS= read -r source; do
 done < <(sed -n 's/^  "$script_dir\/\(.*\.swift\)".*/\1/p' Rotagivan/build.sh | rg -v '^RotagivanApp.swift$')
 for test in ReleaseSettingsTests BuiltInHUDUISmoke TemporaryIntentionUISmoke HUDWorkspaceUISmoke HUDLayoutPreviewUISmoke HUDSettingsUISmoke; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
-  -L "$yaml_build" -lConfigurationYAML "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \
+  -L "$yaml_build" -lConfigurationYAML -lsqlite3 "${settings_sources[@]}" "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit \
   -framework Carbon -framework Security -framework ServiceManagement -framework Speech -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"

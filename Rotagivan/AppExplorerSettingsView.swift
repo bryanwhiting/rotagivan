@@ -1840,6 +1840,7 @@ struct ExplorerHUDSettingsPreview: View {
     let layerName: String?
     var liveEntries: [ExplorerEntry]? = nil
     var liveMessage: String? = nil
+    var chromeTabsProvider: @Sendable () -> [ChromeRecentTab] = { ChromeBookmarkTabs.snapshot() }
     var rootSettings: AppExplorerSettings? = nil
     var selectedLayerID: UUID? = nil
     var onSelectLayer: ((UUID?) -> Void)? = nil
@@ -1852,6 +1853,15 @@ struct ExplorerHUDSettingsPreview: View {
     var editor: ((ExplorerSlot) -> AnyView)? = nil
     var workspace = false
     @StateObject private var model = ExplorerModel()
+    @State private var chromePreviewTabs: [ChromeRecentTab] = []
+    @State private var chromeLoadedKey: String?
+
+    private var chromePreviewKey: String? {
+        guard liveEntries == nil else { return nil }
+        let builtIn = groupPath.isEmpty ? rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn : nil
+        guard settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs else { return nil }
+        return (selectedLayerID?.uuidString ?? "group") + ":" + groupPath.map(\.rawValue).joined(separator: "/")
+    }
 
     var body: some View {
         // Keep the fixed orbit canvas from imposing its 950-point ideal width
@@ -1897,7 +1907,17 @@ struct ExplorerHUDSettingsPreview: View {
             .onChange(of: selectedLayerID) { _, _ in refresh() }
             .onChange(of: liveEntries) { _, _ in refresh() }
             .onChange(of: liveMessage) { _, _ in refresh() }
+            .onChange(of: chromePreviewTabs) { _, _ in refresh() }
+            .onChange(of: chromeLoadedKey) { _, _ in refresh() }
             .onChange(of: selection) { _, selected in model.selected = selected }
+            .task(id: chromePreviewKey) {
+                guard let key = chromePreviewKey else { return }
+                let provider = chromeTabsProvider
+                let tabs = await Task.detached(priority: .userInitiated) { provider() }.value
+                guard !Task.isCancelled else { return }
+                chromePreviewTabs = ChromeTabRecency.shared.ranked(tabs)
+                chromeLoadedKey = key
+            }
             .position(x: viewport.size.width / 2, y: viewport.size.height / 2)
         }
         .frame(height: workspace ? nil : 850)
@@ -1928,22 +1948,45 @@ struct ExplorerHUDSettingsPreview: View {
                 model.message = liveMessage
                 return
             }
+            if chrome {
+                let loaded = chromeLoadedKey == chromePreviewKey
+                model.entries = loaded ? chromeEntries(count: model.slotCount) : []
+                model.message = !loaded ? "Loading Chrome tabs…" : chromePreviewTabs.isEmpty
+                    ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation."
+                    : "Most recently used Chrome tabs · active tab on the left"
+                return
+            }
             let order = ExplorerSlot.slots(model.slotCount).sorted {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             }
             model.entries = order.enumerated().map { index, slot in
                 var entry = ExplorerEntry(direction: slot, bundleID: nil,
-                    name: chrome ? "Chrome tab \(index + 1)" : index == 0 ? "Active app" : "Recent app \(index)",
+                    name: index == 0 ? "Active app" : "Recent app \(index)",
                     icon: NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil), url: nil)
-                entry.isActiveApp = !chrome && index == 0
+                entry.isActiveApp = index == 0
                 return entry
             }
-            model.message = chrome ? "Open Chrome tabs fill these positions · swipe and lift to focus" : "Recent apps fill these positions at runtime · center goes back"
+            model.message = "Recent apps fill these positions at runtime · center goes back"
         } else {
             model.entries = (settings.favorites(at: groupPath) ?? []).map {
                 AppExplorerController.makeEntry($0, depth: groupPath.count, dictionary: dictionary)
             }
             model.message = "Select a tile to edit · drag to move or swap"
+        }
+    }
+
+    private func chromeEntries(count: Int) -> [ExplorerEntry] {
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome")
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return chromePreviewTabs.prefix(count).enumerated().map { offset, tab in
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: "com.google.Chrome",
+                name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
+            entry.chromeTab = tab
+            entry.isActiveApp = offset == 0
+            return entry
         }
     }
 

@@ -140,6 +140,9 @@ struct CredentialVaultView: View {
                         .accessibilityIdentifier("vault-restore-retry")
                     Text("This button may ask for your login Keychain password. Once unlocked, voice reuses the keys in memory; it does not request access on each command.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                if vault.account != nil && !vault.localReady && !vault.unlocked {
+                    // Visible (disabled) while restoring so the alternative is discoverable.
                     VaultRecoveryButton(vault: vault)
                 }
                 if vault.localReady && vault.account != nil && (vault.unlocked || !vault.hasRemote) {

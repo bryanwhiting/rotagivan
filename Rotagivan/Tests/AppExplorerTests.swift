@@ -326,6 +326,19 @@ import Foundation
         precondition(activeRecents.activeFirst(available: ["recent", "older"], active: "closed") == ["recent", "older"])
         precondition(activeRecents.activeFirst(available: ["active", "recent"], active: "active", limit: 1) == ["active"])
         precondition(activeRecents.activeFirst(available: ["active"], active: "active", limit: 0).isEmpty)
+        let chrome = RecentPlaces.chromeBundleID
+        let appStamps: [String: UInt64] = ["slack": 5, chrome: 6, "mail": 9, "notes": 2]
+        let tabStamps: [String: UInt64] = ["docs": 7, "mail-tab": 3, "news": 8]
+        func places(_ active: String?, tabs: [String] = ["docs", "news", "mail-tab", "unseen"]) -> [RecentPlace<String>] {
+            RecentPlaces.merged(apps: ["mail", chrome, "slack", "notes", "idle"], tabs: tabs, active: active,
+                appStamp: { appStamps[$0] }, tabStamp: { tabStamps[$0] })
+        }
+        precondition(places("mail") == [.app("mail"), .tab("news"), .tab("docs"), .app("slack"), .tab("mail-tab"), .app("notes"), .app("idle"), .tab("unseen")],
+            "Apps and tabs interleave by the shared clock; Chrome never appears as an app")
+        precondition(places(chrome).prefix(2) == [.tab("docs"), .app("mail")], "In Chrome, its selected tab is the current place")
+        precondition(places(chrome, tabs: []) == [.app("mail"), .app("slack"), .app("notes"), .app("idle")], "Without tabs, only apps remain")
+        precondition(places(nil).first == .app("mail") && places("gone").first == .app("mail"))
+        precondition(!places(nil).contains(.app(chrome)))
         let clockwise = ExplorerSlot.slots(8).sorted {
             ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
         }

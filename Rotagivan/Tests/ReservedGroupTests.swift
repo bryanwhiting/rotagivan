@@ -49,6 +49,12 @@ import Foundation
         let nestedWindows = ExplorerReservedGroup.windowManager.tile(at: .left, insideWindowManager: true)
         precondition(nestedWindows.isGroup && !nestedWindows.isWindowManager && nestedWindows.children?.count == 8)
         precondition(ExplorerReservedGroup.recentApps.tile(at: .up).isRecentGroup)
+        let places = ExplorerReservedGroup.recentAppsAndTabs.tile(at: .up)
+        precondition(places.isRecentAppsAndTabsGroup && places.isDynamicGroup && !places.isRecentGroup && !places.isChromeTabsGroup)
+        var placesSettings = AppExplorerSettings()
+        placesSettings.builtInDefaults = ["recentAppsAndTabs": HUDDefaultLayout(slotCount: 12)]
+        precondition(placesSettings.hasValidFavorites && placesSettings.assignBuiltIn(.recentAppsAndTabs, at: .left) != nil)
+        precondition(placesSettings.holdLayers?.last?.slotCount == 12 && placesSettings.holdLayers?.last?.builtIn == .recentAppsAndTabs)
         let actions = ExplorerReservedGroup.actions.tile(at: .up)
         precondition(actions.isGroup && actions.children?.count == 8 && actions.slotCount == 8)
         let expected: [String: (UInt16, String, UInt64)] = [

@@ -498,7 +498,7 @@ extension AppExplorerPresenting {
         chromeTabSnapshot = ChromeTabRecency.shared.ranked(tabs)
         chromeTabsLoaded = true
         folderSnapshot = folders
-        if model.showingChromeTabs { refreshGroup() }
+        if model.showingChromeTabs || model.showingRecentPlaces { refreshGroup() }
         if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
     }
 
@@ -720,6 +720,10 @@ extension AppExplorerPresenting {
                 return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
                     slotCount: preview.slotCount, entries: chromeEntries(count: preview.slotCount, page: 0))
             }
+            if map.first(where: { $0.id == preview.id })?.builtIn == .recentAppsAndTabs {
+                return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                    slotCount: preview.slotCount, entries: recentPlaceEntries(count: preview.slotCount, page: 0).entries)
+            }
             guard map.first(where: { $0.id == preview.id })?.builtIn == .recentApps else { return preview }
             return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
                 slotCount: preview.slotCount, entries: recentEntries(slotCount: preview.slotCount))
@@ -780,6 +784,9 @@ extension AppExplorerPresenting {
         model.showingChromeTabs = model.showingWindowManager
             ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isChromeTabsGroup == true
             : settings.favorite(at: groupPath)?.isChromeTabsGroup == true || mappedBuiltIn == .chromeTabs
+        model.showingRecentPlaces = !model.showingChromeTabs && (model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isRecentAppsAndTabsGroup == true
+            : settings.favorite(at: groupPath)?.isRecentAppsAndTabsGroup == true || mappedBuiltIn == .recentAppsAndTabs)
         model.page = 0; model.pageCount = 1
         model.showingRecents = model.mode == .recent || recentGroup
         model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingMediaControls && layer == nil
@@ -795,6 +802,22 @@ extension AppExplorerPresenting {
             model.message = !chromeTabsLoaded ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
                 ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation."
                 : "Swipe to a tab and lift to focus it · use Previous / Next for more tabs"
+            return
+        }
+        if model.showingRecentPlaces {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            let probe = recentPlaceEntries(count: count, page: 0)
+            model.pageCount = max(1, (probe.total + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = chromeTabsPage == 0 ? probe.entries : recentPlaceEntries(count: count, page: chromeTabsPage).entries
+            let chromeRunning = workspace.runningApplications.contains { $0.bundleIdentifier == RecentPlaces.chromeBundleID }
+            model.message = probe.total == 0 ? "Open another app to see it here"
+                : !chromeTabsLoaded && chromeRunning ? "Loading Chrome tabs…"
+                : chromeTabSnapshot.isEmpty && chromeRunning ? "Chrome tabs unavailable. Allow Rotagivan in Privacy & Security → Automation to include them."
+                : "Swipe to an app or tab and lift to return to it"
             return
         }
         if model.showingAppWindows {
@@ -867,6 +890,67 @@ extension AppExplorerPresenting {
         }
     }
 
+    private func recentPlaceEntries(count: Int, page: Int) -> (entries: [ExplorerEntry], total: Int) {
+        let running = Self.recentRunningApps()
+        let order = recents.mostRecentFirst(available: running.compactMap(\.bundleIdentifier))
+        let places = Self.recentPlaces(running: running, order: order, tabs: chromeTabSnapshot, sourcePID: sourcePID)
+        let icon = applicationURL(RecentPlaces.chromeBundleID).map { workspace.icon(forFile: $0.path) }
+        return (Self.recentPlaceEntries(places, running: running, sourcePID: sourcePID, chromeIcon: icon, count: count, page: page), places.count)
+    }
+
+    static func recentRunningApps() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated &&
+            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
+            $0.bundleIdentifier != "local.rotagivan"
+        }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+    }
+
+    /// Shared by the live HUD and its settings previews. Chrome appears only as its tabs.
+    static func recentPlaces(running: [NSRunningApplication], order: [String], tabs: [ChromeRecentTab],
+                             sourcePID: pid_t?) -> [RecentPlace<ChromeRecentTab>] {
+        let recency = ChromeTabRecency.shared
+        return RecentPlaces.merged(apps: order, tabs: tabs,
+            active: running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier,
+            appStamp: { recency.stamp(app: $0) }, tabStamp: { recency.stamp(tab: $0) })
+    }
+
+    /// Settings preview: live running apps and the supplied Chrome tabs, without a source app.
+    static func previewRecentPlaceEntries(tabs: [ChromeRecentTab], count: Int) -> [ExplorerEntry] {
+        let running = recentRunningApps()
+        let order = AppExplorerRecents(UserDefaults.standard.stringArray(forKey: "appExplorer.recentBundleIDs") ?? [])
+            .mostRecentFirst(available: running.compactMap(\.bundleIdentifier))
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: RecentPlaces.chromeBundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return recentPlaceEntries(recentPlaces(running: running, order: order, tabs: tabs, sourcePID: nil),
+            running: running, sourcePID: nil, chromeIcon: icon, count: count, page: 0)
+    }
+
+    /// The current place is outlined on the left; the rest continue clockwise from top-left.
+    static func recentPlaceEntries(_ places: [RecentPlace<ChromeRecentTab>], running: [NSRunningApplication], sourcePID: pid_t?,
+                                   chromeIcon: NSImage?, count: Int, page: Int) -> [ExplorerEntry] {
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return places.dropFirst(page * count).prefix(count).compactMap { place -> ExplorerEntry? in
+            switch place {
+            case .tab(let tab):
+                var entry = ExplorerEntry(direction: .up, bundleID: RecentPlaces.chromeBundleID,
+                    name: tab.title.isEmpty ? tab.url : tab.title, icon: chromeIcon, url: URL(string: tab.url))
+                entry.chromeTab = tab
+                return entry
+            case .app(let id):
+                return (running.first { $0.bundleIdentifier == id && $0.processIdentifier == sourcePID }
+                    ?? running.first { $0.bundleIdentifier == id }).map { ExplorerEntry(direction: .up, app: $0) }
+            }
+        }.enumerated().map { offset, entry in
+            var entry = entry
+            entry.direction = slots[offset]
+            entry.isActiveApp = page == 0 && offset == 0
+            return entry
+        }
+    }
+
     private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
         if let cached = entryCache.first(where: { $0.depth == depth && $0.favorite == favorite }) {
             return cached.entry
@@ -932,11 +1016,7 @@ extension AppExplorerPresenting {
         model.entries = recentEntries(slotCount: model.slotCount)
     }
     private func recentEntries(slotCount: Int) -> [ExplorerEntry] {
-        let running = workspace.runningApplications.filter {
-            $0.activationPolicy == .regular && !$0.isTerminated &&
-            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
-            $0.bundleIdentifier != "local.rotagivan"
-        }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+        let running = Self.recentRunningApps()
         let active = running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier
         let ordered = recents.activeFirst(available: running.compactMap(\.bundleIdentifier), active: active, limit: slotCount)
         let slots = ExplorerSlot.slots(slotCount).sorted { a, b in
@@ -1555,7 +1635,7 @@ extension AppExplorerPresenting {
     }
 
     func changeWindowPage(_ delta: Int) {
-        if model.showingChromeTabs {
+        if model.showingChromeTabs || model.showingRecentPlaces {
             chromeTabsPage = max(0, min(model.pageCount - 1, chromeTabsPage + delta))
             refreshGroup(); return
         }
@@ -2129,6 +2209,7 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var windowFullScreen = false
     @Published var showingAppWindows = false
     @Published var showingChromeTabs = false
+    @Published var showingRecentPlaces = false
     @Published var page = 0
     @Published var pageCount = 1
 }
@@ -2380,7 +2461,7 @@ struct AppExplorerView: View {
                 Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).lineLimit(3)
             }
-            if model.showingAppWindows || model.showingChromeTabs {
+            if model.showingAppWindows || model.showingChromeTabs || (model.showingRecentPlaces && model.pageCount > 1) {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
                     Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)

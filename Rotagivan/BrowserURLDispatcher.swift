@@ -1,5 +1,58 @@
 import AppKit
 
+/// In-memory tab focus order. This is HUD state, not Screen Time data: it is
+/// never written to disk or included in settings sync.
+@MainActor final class ChromeTabRecency {
+    static let shared = ChromeTabRecency()
+    private var visits: [String: UInt64] = [:]
+    private var clock: UInt64 = 0
+    private var timer: Timer?
+    private var sampling = false
+    private func key(_ tab: ChromeRecentTab) -> String { tab.url.isEmpty ? tab.id : tab.url }
+
+    func start() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { _ in
+            Task { @MainActor in ChromeTabRecency.shared.sampleIfChromeIsActive() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() { timer?.invalidate(); timer = nil }
+
+    private func sampleIfChromeIsActive() {
+        guard !sampling, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.google.Chrome" else { return }
+        sampling = true
+        Task.detached(priority: .utility) {
+            let tab = ChromeBookmarkTabs.activeTab()
+            await MainActor.run {
+                if let tab { ChromeTabRecency.shared.record(tab) }
+                ChromeTabRecency.shared.sampling = false
+            }
+        }
+    }
+
+    func record(_ tab: ChromeRecentTab) {
+        let id = key(tab)
+        guard visits[id] != clock else { return }
+        clock &+= 1
+        visits[id] = clock
+        if visits.count > 512 { visits = [id: clock] }
+    }
+
+    /// The first tab is Chrome's currently selected tab; ties retain tab-strip order.
+    func ranked(_ tabs: [ChromeRecentTab]) -> [ChromeRecentTab] {
+        guard let active = tabs.first else { return [] }
+        record(active)
+        return [active] + tabs.dropFirst().enumerated().sorted { lhs, rhs in
+            let left = visits[key(lhs.element)] ?? 0
+            let right = visits[key(rhs.element)] ?? 0
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }.map(\.element)
+    }
+}
+
 /// Explicit browser targets never fall back to the user's default browser.
 @MainActor final class BrowserURLDispatcher {
     var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
@@ -95,23 +148,30 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
     static func snapshot() -> [ChromeRecentTab] {
         let source = """
         if application "Google Chrome" is not running then return ""
-        set output to ""
+        set activeOutput to ""
+        set otherOutput to ""
         try
             tell application "Google Chrome"
                 repeat with w in windows
                     set wi to index of w
+                    set activeIndex to active tab index of w
                     repeat with ti from 1 to count of tabs of w
                         set t to tab ti of w
                         set tabTitle to title of t
                         set tabURL to URL of t
-                        set output to output & (wi as text) & tab & (ti as text) & tab & tabTitle & tab & tabURL & linefeed
+                        set rowText to (wi as text) & tab & (ti as text) & tab & tabTitle & tab & tabURL & linefeed
+                        if wi is 1 and ti is activeIndex then
+                            set activeOutput to rowText
+                        else
+                            set otherOutput to otherOutput & rowText
+                        end if
                     end repeat
                 end repeat
             end tell
         on error
             return ""
         end try
-        return output
+        return activeOutput & otherOutput
         """
         var error: NSDictionary?
         guard let script = NSAppleScript(source: source) else { return [] }
@@ -122,6 +182,29 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
             guard fields.count == 4, let window = Int(fields[0]), let tab = Int(fields[1]) else { return nil }
             return ChromeRecentTab(windowIndex: window, tabIndex: tab, title: String(fields[2]), url: String(fields[3]))
         }
+    }
+
+    static func activeTab() -> ChromeRecentTab? {
+        let source = """
+        if application "Google Chrome" is not running then return ""
+        try
+            tell application "Google Chrome"
+                set w to front window
+                set ti to active tab index of w
+                set t to tab ti of w
+                return "1" & tab & (ti as text) & tab & (title of t) & tab & (URL of t)
+            end tell
+        on error
+            return ""
+        end try
+        """
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return nil }
+        let result = script.executeAndReturnError(&error)
+        guard error == nil, let text = result.stringValue else { return nil }
+        let fields = text.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false)
+        guard fields.count == 4, let index = Int(fields[1]) else { return nil }
+        return ChromeRecentTab(windowIndex: 1, tabIndex: index, title: String(fields[2]), url: String(fields[3]))
     }
 
     static func activate(_ tab: ChromeRecentTab) -> Bool {

@@ -59,17 +59,20 @@ struct HUDSettingsView: View {
 struct BuiltInHUDDefaultEditor: View {
     @ObservedObject var store: SettingsStore
     let group: ExplorerReservedGroup
+    var chromeTabsProvider: @Sendable () -> [ChromeRecentTab] = { ChromeBookmarkTabs.snapshot() }
     @State private var selection: ExplorerSlot = .up
     @State private var editing: ExplorerSlot?
     @State private var restoring = false
     @State private var error: String?
+    @State private var chromeTabs: [ChromeRecentTab] = []
+    @State private var chromeTabsLoaded = false
     private var settings: AppExplorerSettings { store.settings.appExplorer ?? AppExplorerSettings() }
     private var layout: HUDDefaultLayout { settings.defaultLayout(for: group) }
     private var preview: AppExplorerSettings {
         var result = AppExplorerSettings()
         result.slotCount = layout.slotCount
         result.favorites = layout.favorites
-        if !group.hasEditableDefaults {
+        if !group.hasEditableDefaults && group != .chromeTabs {
             let slots = group == .recentApps ? ExplorerSlot.slots(layout.slotCount).sorted {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             } : ExplorerSlot.slots(layout.slotCount)
@@ -79,6 +82,28 @@ struct BuiltInHUDDefaultEditor: View {
             }
         }
         return result
+    }
+    private var chromePreviewEntries: [ExplorerEntry]? {
+        guard group == .chromeTabs else { return nil }
+        let slots = ExplorerSlot.slots(layout.slotCount).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome")
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return chromeTabs.prefix(layout.slotCount).enumerated().map { offset, tab in
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: "com.google.Chrome",
+                name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
+            entry.chromeTab = tab
+            entry.isActiveApp = offset == 0
+            return entry
+        }
+    }
+    private func loadChromeTabs() async {
+        guard group == .chromeTabs else { return }
+        let provider = chromeTabsProvider
+        let tabs = await Task.detached(priority: .userInitiated) { provider() }.value
+        chromeTabs = ChromeTabRecency.shared.ranked(tabs)
+        chromeTabsLoaded = true
     }
     private func save(_ layout: HUDDefaultLayout) {
         var next = settings
@@ -94,6 +119,9 @@ struct BuiltInHUDDefaultEditor: View {
                     var next = layout; next.slotCount = count; save(next)
                 })) { ForEach(2...16, id: \.self) { Text("\($0)").tag($0) } }.frame(width: 130)
                 Spacer()
+                if group == .chromeTabs {
+                    Button("Refresh tabs") { Task { await loadChromeTabs() } }
+                }
                 Button("Restore original…") { restoring = true }.accessibilityIdentifier("builtin-hud-restore")
             }
             Text(group.hasEditableDefaults ? "Click a tile to edit the default. New \(group.title) HUDs use this layout; existing copies stay unchanged."
@@ -101,6 +129,10 @@ struct BuiltInHUDDefaultEditor: View {
                 .font(.callout).foregroundStyle(.secondary)
             ExplorerHUDSettingsPreview(settings: preview, theme: settings.resolvedTheme,
                 dictionary: store.settings.resolvedHotkeyDictionary, groupPath: [], layerName: group.title,
+                liveEntries: chromePreviewEntries,
+                liveMessage: group == .chromeTabs ? (chromeTabsLoaded
+                    ? (chromeTabs.isEmpty ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation." : "Most recently used Chrome tabs · active tab on the left")
+                    : "Loading Chrome tabs…") : nil,
                 selection: $selection, onBack: {}, onDrag: { _, _ in }, onDrop: { source, target in
                     guard group.hasEditableDefaults, let target else { return }
                     var next = preview
@@ -111,6 +143,7 @@ struct BuiltInHUDDefaultEditor: View {
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             Text("Add this layer from Add HUD or choose it in a tile’s Built-in HUD layers menu.").font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
+        .task { await loadChromeTabs() }
         .confirmationDialog("Restore the original \(group.title) default?", isPresented: $restoring) {
             Button("Restore original", role: .destructive) {
                 var next = settings; next.builtInDefaults?[group.rawValue] = nil
@@ -1805,6 +1838,8 @@ struct ExplorerHUDSettingsPreview: View {
     let dictionary: [NamedHotkey]
     let groupPath: [ExplorerSlot]
     let layerName: String?
+    var liveEntries: [ExplorerEntry]? = nil
+    var liveMessage: String? = nil
     var rootSettings: AppExplorerSettings? = nil
     var selectedLayerID: UUID? = nil
     var onSelectLayer: ((UUID?) -> Void)? = nil
@@ -1860,6 +1895,8 @@ struct ExplorerHUDSettingsPreview: View {
             .onChange(of: layerName) { _, _ in refresh() }
             .onChange(of: rootSettings) { _, _ in refresh() }
             .onChange(of: selectedLayerID) { _, _ in refresh() }
+            .onChange(of: liveEntries) { _, _ in refresh() }
+            .onChange(of: liveMessage) { _, _ in refresh() }
             .onChange(of: selection) { _, selected in model.selected = selected }
             .position(x: viewport.size.width / 2, y: viewport.size.height / 2)
         }
@@ -1883,9 +1920,14 @@ struct ExplorerHUDSettingsPreview: View {
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
         let builtIn = groupPath.isEmpty ? rootSettings?.holdLayers?.first(where: { $0.id == selectedLayerID })?.builtIn : nil
         let chrome = settings.favorite(at: groupPath)?.isChromeTabsGroup == true || builtIn == .chromeTabs
-        model.showingRecents = settings.favorite(at: groupPath)?.isDynamicGroup == true || builtIn == .recentApps || chrome
+        model.showingRecents = settings.favorite(at: groupPath)?.isDynamicGroup == true || builtIn == .recentApps || chrome || liveEntries != nil
         model.selected = model.showingRecents ? nil : selection
         if model.showingRecents {
+            if let liveEntries {
+                model.entries = liveEntries
+                model.message = liveMessage
+                return
+            }
             let order = ExplorerSlot.slots(model.slotCount).sorted {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             }

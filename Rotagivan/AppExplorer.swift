@@ -495,7 +495,7 @@ extension AppExplorerPresenting {
 
     private func acceptLauncherSnapshots(tabs: [ChromeRecentTab], folders: [ExplorerFolder], session: UUID) {
         guard isVisible, chromeSnapshotSession == session else { return }
-        chromeTabSnapshot = tabs
+        chromeTabSnapshot = ChromeTabRecency.shared.ranked(tabs)
         chromeTabsLoaded = true
         folderSnapshot = folders
         if model.showingChromeTabs { refreshGroup() }
@@ -525,7 +525,9 @@ extension AppExplorerPresenting {
         case .chromeTab(let tab):
             dismiss()
             Task.detached(priority: .userInitiated) {
-                _ = ChromeBookmarkTabs.activate(tab)
+                if ChromeBookmarkTabs.activate(tab) {
+                    await MainActor.run { ChromeTabRecency.shared.record(tab) }
+                }
             }
         case .rotaSettings: dismiss(); openSettings()
         case .registered(let id):
@@ -863,10 +865,14 @@ extension AppExplorerPresenting {
 
     private func chromeEntries(count: Int, page: Int) -> [ExplorerEntry] {
         let icon = applicationURL("com.google.Chrome").map { workspace.icon(forFile: $0.path) }
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
         return chromeTabSnapshot.dropFirst(page * count).prefix(count).enumerated().map { offset, tab in
-            var entry = ExplorerEntry(direction: ExplorerSlot.slots(count)[offset], bundleID: "com.google.Chrome",
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: "com.google.Chrome",
                 name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
             entry.chromeTab = tab
+            entry.isActiveApp = page == 0 && offset == 0
             return entry
         }
     }
@@ -1365,6 +1371,8 @@ extension AppExplorerPresenting {
             Task.detached(priority: .userInitiated) {
                 if !ChromeBookmarkTabs.activate(tab) {
                     await MainActor.run { Self.showWindowError("That tab moved or closed. Reopen the HUD to refresh Chrome tabs.", title: "Chrome tab unavailable") }
+                } else {
+                    await MainActor.run { ChromeTabRecency.shared.record(tab) }
                 }
             }
             return

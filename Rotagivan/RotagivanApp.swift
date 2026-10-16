@@ -104,12 +104,13 @@ struct RotagivanApp: App {
     }
 
     private func start() {
-        delegate.onQuit = { hid.stop() }
+        delegate.onQuit = { hid.stop(); ChromeTabRecency.shared.stop() }
         delegate.beforeQuit = {
             await LocalUsageTracker.shared.prepareToQuit()
             await sync.prepareToQuit()
         }
         sync.start()
+        ChromeTabRecency.shared.start()
         hotKeys.onProfileChanged = { id in store.setActiveProfile(id) }
         hotKeys.profileName = { id in store.profiles.first { $0.id == id }?.name }
         hotKeys.onAction = { id, down in hid.keyboardAction(id, down: down) }

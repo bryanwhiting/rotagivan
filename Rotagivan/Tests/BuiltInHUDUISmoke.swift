@@ -12,7 +12,9 @@ import SwiftUI
         store.settings.enabled = false
         store.settings.appExplorer = AppExplorerSettings()
         for group in [ExplorerReservedGroup.actions, .chromeTabs, .recentApps, .mediaControls] {
-            let host = NSHostingView(rootView: BuiltInHUDDefaultEditor(store: store, group: group)
+            let host = NSHostingView(rootView: BuiltInHUDDefaultEditor(store: store, group: group,
+                chromeTabsProvider: { (1...8).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0,
+                    title: "Preview tab \($0)", url: "https://example.test/preview/\($0)") } })
                 .padding(24).frame(width: 720, height: 620).background(Color(nsColor: .windowBackgroundColor)))
             let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
                 styleMask: [.titled], backing: .buffered, defer: false)
@@ -30,6 +32,8 @@ import SwiftUI
         }
         let controller = AppExplorerController(defaults: defaults)
         controller.contextIsValid = { true }
+        ChromeTabRecency.shared.record(ChromeRecentTab(windowIndex: 1, tabIndex: 3,
+            title: "Fixture tab 3", url: "https://example.test/3"))
         controller.chromeTabsProvider = { (1...20).map { ChromeRecentTab(windowIndex: 1, tabIndex: $0, title: "Fixture tab \($0)", url: "https://example.test/\($0)") } }
         var configuration = AppExplorerSettings()
         let layer = configuration.assignBuiltIn(.chromeTabs, at: .right)!
@@ -43,6 +47,10 @@ import SwiftUI
         precondition(controller.displayedLayerID == layer)
         precondition(controller.displayedEntries.count == 8)
         precondition(controller.displayedEntries.first?.chromeTab?.tabIndex == 1)
+        precondition(controller.displayedEntries.first?.direction == .left)
+        precondition(controller.displayedEntries.first?.isActiveApp == true)
+        precondition(controller.displayedEntries.dropFirst().first?.chromeTab?.tabIndex == 3)
+        precondition(controller.displayedEntries.dropFirst().first?.direction == .topLeft)
         precondition(controller.displayedEntries.last?.chromeTab?.tabIndex == 8)
         controller.changeWindowPage(1)
         precondition(controller.displayedEntries.first?.chromeTab?.tabIndex == 9)

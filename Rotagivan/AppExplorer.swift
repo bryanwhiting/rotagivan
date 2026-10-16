@@ -2739,6 +2739,14 @@ struct AppExplorerView: View {
             Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if entry.isGroup {
             Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.chromeTab != nil {
+            // The site's favicon identifies a tab; a small Chrome badge keeps it distinct from a bookmark.
+            WebsiteFavicon(url: entry.url, size: 42, fallback: entry.icon)
+                .overlay(alignment: .bottomTrailing) {
+                    if let icon = entry.icon {
+                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 18, height: 18).offset(x: 5, y: 5)
+                    }
+                }
         } else if entry.isWebURL {
             WebsiteFavicon(url: entry.url, size: 42, symbolName: entry.webIconSymbol)
         } else {

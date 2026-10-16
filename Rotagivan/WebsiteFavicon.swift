@@ -167,6 +167,8 @@ struct WebsiteFavicon: View {
     let url: URL?
     let size: CGFloat
     var symbolName: String? = nil
+    // Shown instead of the globe while loading or when the site has no favicon.
+    var fallback: NSImage? = nil
     var service: FaviconService = .shared
     @State private var icon: NSImage?
 
@@ -180,6 +182,8 @@ struct WebsiteFavicon: View {
                 Image(systemName: symbolName).resizable().scaledToFit().foregroundStyle(.teal)
             } else if let icon {
                 Image(nsImage: icon).resizable().renderingMode(.original).scaledToFit()
+            } else if let fallback {
+                Image(nsImage: fallback).resizable().scaledToFit()
             } else {
                 Image(systemName: "globe").resizable().scaledToFit().foregroundStyle(.teal)
             }

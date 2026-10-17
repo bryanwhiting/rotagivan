@@ -262,6 +262,8 @@ struct AppExplorerSettingsView: View {
     @State var pendingGroupPath: [ExplorerSlot]?
     @State var showingWorkspaceOptions = false
     @State var restoringDefaultWindow = false
+    @State private var pendingConversion: HUDLayerBuiltIn?
+    @State private var confirmingConversion = false
     let defaultTaps: (() -> AnyView)?
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
@@ -1896,6 +1898,16 @@ extension AppExplorerSettingsView {
                     .help("Where this HUD sits around Main HUD for two-finger navigation. Choosing an occupied spot swaps the two HUDs.")
                     .accessibilityIdentifier("hud-inspector-position")
                 }
+                inspectorField("Type") {
+                    RotaSelect("Type", selection: Binding(get: { layer.builtIn }, set: { kind in
+                        if kind != nil && !layer.favorites.isEmpty { pendingConversion = kind; confirmingConversion = true }
+                        else { convertSelectedLayer(to: kind) }
+                    }), options: [RotaOption("Custom HUD", value: HUDLayerBuiltIn?.none, systemImage: "square.3.layers.3d")] +
+                        HUDLayerBuiltIn.allCases.map { RotaOption($0.title, value: Optional($0), systemImage: $0.symbol, section: "Built-in") },
+                        showsTitle: false, fill: true)
+                    .help("Turn this HUD into a built-in HUD. Its position, name and hotkeys are kept.")
+                    .accessibilityIdentifier("hud-inspector-type")
+                }
             } else if let group = settings.favorite(at: groupPath), let direction = groupPath.last {
                 let path = groupPath
                 inspectorField("Name") {
@@ -1968,6 +1980,24 @@ extension AppExplorerSettingsView {
             }
         }
         .padding(14)
+        .confirmationDialog("Replace this HUD's tiles?", isPresented: $confirmingConversion, presenting: pendingConversion) { kind in
+            Button("Erase tiles and use \(kind.title)", role: .destructive) { convertSelectedLayer(to: kind) }
+            Button("Cancel", role: .cancel) { pendingConversion = nil }
+        } message: { kind in
+            let count = selectedHoldLayer?.favorites.count ?? 0
+            Text("Converting to \(kind.title) permanently erases the \(count) tile\(count == 1 ? "" : "s") in this HUD. Its position, name and hotkeys are kept.")
+        }
+    }
+
+    private func convertSelectedLayer(to kind: HUDLayerBuiltIn?) {
+        pendingConversion = nil
+        guard let id = selectedLayerID else { return }
+        var next = baseSettings
+        guard next.convertLayer(id, to: kind) else {
+            groupError = "This HUD couldn't be converted. Your existing tiles have been kept."; return
+        }
+        previewEditing = nil
+        saveBase(next)
     }
 
     private func builtInDescription(_ builtIn: HUDLayerBuiltIn) -> String {

@@ -1224,6 +1224,37 @@ struct AppExplorerSettings: Codable, Equatable {
         return layer.id
     }
 
+    /// Turns an existing HUD into a built-in (or back into a custom HUD) in place,
+    /// keeping its position, name and hotkeys. Converting to a built-in replaces its tiles.
+    @discardableResult mutating func convertLayer(_ id: UUID, to builtIn: HUDLayerBuiltIn?) -> Bool {
+        guard var layers = holdLayers, let index = layers.firstIndex(where: { $0.id == id }) else { return false }
+        var layer = layers[index]
+        guard layer.builtIn != builtIn else { return true }
+        let defaultNames = Set(HUDLayerBuiltIn.allCases.map(\.title) + [ExplorerHoldLayer.empty().name])
+        if let builtIn {
+            if defaultNames.contains(layer.name) { layer.name = builtIn.title }
+            layer.builtIn = builtIn
+            layer.favorites = []
+            layer.slotCount = 8
+            if let group = ExplorerReservedGroup(rawValue: builtIn.rawValue), group != .windowManager {
+                let layout = defaultLayout(for: group)
+                layer.slotCount = layout.slotCount
+                if group.hasEditableDefaults { layer.favorites = layout.favorites }
+                if group == .mediaControls { layer.builtIn = nil }
+            }
+        } else {
+            layer.favorites = layer.editableFavorites
+            layer.builtIn = nil
+        }
+        layer.windowTilesConfigured = true
+        layers[index] = layer
+        var next = self
+        next.holdLayers = layers
+        guard next.hasValidFavorites else { return false }
+        self = next
+        return true
+    }
+
     /// The same fixed map drives the live HUD, keyboard navigation and settings preview.
     /// Imported layers beyond the eight map slots remain saved and shortcut-accessible.
     func hudMap(in bundleID: String? = nil, includingUnavailable: Bool = false) -> [HUDMapNode] {

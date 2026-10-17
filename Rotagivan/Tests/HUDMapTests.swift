@@ -86,6 +86,17 @@ import Foundation
         precondition(emptyMap.hudMap().count == 9 && emptyMap.hasValidFavorites)
         let emptyRoundTrip = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(emptyMap))
         precondition(emptyRoundTrip == emptyMap, "Blank HUDs and positions survive saving")
+        var converting = AppExplorerSettings()
+        let customID = converting.assignEmptyHUD(at: .top)!
+        let customIndex = converting.holdLayers!.firstIndex { $0.id == customID }!
+        converting.holdLayers![customIndex].favorites = [AppExplorerFavorite(direction: .up, name: "Mail", url: "https://mail.google.com/")]
+        let customPosition = converting.resolvedHUDPositions[customID]
+        precondition(converting.convertLayer(customID, to: .chromeTabs))
+        let converted = converting.holdLayers!.first { $0.id == customID }!
+        precondition(converted.builtIn == .chromeTabs && converted.favorites.isEmpty &&
+            converting.resolvedHUDPositions[customID] == customPosition,
+            "Converting a HUD to a built-in replaces its tiles but keeps its place")
+        precondition(converting.convertLayer(customID, to: nil) && converting.holdLayers!.first { $0.id == customID }!.builtIn == nil)
         for (kind, position) in zip(HUDLayerBuiltIn.allCases, HUDLayerPosition.legacyOrder) {
             let id = builtIns.assignBuiltIn(kind, at: position)!
             // Placed media becomes an ordinary editable copy rather than a built-in.

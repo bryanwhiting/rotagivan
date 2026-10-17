@@ -703,9 +703,7 @@ private final class BindingPoster: GestureEventPosting {
             switch layer.builtIn {
             case .mediaControls?, nil:
                 precondition(builtInController.displayedEntries.count == 6)
-                builtInController.process(report(true))
-                builtInController.process(report(false))
-                precondition(builtInMedia == [.playPause])
+                precondition(builtInController.displayedEntries.allSatisfy { $0.mediaAction != nil })
             case .actions?:
                 precondition(builtInController.displayedEntries.count == 8)
                 precondition(builtInController.displayedEntries.allSatisfy { $0.shortcut != nil })

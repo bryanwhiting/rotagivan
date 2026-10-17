@@ -174,6 +174,11 @@ enum ChromeLocalHistory {
         }
     }
 
+    /// The most recently focused tab URL that starts with `prefix`, if any.
+    func mostRecentURL(withPrefix prefix: String) -> String? {
+        visits.filter { $0.key.hasPrefix(prefix) }.max { $0.value < $1.value }?.key
+    }
+
     func record(_ tab: ChromeRecentTab) {
         let id = key(tab)
         guard visits[id] != clock else { return }
@@ -205,8 +210,9 @@ enum ChromeLocalHistory {
     var defaultBrowserBundleID: (URL) -> String? = {
         NSWorkspace.shared.urlForApplication(toOpen: $0).flatMap { Bundle(url: $0)?.bundleIdentifier }
     }
-    var openChrome: (URL, @escaping @MainActor (Int?) -> Void) -> Void = { url, completion in
-        ChromeBookmarkTabs.shared.open(url, completion: completion)
+    // The second argument is the most recently visited open tab on the bookmark's site.
+    var openChrome: (URL, String, @escaping @MainActor (Int?) -> Void) -> Void = { url, recentURL, completion in
+        ChromeBookmarkTabs.shared.open(url, recentURL: recentURL, completion: completion)
     }
     var openTargeted: (URL, URL, @escaping @MainActor (Error?) -> Void) -> Void = { url, application, completion in
         NSWorkspace.shared.open([url], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { running, error in
@@ -240,7 +246,8 @@ enum ChromeLocalHistory {
         guard AppExplorerFavorite.webURL(url.absoluteString) != nil else { return }
         if targetBrowserBundleID == "com.google.Chrome" ||
             (targetBrowserBundleID == nil && defaultBrowserBundleID(url) == "com.google.Chrome") {
-            openChrome(url) { [weak self] code in
+            let recentURL = ChromeTabRecency.shared.mostRecentURL(withPrefix: ChromeBookmarkTabs.sitePrefix(url.absoluteString)) ?? ""
+            openChrome(url, recentURL) { [weak self] code in
                 guard let code else { return }
                 self?.onFailure("Could not focus the Chrome bookmark tab. Allow Rotagivan to control Google Chrome in System Settings → Privacy & Security → Automation, then retry. Error code: \(code).")
             }
@@ -278,10 +285,10 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
 
     init(run: @escaping Runner = ChromeBookmarkTabs.execute) { self.run = run }
 
-    func open(_ url: URL, completion: @escaping @MainActor (Int?) -> Void) {
+    func open(_ url: URL, recentURL: String = "", completion: @escaping @MainActor (Int?) -> Void) {
         queue.async { [self] in
             let key = url.absoluteString
-            let result = run(Self.script(url: key, preferredTab: lastTabs[key] ?? ""))
+            let result = run(Self.script(url: key, preferredTab: lastTabs[key] ?? "", recentURL: recentURL))
             if let tab = result.tabID, result.error == nil {
                 if lastTabs.count >= 1_000 && lastTabs[key] == nil { lastTabs.removeAll(keepingCapacity: true) }
                 lastTabs[key] = tab
@@ -401,7 +408,16 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
             .replacingOccurrences(of: "\n", with: "\\n") + "\""
     }
 
-    static func script(url: String, preferredTab: String) -> String {
+    /// A bookmark covers every tab under its origin and path, so a Gmail bookmark
+    /// for https://mail.google.com/ reuses https://mail.google.com/mail/u/0/#inbox.
+    static func sitePrefix(_ url: String) -> String {
+        guard var parts = URLComponents(string: url), parts.host?.isEmpty == false else { return url }
+        parts.query = nil; parts.fragment = nil
+        if parts.path.isEmpty { parts.path = "/" }
+        return parts.url?.absoluteString ?? url
+    }
+
+    static func script(url: String, preferredTab: String, recentURL: String = "") -> String {
         // Chrome adds '/' to bare origins. Keep query and fragment intact.
         var parts = URLComponents(string: url)
         if parts?.path.isEmpty == true { parts?.path = "/" }
@@ -410,24 +426,27 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
         set requestedURL to \(literal(url))
         set normalizedURL to \(literal(normalizedURL))
         set preferredID to \(literal(preferredTab))
+        set recentURL to \(literal(recentURL))
+        set sitePrefix to \(literal(sitePrefix(url)))
         with timeout of 15 seconds
             tell application "Google Chrome"
-                -- First recover our last selection, then any existing exact match.
-                repeat with passNumber from 1 to 2
+                -- Our last selection, any exact match, the most recent tab on the site,
+                -- then any tab on the site. Only when none is open does a new tab appear.
+                repeat with passNumber from 1 to 4
                     repeat with w in windows
                         if mode of w is "normal" then
                             set tabNumber to 0
                             repeat with t in tabs of w
                                 set tabNumber to tabNumber + 1
-                                if URL of t is requestedURL or URL of t is normalizedURL then
-                                    if passNumber is 2 or (id of t as text) is preferredID then
-                                        set selectedID to id of t as text
-                                        set active tab index of w to tabNumber
-                                        set minimized of w to false
-                                        set index of w to 1
-                                        activate
-                                        return selectedID
-                                    end if
+                                set tabURL to URL of t as text
+                                set exactMatch to (tabURL is requestedURL or tabURL is normalizedURL)
+                                if (passNumber is 1 and exactMatch and (id of t as text) is preferredID) or (passNumber is 2 and exactMatch) or (passNumber is 3 and recentURL is not "" and tabURL is recentURL) or (passNumber is 4 and tabURL starts with sitePrefix) then
+                                    set selectedID to id of t as text
+                                    set active tab index of w to tabNumber
+                                    set minimized of w to false
+                                    set index of w to 1
+                                    activate
+                                    return selectedID
                                 end if
                             end repeat
                         end if

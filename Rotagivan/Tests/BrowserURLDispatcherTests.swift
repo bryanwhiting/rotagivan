@@ -44,18 +44,18 @@ import SQLite3
         precondition(failures.count == 4, "Invalid URL schemes are never dispatched")
 
         var chromeOpens = 0
-        dispatcher.openChrome = { _, completion in chromeOpens += 1; completion(nil) }
+        dispatcher.openChrome = { _, _, completion in chromeOpens += 1; completion(nil) }
         dispatcher.open(url, targetBrowserBundleID: "com.google.Chrome")
         dispatcher.defaultBrowserBundleID = { _ in "com.google.Chrome" }
         dispatcher.open(url, targetBrowserBundleID: nil)
         precondition(chromeOpens == 2 && defaults.count == 1, "Explicit and default Chrome use tab reuse")
-        dispatcher.openChrome = { _, completion in completion(-1743) }
+        dispatcher.openChrome = { _, _, completion in completion(-1743) }
         dispatcher.open(url, targetBrowserBundleID: "com.google.Chrome")
         precondition(failures.count == 5 && defaults.count == 1, "Automation denial must not open duplicates")
 
         let tabs = ChromeBookmarkTabs(run: { source in
             precondition(source.contains("mode of w is \"normal\""))
-            precondition(source.contains("if URL of t is requestedURL"))
+            precondition(source.contains("set exactMatch to (tabURL is requestedURL"))
             if source.contains("set preferredID to \"fixture-tab\"") { return ("fixture-tab", nil) }
             precondition(source.contains("set preferredID to \"\""))
             return ("fixture-tab", nil)
@@ -70,6 +70,11 @@ import SQLite3
         precondition(ChromeBookmarkTabs.script(url: "https://example.com?account=one#section", preferredTab: "")
             .contains("set normalizedURL to \"https://example.com/?account=one#section\""),
             "Bare origins must match Chrome's slash normalization without dropping query or fragment")
+        precondition(ChromeBookmarkTabs.sitePrefix("https://mail.google.com") == "https://mail.google.com/")
+        precondition(ChromeBookmarkTabs.sitePrefix("https://mail.google.com/mail/u/1/?tab=rm#inbox") == "https://mail.google.com/mail/u/1/",
+            "Bookmarks reuse any open tab under their origin and path")
+        precondition(ChromeBookmarkTabs.script(url: "https://mail.google.com/", preferredTab: "", recentURL: "https://mail.google.com/mail/u/0/#inbox")
+            .contains("set recentURL to \"https://mail.google.com/mail/u/0/#inbox\""))
         var compileError: NSDictionary?
         let script = NSAppleScript(source: ChromeBookmarkTabs.script(url: url.absoluteString, preferredTab: ""))!
         precondition(script.compileAndReturnError(&compileError), "Chrome script must compile: \(String(describing: compileError))")

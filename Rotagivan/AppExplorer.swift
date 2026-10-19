@@ -2708,7 +2708,7 @@ struct AppExplorerView: View {
                 let count = model.groupSlotCounts.indices.contains(level) ? model.groupSlotCounts[level] : 8
                 ForEach(ExplorerSlot.slots(count), id: \.self) { sector in
                     ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6, halfAngle: 180 / Double(count) - 2)
-                        .fill(direction == sector ? (model.theme.isFloating ? Color(red: 1, green: 0.77, blue: 0.40) : accent).opacity(0.95 - Double(level) * 0.1) : accent.opacity(model.theme.isFloating ? 0.3 : 0.12))
+                        .fill(direction == sector ? accent.opacity(0.95 - Double(level) * 0.1) : (model.theme.isFloating ? Color.white.opacity(0.14) : accent.opacity(0.12)))
                         .frame(width: 418, height: 310)
                         .accessibilityHidden(true)
                 }
@@ -2721,16 +2721,17 @@ struct AppExplorerView: View {
             Button(action: onBack) {
                 VStack(spacing: 3) {
                     Image(systemName: canActivateVoice ? "mic.fill" : (model.showingTimer ? "timer" : model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark")))
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 14, weight: model.theme.isFloating ? .regular : .medium))
                     Text(String(format: "%02d", depth + 1))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 9, weight: model.theme.isFloating ? .medium : .semibold, design: .monospaced))
+                        .opacity(model.theme.isFloating ? 0.55 : 1)
                 }
-                .foregroundStyle(model.theme.isFloating ? Color(red: 1, green: 0.83, blue: 0.54) : accent)
+                .foregroundStyle(model.theme.isFloating ? Color.white.opacity(0.9) : accent)
                 .frame(width: 54, height: 54)
                 .background(Circle().fill(model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.88 : 1)))
-                .overlay(Circle().strokeBorder(model.theme.isFloating ? Color(red: 1, green: 0.78, blue: 0.43) : accent.opacity(0.45),
-                    lineWidth: model.theme.isFloating ? 1.5 : 1))
-                .shadow(color: model.theme.isFloating ? Color.orange.opacity(0.28) : .clear, radius: 4)
+                .overlay(Circle().strokeBorder(model.theme.isFloating ? Color.white.opacity(0.18) : accent.opacity(0.45),
+                    lineWidth: model.theme.isFloating ? 0.5 : 1))
+                .shadow(color: model.theme.isFloating ? accent.opacity(0.28) : .clear, radius: 4)
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -2759,20 +2760,20 @@ struct AppExplorerView: View {
                     available: available, opaque: opaqueChrome)
                 if model.theme.isFloating {
                     Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
-                        .stroke(accent.opacity(selected ? 1 : available ? 0.5 : 0.15), style: StrokeStyle(lineWidth: selected ? 2 : 0.75, lineCap: .round))
+                        .stroke(selected ? accent : Color.white.opacity(available ? 0.22 : 0.08), style: StrokeStyle(lineWidth: selected ? 1.5 : 0.5, lineCap: .round))
                         .frame(width: 294, height: 294)
                         .rotationEffect(.degrees(direction.angle - 180 / Double(model.slotCount) + 4))
                         .position(center)
                         .allowsHitTesting(false)
                 }
                 if entry?.isActiveApp == true {
-                    shape.stroke(Color.orange, lineWidth: 2)
+                    shape.stroke(Color.orange.opacity(model.theme.isFloating ? 0.85 : 1), lineWidth: model.theme.isFloating ? 1.2 : 2)
                         .allowsHitTesting(false)
                 }
                 VStack(spacing: 3) {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
-                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8 : 9, weight: model.theme.isFloating ? .semibold : .medium))
+                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8.5 : 10, weight: model.theme.isFloating ? (selected ? .semibold : .regular) : .medium))
                             .lineLimit(entry.chromeTab == nil ? (entry.shortcut == nil ? 2 : 3) : 1).multilineTextAlignment(.center)
                         if let tab = entry.chromeTab, let profile = tab.profileName {
                             Text(profile + (tab.profileIsEstimated ? "?" : ""))
@@ -2792,7 +2793,7 @@ struct AppExplorerView: View {
                     }
                 }
                 .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: entry?.chromeTab == nil ? (model.slotCount > 8 ? 40 : 50) : 56)
-                .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(0.85)) : Color.primary)
+                .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(model.theme.isFloating ? 0.92 : 0.85)) : Color.primary)
                 .shadow(color: model.theme.isFloating ? .black.opacity(0.8) : .clear, radius: 1, y: 1)
                 .position(point)
             }

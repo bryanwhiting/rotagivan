@@ -68,12 +68,13 @@ extension ExplorerTheme {
         switch self {
         case .native: return .teal
         case .starburst: return Color(red: 0.73, green: 0.65, blue: 1)
-        case .starburstAir: return Color(red: 0.25, green: 0.91, blue: 1)
+        // Air follows the Mac's own accent color, like menus and sidebars.
+        case .starburstAir: return Color.accentColor
         }
     }
     var surface: Color {
         if self == .starburst { return Color(red: 0.055, green: 0.043, blue: 0.105) }
-        if self == .starburstAir { return Color(red: 0.025, green: 0.065, blue: 0.10) }
+        if self == .starburstAir { return Color(red: 0.10, green: 0.10, blue: 0.11) }
         return Color(red: 0.025, green: 0.045, blue: 0.045)
     }
 }
@@ -124,18 +125,16 @@ struct ExplorerAirGlass: View {
     var opaque = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        let accent = ExplorerTheme.starburstAir.accent
         ZStack {
             if opaque || reduceTransparency {
                 Circle().fill(ExplorerTheme.starburstAir.surface)
             } else {
                 Circle().fill(.ultraThinMaterial)
-                Circle().fill(ExplorerTheme.starburstAir.surface.opacity(0.58))
+                Circle().fill(ExplorerTheme.starburstAir.surface.opacity(0.42))
             }
-            Circle().fill(LinearGradient(colors: [.white.opacity(0.12), .clear, accent.opacity(0.07)],
-                startPoint: .topLeading, endPoint: .bottomTrailing))
-            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.65), accent.opacity(0.36), .white.opacity(0.12)],
-                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+            Circle().fill(LinearGradient(colors: [.white.opacity(0.07), .clear],
+                startPoint: .top, endPoint: .bottom))
+            Circle().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.4), radius: 12, y: 7)
         .allowsHitTesting(false).accessibilityHidden(true)
@@ -173,17 +172,12 @@ struct ExplorerAirSectorChrome: View {
     var body: some View {
         let accent = ExplorerTheme.starburstAir.accent
         ZStack {
-            shape.fill(ExplorerTheme.starburstAir.surface.opacity(opaque ? 1 : selected ? 0.20 : 0.46))
-            shape.fill(RadialGradient(colors: [accent.opacity(selected ? 0.14 : 0.025),
-                accent.opacity(selected ? 0.60 : 0.075)], center: .center,
-                startRadius: shape.innerRadius, endRadius: shape.outerRadius + shape.tip))
-            shape.fill(LinearGradient(colors: [.white.opacity(selected ? 0.14 : 0.04), .clear],
-                startPoint: .topLeading, endPoint: .bottomTrailing))
-            shape.stroke(accent.opacity(selected ? 1 : available ? 0.63 : 0.24), lineWidth: selected ? 1.7 : 0.85)
-                .shadow(color: accent.opacity(selected ? 0.7 : 0), radius: selected ? 5 : 0)
+            shape.fill(opaque ? ExplorerTheme.starburstAir.surface : Color.white.opacity(available ? 0.045 : 0.02))
             if selected {
-                shape.stroke(.white.opacity(0.65), lineWidth: 0.55)
+                shape.fill(LinearGradient(colors: [accent.opacity(0.95), accent.opacity(0.78)], startPoint: .top, endPoint: .bottom))
             }
+            shape.stroke(selected ? accent : Color.white.opacity(available ? 0.12 : 0.06), lineWidth: selected ? 1 : 0.5)
+                .shadow(color: accent.opacity(selected ? 0.7 : 0), radius: selected ? 5 : 0)
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }

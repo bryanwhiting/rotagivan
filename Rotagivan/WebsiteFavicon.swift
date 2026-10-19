@@ -179,13 +179,13 @@ struct WebsiteFavicon: View {
     var body: some View {
         Group {
             if let symbolName {
-                Image(systemName: symbolName).resizable().scaledToFit().foregroundStyle(.teal)
+                Image(systemName: symbolName).resizable().scaledToFit().foregroundStyle(Color.accentColor)
             } else if let icon {
                 Image(nsImage: icon).resizable().renderingMode(.original).scaledToFit()
             } else if let fallback {
                 Image(nsImage: fallback).resizable().scaledToFit()
             } else {
-                Image(systemName: "globe").resizable().scaledToFit().foregroundStyle(.teal)
+                Image(systemName: "globe").resizable().scaledToFit().foregroundStyle(Color.accentColor)
             }
         }.frame(width: size, height: size).accessibilityHidden(true)
             .task(id: taskID) {

@@ -663,6 +663,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     case moveWindowPreviousDesktop, moveWindowNextDesktop
     case windowManager, mediaControls, appWindows, missionControl, previousDesktop, nextDesktop, showDesktop, lockScreen
     case maximize, toggleFullScreen, exitFullScreen, minimize, closeWindow
+    case timer
     var title: String {
         switch self {
         case .activateVoiceMode: return "Activate voice mode"
@@ -690,6 +691,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .exitFullScreen: return "Exit full screen"
         case .minimize: return "Minimize window"
         case .closeWindow: return "Close window"
+        case .timer: return "Timer"
         }
     }
     var symbol: String {
@@ -719,6 +721,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
         case .minimize: return "minus.rectangle"
         case .closeWindow: return "xmark.rectangle"
+        case .timer: return "timer"
         }
     }
     var description: String {
@@ -748,6 +751,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
         case .exitFullScreen: return "Leave full-screen mode for the focused window."
         case .minimize: return "Minimize the focused window into the Dock."
         case .closeWindow: return "Close the focused window. The app may ask about unsaved changes."
+        case .timer: return "Start a focus timer. Tap for 25 minutes or swipe for 5–60. When it ends, the screen edges glow until you dismiss it."
         }
     }
     static let appCommands: [Self] = [.syncSettings]

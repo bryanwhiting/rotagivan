@@ -297,7 +297,7 @@ final class NavigatorHIDManager: ObservableObject {
                 if explorer?.isVisible == true { explorer?.dismiss() }
                 openAppExplorer(windowManager: true)
                 if fromKeyboard { releaseKeyboardHUDOwnership() }
-            case .mediaControls:
+            case .mediaControls, .timer:
                 let wasVisible = explorer?.isVisible == true
                 if !wasVisible { openAppExplorer() }
                 (explorer as? AppExplorerController)?.showBuiltIn(command)

@@ -98,6 +98,7 @@ enum ActionPickerCatalog {
         }
         ExplorerMediaAction.allCases.forEach { add(.media($0), .media) }
         add(.command(.mediaControls), .hud)
+        add(.command(.timer), .hud)
         add(.command(.windowManager), .hud)
         add(.command(.activateVoiceMode), .hud)
         HUDNavigationAction.allCases.forEach { add(.hudNavigation($0), .hud) }

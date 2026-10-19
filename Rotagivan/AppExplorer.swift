@@ -220,7 +220,7 @@ extension AppExplorerPresenting {
         windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         windowList = []; windowPage = 0
         model.showingAppWindows = false
-        model.showingMediaControls = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
         model.showingWindowManager = false
         model.directWindowManager = false
         controlDirection = nil
@@ -235,7 +235,7 @@ extension AppExplorerPresenting {
     private var mapNavigationAvailable: Bool {
         !model.showingAppWindows &&
         (!model.showingWindowManager || mappedBuiltIn == .windowManager) &&
-        (!model.showingMediaControls || mappedBuiltIn == .mediaControls)
+        (!model.showingMediaControls || mappedBuiltIn == .mediaControls) && !model.showingTimer
     }
 
     /// Move within the fixed map without closing the panel or wrapping at its edges.
@@ -260,7 +260,7 @@ extension AppExplorerPresenting {
         windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         windowList = []; windowPage = 0
         model.showingAppWindows = false
-        model.showingMediaControls = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
         model.showingWindowManager = false
         model.directWindowManager = false
         controlDirection = nil
@@ -293,7 +293,7 @@ extension AppExplorerPresenting {
         windowOwnerPath = ownerSlot.map { ownerGroups + [$0] }
         windowList = []; windowPage = 0
         model.showingAppWindows = false
-        model.showingMediaControls = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
         model.showingWindowManager = true
         model.directWindowManager = ownerSlot == nil
         controlDirection = ownerSlot
@@ -309,6 +309,13 @@ extension AppExplorerPresenting {
         switch command {
         case .mediaControls:
             model.showingMediaControls = true
+            model.showingTimer = false
+            model.showingAppWindows = false
+            controlDirection = nil
+            refreshGroup()
+        case .timer:
+            model.showingTimer = true
+            model.showingMediaControls = false
             model.showingAppWindows = false
             controlDirection = nil
             refreshGroup()
@@ -329,7 +336,7 @@ extension AppExplorerPresenting {
         windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         windowList = []; windowPage = 0; model.showingAppWindows = false
         baseGroupPath = []
-        model.showingMediaControls = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
         model.showingWindowManager = windowManager
         model.directWindowManager = windowManager
         model.message = nil
@@ -435,7 +442,7 @@ extension AppExplorerPresenting {
 
     private var layerScopePath: [ExplorerSlot] {
         if model.showingWindowManager { return windowOwnerPath ?? [] }
-        if model.showingMediaControls,
+        if model.showingControlHUD,
            let controlDirection { return groupPath + [controlDirection] }
         return groupPath
     }
@@ -479,7 +486,7 @@ extension AppExplorerPresenting {
         }
         let dispatch = fromKeyboard ? (onKeyboardBindingAction ?? onBindingAction) : onBindingAction
         if action.kind == .hudLayer ||
-           (action.kind == .command && action.command == .mediaControls) {
+           (action.kind == .command && (action.command == .mediaControls || action.command == .timer)) {
             dispatch?(action)
             return
         }
@@ -550,7 +557,7 @@ extension AppExplorerPresenting {
 
     @discardableResult private func processLauncherKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, !model.showingWindowManager, !model.showingAppWindows,
-              !model.showingMediaControls else { return false }
+              !model.showingControlHUD else { return false }
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
         guard modifiers.isEmpty else { return false }
         let searching = !model.launcherQuery.isEmpty || model.realtimeSession != nil
@@ -694,7 +701,7 @@ extension AppExplorerPresenting {
         if previous != heldKeys.activeID || previousSettings != heldKeys.resolved(configuration()) {
             if previous == nil { baseGroupPath = groupPath }
             if heldKeys.activeID == nil { groupPath = baseGroupPath }
-            else if heldKeys.activeScope?.isEmpty == true && !model.showingWindowManager && !model.showingMediaControls { groupPath = [] }
+            else if heldKeys.activeScope?.isEmpty == true && !model.showingWindowManager && !model.showingControlHUD { groupPath = [] }
             model.message = nil
             refreshGroup() // Drain any in-progress swipe before changing its targets.
         }
@@ -778,7 +785,7 @@ extension AppExplorerPresenting {
         model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
         model.groupDirections = groupPath
         model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
-        if model.showingAppWindows || model.showingMediaControls || (model.showingWindowManager && !model.directWindowManager),
+        if model.showingAppWindows || model.showingControlHUD || (model.showingWindowManager && !model.directWindowManager),
            let controlDirection {
             model.groupDirections.append(controlDirection)
             model.groupSlotCounts.append(settings.count(at: groupPath))
@@ -792,7 +799,7 @@ extension AppExplorerPresenting {
             : settings.favorite(at: groupPath)?.isRecentAppsAndTabsGroup == true || mappedBuiltIn == .recentAppsAndTabs)
         model.page = 0; model.pageCount = 1
         model.showingRecents = model.mode == .recent || recentGroup
-        model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingMediaControls && layer == nil
+        model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingControlHUD && layer == nil
         model.slotCount = settings.count(at: groupPath)
         if model.showingChromeTabs {
             model.canEdit = false
@@ -833,6 +840,16 @@ extension AppExplorerPresenting {
                     name: window.title + (window.minimized ? " (minimized)" : ""), icon: nil, url: nil, windowIndex: windowPage * 16 + offset)
             }
             model.message = windowList.isEmpty ? "No accessible windows. Enable Accessibility and make sure the app is running." : nil
+            return
+        }
+        if model.showingTimer {
+            model.slotCount = 8
+            model.groupNames.append("Timer")
+            model.entries = FocusTimerPreset.swipes.map { preset in
+                var entry = ExplorerEntry(direction: ExplorerSlot(preset.direction), bundleID: nil, name: preset.title, icon: nil, url: nil)
+                entry.timerMinutes = preset.minutes
+                return entry
+            }
             return
         }
         if model.showingMediaControls {
@@ -1473,6 +1490,18 @@ extension AppExplorerPresenting {
             model.showingAppWindows = true
             refreshGroup(); return
         }
+        if let minutes = entry?.timerMinutes {
+            RotaActionUsage.record(.command(.timer))
+            FocusTimer.shared.start(minutes: minutes)
+            dismiss()
+            return
+        }
+        if entry?.command == .timer {
+            controlDirection = direction
+            model.showingTimer = true
+            refreshGroup()
+            return
+        }
         if let command = entry?.command, AppExplorerAction.appCommands.contains(command) {
             performBoundAction(.command(command), fromKeyboard: fromKeyboard)
             return
@@ -1550,7 +1579,7 @@ extension AppExplorerPresenting {
                   layer.isAvailable(in: sourceBundleID) else { refreshGroup(); return }
             heldKeys.selectRootLayer(id, settings: configuration())
             groupPath = []; baseGroupPath = []
-            model.showingMediaControls = false; model.showingWindowManager = false; model.showingAppWindows = false
+            model.showingMediaControls = false; model.showingTimer = false; model.showingWindowManager = false; model.showingAppWindows = false
             refreshGroup()
             return
         }
@@ -1660,8 +1689,14 @@ extension AppExplorerPresenting {
             }
             return
         }
-        if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingMediaControls {
+        if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingControlHUD {
             beginVoiceMode(); return
+        }
+        if model.showingTimer {
+            RotaActionUsage.record(.command(.timer))
+            FocusTimer.shared.start(minutes: FocusTimerPreset.centerMinutes)
+            dismiss()
+            return
         }
         guard model.showingMediaControls || mappedBuiltIn == .mediaControls else { goBack(); return }
         RotaActionUsage.record(.media(.playPause))
@@ -1801,9 +1836,17 @@ extension AppExplorerPresenting {
             model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
             model.message = nil; refreshGroup(); return
         }
+        if model.showingTimer {
+            model.showingTimer = false
+            guard controlDirection != nil, contextIsValid?() != false else { dismiss(); return }
+            controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
+            heldKeys.leave(to: groupPath)
+            refreshGroup()
+            return
+        }
         if model.showingMediaControls {
             guard contextIsValid?() != false else { dismiss(); return }
-            model.showingMediaControls = false
+            model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
             controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
             heldKeys.leave(to: groupPath)
             refreshGroup()
@@ -1851,7 +1894,7 @@ extension AppExplorerPresenting {
 
     func beginEditing() {
         if model.voiceSession != nil { endVoiceMode() }
-        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingMediaControls, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingControlHUD, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
               contextIsValid?() != false else { return }
         selectionGeneration &+= 1
         model.isEditing = true
@@ -1965,7 +2008,7 @@ extension AppExplorerPresenting {
         windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
         model.showingWindowManager = false
         model.directWindowManager = false
-        model.showingMediaControls = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
         heldKeys = ExplorerScopedHeldKeys()
         baseGroupPath = []
         model.message = nil
@@ -2029,6 +2072,7 @@ struct ExplorerEntry: Equatable {
     var activationShortcut: RecordedShortcut?
     var isMediaControls: Bool
     var mediaAction: ExplorerMediaAction?
+    var timerMinutes: Int? = nil
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
@@ -2200,6 +2244,9 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var directWindowManager = false
     @Published var message: String?
     @Published var showingMediaControls = false
+    /// The timer picker: tap for 25 minutes, swipe for 5–60.
+    @Published var showingTimer = false
+    var showingControlHUD: Bool { showingMediaControls || showingTimer }
     @Published var layerName: String?
     @Published var previousLayerName: String?
     @Published var nextLayerName: String?
@@ -2260,7 +2307,7 @@ struct AppExplorerView: View {
     private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
     private var canActivateVoice: Bool {
         !isPreview && !model.isEditing && model.layerName == nil && model.groupNames.isEmpty &&
-            !model.showingWindowManager && !model.showingMediaControls && !model.showingAppWindows && !model.showingRecents
+            !model.showingWindowManager && !model.showingControlHUD && !model.showingAppWindows && !model.showingRecents
     }
     private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
     private var animates: Bool {
@@ -2276,6 +2323,12 @@ struct AppExplorerView: View {
         if let slot = model.selected, model.slotCount > 8,
            let entry = model.entries.first(where: { $0.direction == slot }) { return "\(entry.name) · lift to choose" }
         if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
+        if model.showingTimer {
+            if let left = FocusTimer.shared.remaining {
+                return "\(Int((left / 60).rounded(.up))) min left on your timer · pick a time to restart it · Esc to close"
+            }
+            return "Tap for 25 minutes · swipe for another length · Esc to close"
+        }
         if model.showingMediaControls { return "Tap to play / pause · swipe to control · Esc to close" }
         if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
         if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
@@ -2395,15 +2448,15 @@ struct AppExplorerView: View {
                                                         .frame(width: 57, height: 57)
                                                         .rotationEffect(.degrees(reticleRotation))
                                                 }
-                                                Image(systemName: canActivateVoice ? "mic.fill" : (model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))))
+                                                Image(systemName: canActivateVoice ? "mic.fill" : (model.showingTimer ? "timer" : model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))))
                                                     .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
                                             }.frame(height: model.theme.isHUD ? 57 : 30)
                                         }
-                                        Text(canActivateVoice ? "Tap for voice" : (model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close")))
+                                        Text(canActivateVoice ? "Tap for voice" : (model.showingTimer ? "Tap for 25 min" : model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close")))
                                             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                                     }.frame(width: 130, height: 98).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(canActivateVoice ? "Start voice mode" : (model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")))
+                                    .accessibilityLabel(canActivateVoice ? "Start voice mode" : (model.showingTimer ? "Start a 25 minute timer" : model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")))
                             }
                         }
                     }
@@ -2667,7 +2720,7 @@ struct AppExplorerView: View {
             if let fan = model.deepFan { deepFan(fan) }
             Button(action: onBack) {
                 VStack(spacing: 3) {
-                    Image(systemName: canActivateVoice ? "mic.fill" : (model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark")))
+                    Image(systemName: canActivateVoice ? "mic.fill" : (model.showingTimer ? "timer" : model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark")))
                         .font(.system(size: 13, weight: .medium))
                     Text(String(format: "%02d", depth + 1))
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -2682,8 +2735,8 @@ struct AppExplorerView: View {
             }
             .buttonStyle(.plain)
             .position(center)
-            .help(canActivateVoice ? "Tap for voice mode" : (model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")))
-            .accessibilityLabel(canActivateVoice ? "Start voice mode" : "\(model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+            .help(canActivateVoice ? "Tap for voice mode" : (model.showingTimer ? "Tap for 25 minutes" : model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")))
+            .accessibilityLabel(canActivateVoice ? "Start voice mode" : "\(model.showingTimer ? "Start a 25 minute timer" : model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
         }
         .frame(width: 418, height: 310)
         .animation(feedback, value: names)
@@ -2808,11 +2861,14 @@ struct AppExplorerView: View {
         if isPreview { return true }
         guard let entry else { return false }
         return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
-            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.command != nil || entry.windowIndex != nil
+            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.timerMinutes != nil || entry.command != nil || entry.windowIndex != nil
     }
 
     @ViewBuilder private func entrySymbol(_ entry: ExplorerEntry) -> some View {
-        if let command = entry.command {
+        if let minutes = entry.timerMinutes {
+            Text("\(minutes)").font(.system(size: 28, weight: .light, design: .rounded)).monospacedDigit()
+                .foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if let command = entry.command {
             Image(systemName: command.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
         } else if entry.windowIndex != nil {
             Image(systemName: "macwindow").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)

@@ -77,6 +77,7 @@ sources=(
   "$script_dir/LocalUsageTracker.swift"
   "$script_dir/LocalUsageView.swift"
   "$script_dir/AppExplorer.swift"
+  "$script_dir/FocusTimer.swift"
   "$script_dir/AppExplorerSettingsView.swift"
   "$script_dir/GestureEngine.swift"
   "$script_dir/DoubleTapSwipe.swift"

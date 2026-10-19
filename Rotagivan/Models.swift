@@ -219,7 +219,7 @@ struct CommonMacShortcut {
 /// keys are stored as scalars so references cannot recursively contain actions.
 struct BindingAction: Codable, Equatable {
     enum Kind: String, Codable, CaseIterable {
-        case keystroke, macro, hudLayer, hudNavigation, openApp, openURL, command, media, windowPlacement, tap
+        case keystroke, macro, hudLayer, hudNavigation, openApp, openURL, command, media, windowPlacement, tap, slackChannel
     }
     var kind: Kind
     var keyCode: UInt16? = nil
@@ -254,6 +254,7 @@ struct BindingAction: Codable, Equatable {
         case .media: return media?.title ?? "Media"
         case .windowPlacement: return windowPlacement?.title ?? "Place window"
         case .tap: return tap?.title ?? "Pointer action"
+        case .slackChannel: return "Slack · #" + (name ?? "channel")
         }
     }
     var description: String {
@@ -275,6 +276,7 @@ struct BindingAction: Codable, Equatable {
             case .previous: return "Return to the previous track in the current media session."
             case nil: return "Choose an audio or playback action."
             }
+        case .slackChannel: return "Open the #\(name ?? "selected") channel in Slack using its quick switcher."
         case .windowPlacement: return "Move and resize the focused window to \(windowPlacement?.title ?? "the selected layout") within its current desktop."
         case .tap:
             switch tap {
@@ -334,9 +336,15 @@ struct BindingAction: Codable, Equatable {
         case .media: return media != nil
         case .windowPlacement: return windowPlacement != nil
         case .tap: return tap.map { $0 != .none && $0 != .shortcut } ?? false
+        case .slackChannel: return name.map(Self.isValidSlackChannel) ?? false
         }
     }
     private static let bundleIDCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+    /// Typed into Slack's quick switcher, so keep it to one short plain line.
+    static func isValidSlackChannel(_ value: String) -> Bool {
+        (1...80).contains(value.count) && !value.contains(where: { $0.isNewline || $0.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } })
+    }
+    static func slackChannel(_ name: String) -> Self { Self(kind: .slackChannel, name: name) }
     static func isValidBundleID(_ value: String) -> Bool {
         !value.isEmpty && value.count <= 255 && value != "local.rotagivan" && value.contains(".") &&
         value.unicodeScalars.allSatisfy { bundleIDCharacters.contains($0) }

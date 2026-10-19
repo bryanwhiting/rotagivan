@@ -86,6 +86,7 @@ sources=(
   "$script_dir/GestureCalibration.swift"
   "$script_dir/GestureCalibrationView.swift"
   "$script_dir/HIDManager.swift"
+  "$script_dir/SlackChannels.swift"
   "$script_dir/HotKeyManager.swift"
   "$script_dir/CalibrationSettingsView.swift"
   "$script_dir/AccessibilitySetup.swift"

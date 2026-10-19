@@ -312,6 +312,8 @@ final class NavigatorHIDManager: ObservableObject {
             }
         case .media:
             if let media = action.media { ExplorerMediaAction.perform(media) }
+        case .slackChannel:
+            if let name = action.name { SlackChannelOpener.open(name) }
         case .windowPlacement:
             guard let placement = action.windowPlacement,
                   let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,

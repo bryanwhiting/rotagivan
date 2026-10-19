@@ -151,7 +151,7 @@ ui_sources=("${common[@]}" Rotagivan/UIComponents.swift Rotagivan/TrackpadReport
   Rotagivan/HUDLayerHotkeyEditor.swift \
   Rotagivan/TrackpadInputRouting.swift Rotagivan/AppleTrackpadInput.swift \
   Rotagivan/ExplorerPointerLock.swift \
-  Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift -lsqlite3)
+  Rotagivan/AccessibilitySetup.swift Rotagivan/HIDManager.swift Rotagivan/SlackChannels.swift -lsqlite3)
 for test in ActionTableTests HotkeyGestureAssignmentTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
@@ -164,7 +164,7 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
   Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ApplicationCommandUISmoke"
 "$test_dir/ApplicationCommandUISmoke" "$test_dir"
-for test in ApplicationCommandTests BrowserURLDispatcherTests; do
+for test in ApplicationCommandTests BrowserURLDispatcherTests SlackChannelTests; do
   xcrun swiftc -j 4 "${ui_sources[@]}" "Rotagivan/Tests/$test.swift" \
     -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
   "$test_dir/$test"

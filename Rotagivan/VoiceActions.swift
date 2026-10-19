@@ -28,6 +28,8 @@ struct VoiceRegisteredAction: Identifiable, Equatable {
 
 /// Shared Actions-manager / voice allowlist. Remote output may select IDs only.
 enum VoiceActionRegistry {
+    /// Learned, device-local actions (recent Slack channels). Set once at launch.
+    nonisolated(unsafe) static var supplementalActions: () -> [VoiceRegisteredAction] = { [] }
     static func make(settings: StoredSettings, applications: [ExplorerApplication] = [], activeBundleID: String? = nil,
                      includeInactiveApplications: Bool = false) -> [VoiceRegisteredAction] {
         var records: [String: VoiceRegisteredAction] = [:]
@@ -65,6 +67,7 @@ enum VoiceActionRegistry {
         }
         if let data = try? JSONEncoder().encode(settings), let object = try? JSONSerialization.jsonObject(with: data) { visit(object) }
         applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name)) }
+        for record in supplementalActions() where record.action.isValid && records[record.id] == nil { records[record.id] = record }
         let builtInCommands = slackDefaults + chromeDefaults
         var scoped = builtInCommands
         for command in settings.resolvedApplicationCommands where command.isValid {

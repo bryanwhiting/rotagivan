@@ -70,6 +70,7 @@ extension BindingAction {
         case .command: return command?.symbol ?? "macwindow"
         case .media: return media?.symbol ?? "speaker.wave.2"
         case .windowPlacement: return "rectangle.split.2x2"
+        case .slackChannel: return "number"
         case .tap: return "hand.tap"
         }
     }

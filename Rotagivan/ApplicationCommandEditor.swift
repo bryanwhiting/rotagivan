@@ -166,3 +166,117 @@ struct ApplicationCommandRemovalConfirmation: View {
         }.padding(24).frame(width: 500)
     }
 }
+
+/// Adds several website bookmarks at once. Each becomes a trigger-free
+/// open-URL action under Websites that can be assigned or spoken later.
+struct WebsiteBookmarksEditor: View {
+    struct Draft: Identifiable, Equatable { let id = UUID(); var name = ""; var url = "" }
+    let existingURLs: Set<String>
+    var onSave: ([BindingAction]) -> Void
+    var onImport: () -> Void
+    var onCancel: () -> Void
+    @State private var drafts = [Draft()]
+    @State private var browser = "com.google.Chrome"
+    @FocusState private var focusedURL: UUID?
+
+    /// Accepts "gmail.com" as well as full URLs; only http(s) is kept.
+    static func normalizedURL(_ text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return AppExplorerFavorite.webURL(trimmed.contains("://") ? trimmed : "https://" + trimmed)
+    }
+    static func defaultName(_ url: URL) -> String {
+        let host = url.host ?? url.absoluteString
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    private var filled: [Draft] { drafts.filter { !$0.url.trimmingCharacters(in: .whitespaces).isEmpty } }
+    private var actions: [BindingAction] {
+        filled.compactMap { draft in
+            guard let url = Self.normalizedURL(draft.url) else { return nil }
+            var action = BindingAction.openURL(url.absoluteString)
+            let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            action.name = name.isEmpty ? Self.defaultName(url) : name
+            action.targetBrowserBundleID = browser.isEmpty ? nil : browser
+            return action.isValid ? action : nil
+        }
+    }
+    private var validation: String? {
+        if filled.isEmpty { return "Enter at least one website address." }
+        if let bad = filled.first(where: { Self.normalizedURL($0.url) == nil }) { return "“\(bad.url)” is not a valid http or https address." }
+        let urls = actions.compactMap(\.url)
+        if Set(urls).count != urls.count { return "The same address is listed twice." }
+        if let dup = urls.first(where: existingURLs.contains) { return "\(dup) is already a bookmark." }
+        return nil
+    }
+    private func addRow() {
+        let row = Draft(); drafts.append(row)
+        DispatchQueue.main.async { focusedURL = row.id }
+    }
+    /// One URL per line, optionally "Name, URL" or "Name | URL".
+    private func pasteList() {
+        let lines = (NSPasteboard.general.string(forType: .string) ?? "").split(whereSeparator: \.isNewline)
+        let pasted: [Draft] = lines.compactMap { line in
+            let parts = line.split(whereSeparator: { $0 == "|" || $0 == "\t" || $0 == "," }).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let url = parts.last, Self.normalizedURL(url) != nil else { return nil }
+            return Draft(name: parts.count > 1 ? parts.dropLast().joined(separator: " ") : "", url: url)
+        }
+        guard !pasted.isEmpty else { return }
+        drafts = drafts.filter { !$0.url.isEmpty || !$0.name.isEmpty } + pasted
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "bookmark.fill").font(.system(size: 26, weight: .light)).foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add bookmarks").font(.title2.weight(.semibold))
+                    Text("Websites you can open from voice, a HUD tile or a hotkey.").foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Text("Open in").font(.headline)
+                RotaSegmented("Open in", selection: $browser, options: [
+                    RotaOption("Chrome", value: "com.google.Chrome"), RotaOption("Safari", value: "com.apple.Safari"),
+                    RotaOption("Default browser", value: "")])
+                    .accessibilityIdentifier("bookmarks-browser")
+            }
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach($drafts) { $draft in
+                        HStack(spacing: 8) {
+                            WebsiteFavicon(url: Self.normalizedURL(draft.url), size: 18)
+                            TextField("Name (optional)", text: $draft.name).textFieldStyle(.roundedBorder).frame(width: 150)
+                                .accessibilityLabel("Bookmark name")
+                            TextField("gmail.com", text: $draft.url).textFieldStyle(.roundedBorder)
+                                .focused($focusedURL, equals: draft.id).onSubmit(addRow)
+                                .accessibilityLabel("Bookmark address")
+                            Button { drafts.removeAll { $0.id == draft.id }; if drafts.isEmpty { drafts = [Draft()] } } label: {
+                                Image(systemName: "minus.circle")
+                            }.buttonStyle(.rotaGhost).accessibilityLabel("Remove row")
+                        }
+                    }
+                }.padding(.vertical, 2)
+            }.frame(minHeight: 120, maxHeight: 320)
+            HStack(spacing: 10) {
+                Button { addRow() } label: { Label("Add row", systemImage: "plus") }.buttonStyle(.rotaSecondary)
+                    .accessibilityIdentifier("bookmarks-add-row")
+                Button { pasteList() } label: { Label("Paste list", systemImage: "doc.on.clipboard") }.buttonStyle(.rotaSecondary)
+                    .help("Paste one address per line, optionally as “Name, address”.")
+                Button { onImport() } label: { Label("Import from Chrome or Safari…", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.rotaLink)
+            }
+            Text(validation ?? "Press Return in an address to add another row. \(actions.count) ready to add.")
+                .font(.caption).foregroundStyle(validation == nil || filled.isEmpty ? Color.secondary : Color.orange)
+                .accessibilityIdentifier("bookmarks-validation")
+            HStack {
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Add \(actions.count) \(actions.count == 1 ? "bookmark" : "bookmarks")") {
+                    guard validation == nil else { return }; onSave(actions)
+                }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary).disabled(validation != nil)
+                    .accessibilityIdentifier("bookmarks-save")
+            }
+        }.padding(24).frame(width: 600)
+        .onAppear { focusedURL = drafts.first?.id }
+    }
+}

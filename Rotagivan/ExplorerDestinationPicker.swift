@@ -136,6 +136,7 @@ struct ExplorerBookmarkImporter: View {
     let existingURLs: Set<String>
     var onImport: ([BrowserBookmark]) -> Bool
     var onCancel: () -> Void
+    var capacityUnit = "open slot"
     var loadBookmarks: @Sendable (BrowserBookmarkSource, URL?) throws -> [BrowserBookmark] = {
         try BrowserBookmarkLoader.load($0, from: $1)
     }
@@ -163,7 +164,7 @@ struct ExplorerBookmarkImporter: View {
             HStack(alignment: .firstTextBaseline) {
                 Label("Import browser bookmarks", systemImage: "book.closed.fill").font(.title2.weight(.semibold))
                 Spacer()
-                Text("\(capacity) open \(capacity == 1 ? "slot" : "slots")")
+                Text("\(capacity) \(capacityUnit)\(capacity == 1 ? "" : "s")")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .padding(.horizontal, 9).padding(.vertical, 5)
                     .background(.quaternary, in: Capsule())

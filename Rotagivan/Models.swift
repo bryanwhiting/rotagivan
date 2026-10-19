@@ -2363,6 +2363,27 @@ struct StoredSettings: Codable {
     var actionVocabulary: [ActionVocabulary]? = nil
     var applicationCommands: [ApplicationCommand]? = nil
     var resolvedApplicationCommands: [ApplicationCommand] { applicationCommands ?? [] }
+    /// Global website bookmarks: open-URL actions that need no trigger. They
+    /// appear under Websites in Actions and voice, and can be assigned anywhere.
+    var websiteBookmarks: [BindingAction]? = nil
+    var resolvedWebsiteBookmarks: [BindingAction] { websiteBookmarks ?? [] }
+    static let maximumWebsiteBookmarks = 1_000
+    /// Adds valid, not-yet-saved bookmarks and returns how many were added.
+    @discardableResult mutating func addWebsiteBookmarks(_ bookmarks: [BindingAction]) -> Int {
+        var list = resolvedWebsiteBookmarks
+        var seen = Set(list.compactMap(\.url))
+        for bookmark in bookmarks where bookmark.kind == .openURL && bookmark.isValid && list.count < Self.maximumWebsiteBookmarks {
+            guard let url = bookmark.url, seen.insert(url).inserted else { continue }
+            list.append(bookmark)
+        }
+        let added = list.count - resolvedWebsiteBookmarks.count
+        websiteBookmarks = list.isEmpty ? nil : list
+        return added
+    }
+    mutating func removeWebsiteBookmark(identity: String) {
+        websiteBookmarks?.removeAll { $0.identity == identity }
+        if websiteBookmarks?.isEmpty == true { websiteBookmarks = nil }
+    }
     var appOverrides: [AppGestureOverride]? = nil
     var resolvedAppOverrides: [AppGestureOverride] { appOverrides ?? AppGestureOverride.defaults }
     var enabled = true

@@ -91,6 +91,8 @@ struct HotkeyOrganizerView: View {
     @State private var editing: NamedHotkey?
     @State private var deleting: NamedHotkey?
     @State private var editingBinding: ActionBinding?
+    @State private var addingBookmarks = false
+    @State private var importingBookmarks = false
     @State private var migratingNamedHotkeyID: String?
     @State private var expandedAssignment: String?
 
@@ -228,6 +230,34 @@ struct HotkeyOrganizerView: View {
                 HStack { Spacer(); Button("Done") { managingOverrides = false }.keyboardShortcut(.defaultAction).buttonStyle(.rotaPrimary) }
             }.padding(24).frame(width: 720, height: 580)
         }
+        .sheet(isPresented: $addingBookmarks) {
+            WebsiteBookmarksEditor(existingURLs: Set(store.settings.resolvedWebsiteBookmarks.compactMap(\.url)), onSave: { bookmarks in
+                var settings = store.settings
+                settings.addWebsiteBookmarks(bookmarks)
+                store.settings = settings
+                addingBookmarks = false
+            }, onImport: {
+                addingBookmarks = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { importingBookmarks = true }
+            }, onCancel: { addingBookmarks = false })
+        }
+        .sheet(isPresented: $importingBookmarks) {
+            let saved = store.settings.resolvedWebsiteBookmarks
+            ExplorerBookmarkImporter(capacity: max(0, StoredSettings.maximumWebsiteBookmarks - saved.count),
+                existingURLs: Set(saved.compactMap(\.url)), onImport: { bookmarks in
+                    var settings = store.settings
+                    let added = settings.addWebsiteBookmarks(bookmarks.map { bookmark in
+                        var action = BindingAction.openURL(bookmark.url.absoluteString)
+                        action.name = bookmark.title.isEmpty ? WebsiteBookmarksEditor.defaultName(bookmark.url) : bookmark.title
+                        action.targetBrowserBundleID = bookmark.source == .chrome ? "com.google.Chrome" : "com.apple.Safari"
+                        return action
+                    })
+                    guard added > 0 || bookmarks.isEmpty else { return false }
+                    store.settings = settings
+                    importingBookmarks = false
+                    return true
+                }, onCancel: { importingBookmarks = false }, capacityUnit: "bookmark left")
+        }
         .sheet(item: $editingBinding) { binding in
             BindingEditor(binding: binding, existing: store.settings.actionBindings ?? [], global: true,
                 reservedKeys: reservedGlobalKeys,
@@ -307,6 +337,12 @@ struct HotkeyOrganizerView: View {
                 .disabled(store.settings.resolvedApplicationCommands.count >= 500)
                 .accessibilityIdentifier("application-command-add")
             Button("Add assignment…") { assign(.hudLayer(nil)) }
+            Divider()
+            Button("Add bookmarks…") { addingBookmarks = true }
+                .disabled(store.settings.resolvedWebsiteBookmarks.count >= StoredSettings.maximumWebsiteBookmarks)
+                .accessibilityIdentifier("bookmarks-add")
+            Button("Import browser bookmarks…") { importingBookmarks = true }
+                .disabled(store.settings.resolvedWebsiteBookmarks.count >= StoredSettings.maximumWebsiteBookmarks)
         }
     }
 
@@ -429,6 +465,14 @@ struct HotkeyOrganizerView: View {
                                 Button("Remove \(binding.trigger.title)", role: .destructive) {
                                     store.settings.actionBindings?.removeAll { $0.id == binding.id }
                                 }
+                            }
+                            if store.settings.resolvedWebsiteBookmarks.contains(where: { $0.identity == row.action.identity }) {
+                                Divider()
+                                Button("Delete bookmark", role: .destructive) {
+                                    var settings = store.settings
+                                    settings.removeWebsiteBookmark(identity: row.action.identity)
+                                    store.settings = settings
+                                }.accessibilityIdentifier("bookmark-delete-\(row.id)")
                             }
                             if let macro = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == row.action.macroID }) {
                                 Divider()

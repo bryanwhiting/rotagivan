@@ -223,7 +223,7 @@ private indirect enum ConfigurationValue: Codable {
             case "": allowed = "formatVersion settings shortcuts profiles activeConfigurationID"
             case "profiles": allowed = "id name settings shortcuts"
             case "devices": allowed = "navigatorEnabled appleEnabled shareTapActions appleLayerGestures"
-            case "settings": allowed = "applicationCommands actionVocabulary actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
+            case "settings": allowed = "websiteBookmarks applicationCommands actionVocabulary actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
             case "applicationCommands": allowed = "id bundleID appName name detail action enabled"
             case "actionVocabulary": allowed = "actionID keywordSets"
             case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
@@ -235,7 +235,7 @@ private indirect enum ConfigurationValue: Codable {
             case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
             case "actionBindings": allowed = "id trigger action"
             case "trigger": allowed = "keyboard gesture"
-            case "action", "assignedAction": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath hudNavigation bundleID name url targetBrowserBundleID command media windowPlacement tap"
+            case "action", "assignedAction", "websiteBookmarks": allowed = "kind keyCode modifiers keyLabel macroID hudLayerID hudPath windowOwnerPath hudNavigation bundleID name url targetBrowserBundleID command media windowPlacement tap"
             case "keyboard": allowed = "keyCode modifiers keyLabel"
             case "windowPlacement": allowed = "direction layout"
             case "holdShortcut", "launchShortcut", "steps": allowed = "keyCode modifiers keyLabel"
@@ -276,7 +276,7 @@ private indirect enum ConfigurationValue: Codable {
                 throw ConfigurationError("Unknown setting: \(path).\(unknown)")
             }
             for (name, value) in values { try value.validate(key: name, path: path + "." + name) }
-            if key == "action" || key == "assignedAction" {
+            if key == "action" || key == "assignedAction" || key == "websiteBookmarks" {
                 let action = try JSONDecoder().decode(BindingAction.self, from: JSONEncoder().encode(self))
                 guard action.isValid else { throw ConfigurationError("Invalid action at \(path).") }
             } else if values["macroID"] != nil || values["hudLayerID"] != nil || values["assignedAction"] != nil {

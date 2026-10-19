@@ -41,15 +41,19 @@ struct SyncSettingsView: View {
                             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack {
                             if let date = sync.lastChecked ?? sync.lastSave {
-                                Text("Last checked " + date.formatted(date: .omitted, time: .shortened))
+                                Text("Last checked " + date.formatted(.dateTime.hour().minute().second()))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Download latest") { NSWorkspace.shared.open(URL(string: "https://rota.silvermine.dev/download/latest")!) }
                                 .help("Download the newest Rotagivan release from rota.silvermine.dev")
                                 .accessibilityIdentifier("sync-download-latest")
-                            Button("Sync now") { Task { await sync.save() } }
-                                .accessibilityIdentifier("sync-save").disabled(sync.busy)
+                            Button { Task { await sync.syncNowPressed() } } label: {
+                                if sync.manualSyncing {
+                                    HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing…") }
+                                } else { Text("Sync now") }
+                            }
+                            .accessibilityIdentifier("sync-save").disabled(sync.manualSyncing)
                         }
                         if let notice = sync.conflictNotice {
                             Label(notice, systemImage: "exclamationmark.triangle")

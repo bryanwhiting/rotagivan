@@ -97,6 +97,9 @@ struct SyncCredentials {
     private var observedFields: [String: Data]?
     private var observedStorageKey: String?
     private var autoRunning = false
+    /// True while the user's Sync now press is waiting or running, so the
+    /// button can show progress instead of appearing to do nothing.
+    @Published private(set) var manualSyncing = false
     private var autoObservers = Set<AnyCancellable>()
     private var consecutiveFailures = 0
     private var lastVaultRefresh: Date?
@@ -252,6 +255,27 @@ struct SyncCredentials {
         if let date { defaults.set(date, forKey: key) }
         else { defaults.removeObject(forKey: key) }
         if account?.userID == savedAccount?.userID { lastSave = date }
+    }
+
+    /// The Sync now button. A press during an automatic pass or a key
+    /// refresh used to be dropped silently; it now waits its turn (up to 30 s)
+    /// and always ends with a status the user can see.
+    func syncNowPressed() async {
+        guard !manualSyncing else { return }
+        manualSyncing = true
+        defer { manualSyncing = false }
+        syncStatus = "Syncing…"
+        for _ in 0..<600 where autoRunning || busy || vault.busy {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard !shuttingDown else { return }
+        guard credentialsReady else { syncStatus = "Unlock your saved account to resume sync."; return }
+        guard !autoRunning, !busy, !vault.busy else {
+            syncStatus = "Another sync is still running. Try again in a moment."; return
+        }
+        await save()
+        if syncStatus == "Syncing…" { syncStatus = error == nil ? "Up to date" : "Waiting to sync" }
+        lastChecked = Date()
     }
 
     /// An explicit Save captures exactly this moment. Later edits stay local

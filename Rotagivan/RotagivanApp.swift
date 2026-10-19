@@ -347,7 +347,12 @@ final class CloneDelegate: NSObject, NSApplicationDelegate {
     var beforeQuit: (() async -> Void)?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let beforeQuit else { return .terminateNow }
-        Task { await beforeQuit(); sender.reply(toApplicationShouldTerminate: true) }
+        // A stalled save or sync must never leave the app half-quit, where it
+        // also ignores every later Quit. Give cleanup a few seconds, then exit.
+        var replied = false
+        let reply = { if !replied { replied = true; sender.reply(toApplicationShouldTerminate: true) } }
+        Task { @MainActor in await beforeQuit(); reply() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { reply() }
         return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) {

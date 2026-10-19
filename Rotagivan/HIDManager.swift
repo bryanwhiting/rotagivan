@@ -134,6 +134,13 @@ final class NavigatorHIDManager: ObservableObject {
             }
             (explorer as? AppExplorerController)?.hotkeyDictionary = { [weak store] in store?.settings.resolvedHotkeyDictionary ?? [] }
             (explorer as? AppExplorerController)?.editingStore = store
+            // HUD and search bookmarks share the action path, so a Chrome
+            // bookmark reuses its last-opened tab instead of adding a new one.
+            (explorer as? AppExplorerController)?.openWebURL = { [weak self] url in
+                guard let self else { return false }
+                self.browserURLDispatcher.open(url, targetBrowserBundleID: nil)
+                return true
+            }
             (explorer as? AppExplorerController)?.onSettings = {
                 HUDSettingsNavigation.pending = true
                 NotificationCenter.default.post(name: .openHUDSettingsRequested, object: nil)

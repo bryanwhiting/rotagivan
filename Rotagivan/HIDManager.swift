@@ -181,6 +181,7 @@ final class NavigatorHIDManager: ObservableObject {
                 self.explorerSource = nil
                 self.explorerPointer.setLocked(false)
                 self.suppressUntilLift = self.contactsDown
+                self.onExplorerUsed?()
             }
             explorer.contextIsValid = { [weak self] in
                 guard let self else { return false }
@@ -232,6 +233,8 @@ final class NavigatorHIDManager: ObservableObject {
     }
 
     var onSyncSettings: (() -> Void)?
+    /// Fires when the HUD or launcher closes; sync uses it to check for another Mac's edits.
+    var onExplorerUsed: (() -> Void)?
 
     /// Shared executor for keyboard and trackpad bindings, including actions
     /// assigned inside the HUD. A single path keeps action references from

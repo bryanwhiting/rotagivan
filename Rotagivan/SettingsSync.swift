@@ -5,7 +5,7 @@ import Network
 
 /// Why a sync cycle runs. Local-change cycles skip the network entirely when
 /// no portable setting differs from the last reconciled snapshot.
-enum SyncTrigger: Sendable { case launch, localChange, poll, wake, network, manual }
+enum SyncTrigger: Sendable { case launch, localChange, poll, wake, network, manual, activity }
 private struct SyncNotModified: Error {}
 
 private final class SyncRedirectBlocker: NSObject, URLSessionTaskDelegate {
@@ -89,8 +89,14 @@ struct SyncCredentials {
     @Published private(set) var conflictNotice: String?
     @Published private(set) var lastChecked: Date?
     let automatic: Bool
-    static let pollInterval: UInt64 = 30
+    /// Idle Macs check the cloud once an hour; using the HUD checks sooner.
+    static let pollInterval: UInt64 = 3600
+    /// While a cycle keeps failing, retries start here and back off to five minutes.
+    static let retryInterval: UInt64 = 30
+    /// A HUD or launcher use checks for remote changes at most this often.
+    static let activityCheckInterval: TimeInterval = 60
     private static let vaultRefreshInterval: TimeInterval = 300
+    private var lastActivityCheck: Date?
     private var autoLoop: Task<Void, Never>?
     private var reconciler: EncryptedAutoSync?
     private var reconciliationAccount: String?
@@ -144,6 +150,7 @@ struct SyncCredentials {
         self.snapshot = snapshot ?? { AppConfiguration(store: store) }
         applyOverride = apply
         self.computerName = computerName
+        hid.onExplorerUsed = { [weak self] in self?.noteUse() }
         hid.onSyncSettings = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -166,13 +173,15 @@ struct SyncCredentials {
         guard !started, !shuttingDown else { return }; started = true
         restoreLogin()
         if automatic {
-            // Push: a quiet period after any edit. The cycle itself decides
-            // whether a portable setting actually changed before touching the network.
+            // Push: every edit uploads after a short quiet period, so the last
+            // Mac to edit wins. The cycle itself decides whether a portable
+            // setting actually changed before touching the network.
             Publishers.Merge(store.objectWillChange, ShortcutSettings.shared.objectWillChange)
                 .debounce(for: .milliseconds(750), scheduler: RunLoop.main)
                 .sink { [weak self] _ in Task { await self?.synchronizeAutomatically(trigger: .localChange) } }
                 .store(in: &autoObservers)
-            // Pull: a cheap conditional poll with bounded backoff while failing.
+            // Pull: an hourly conditional poll (plus wake, network and HUD use),
+            // retrying sooner with bounded backoff while failing.
             autoLoop = Task { [weak self] in
                 var first = true
                 while !Task.isCancelled {
@@ -185,9 +194,17 @@ struct SyncCredentials {
             observeWakeAndNetwork()
         }
     }
-    /// Seconds until the next poll: 30 s when healthy, doubling to 5 min while failing.
+    /// Seconds until the next poll: an hour when healthy; while failing, 60 s doubling to 5 min.
     var pollDelay: UInt64 {
-        consecutiveFailures == 0 ? Self.pollInterval : min(300, Self.pollInterval << UInt64(min(consecutiveFailures, 4)))
+        consecutiveFailures == 0 ? Self.pollInterval : min(300, Self.retryInterval << UInt64(min(consecutiveFailures, 4)))
+    }
+    /// The user just used the HUD or launcher: a good moment to pick up another
+    /// Mac's edits, at most once a minute. Never more than one conditional GET.
+    func noteUse() {
+        guard automatic, started, !shuttingDown,
+              lastActivityCheck.map({ Date().timeIntervalSince($0) >= Self.activityCheckInterval }) ?? true else { return }
+        lastActivityCheck = Date()
+        Task { await synchronizeAutomatically(trigger: .activity) }
     }
     private func observeWakeAndNetwork() {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
@@ -540,8 +557,9 @@ struct SyncCredentials {
                         let legacyConfig = try Self.parseLegacyCloud(yaml)
                         defaults.set(try JSONEncoder().encode(legacyConfig), forKey: "encrypted.legacyCloud." + accountID)
                         let legacyFields = try SyncConfigurationCodec.fields(legacyConfig)
+                        // A manual snapshot predates every live edit, so it carries no time.
                         for (name, value) in legacyFields.sorted(by: { $0.key < $1.key }) {
-                            try localState.journal.set(value, for: name, deviceID: "legacy")
+                            try localState.journal.set(value, for: name, deviceID: "legacy", at: Date(timeIntervalSince1970: 0))
                         }
                         // The first upgraded Mac keeps its live edits while
                         // upgrading the manual cloud snapshot to encryption.
@@ -564,7 +582,7 @@ struct SyncCredentials {
                     }, validate: { journal in _ = try SyncConfigurationCodec.configuration(journal) }, legacy: { yaml in
                         var journal = EncryptedSettingsJournal()
                         for (name, value) in try SyncConfigurationCodec.fields(SettingsSync.parseLegacyCloud(yaml)).sorted(by: { $0.key < $1.key }) {
-                            try journal.set(value, for: name, deviceID: "legacy")
+                            try journal.set(value, for: name, deviceID: "legacy", at: Date(timeIntervalSince1970: 0))
                         }
                         return journal
                     }, schedulesItself: false)

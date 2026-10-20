@@ -160,11 +160,26 @@ private final class MemoryPersistence: @unchecked Sendable {
         try await deleter.edit(["profile/name": Data("Travel".utf8), "profile/speed": Data("1".utf8)])
         _ = try await deleter.syncNow(); _ = try await editor.syncNow()
         precondition(deleterDisk.read().journal == editorDisk.read().journal)
+        // Whoever edited last wins the whole document: the editor's edits came
+        // after the deletion, so its profile survives on both Macs.
         try await deleter.edit(["profile/name": nil, "profile/speed": nil])
+        try await Task.sleep(nanoseconds: 20_000_000)
         for value in ["2", "3", "4"] { try await editor.edit(["profile/speed": Data(value.utf8)]) }
         _ = try await deleter.syncNow()
-        let conflicted = try await editor.syncNow()
-        precondition(conflicted == .synchronizedDroppingLocalConflict)
+        let survived = try await editor.syncNow()
+        precondition(survived == .synchronized, "The later edit wins without reporting a drop")
+        _ = try await deleter.syncNow()
+        precondition(editorDisk.read().journal == deleterDisk.read().journal, "Both Macs converge on the later edit")
+        precondition(deleterDisk.read().journal.fields["profile/speed"]?.value == Data("4".utf8))
+        precondition(deleterDisk.read().journal.fields["profile/name"]?.value == Data("Travel".utf8))
+        // The reverse order: a deletion made after the edits wins field by
+        // field, so the merge stays valid and nothing needs dropping.
+        try await editor.edit(["profile/speed": Data("5".utf8)])
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try await deleter.edit(["profile/name": nil, "profile/speed": nil])
+        _ = try await deleter.syncNow()
+        let deleted = try await editor.syncNow()
+        precondition(deleted == .synchronized)
         precondition(editorDisk.read().journal == deleterDisk.read().journal, "Both Macs converge on the deletion")
         precondition(editorDisk.read().journal.fields["profile/speed"]?.value == nil)
         let clock = editorDisk.read().journal.counter
@@ -180,6 +195,6 @@ private final class MemoryPersistence: @unchecked Sendable {
         let legacy = try device("legacy", disk: MemoryPersistence())
         await rejected { _ = try await legacy.syncNow() }
         await legacy.stop(); await work.stop(); await home.stop()
-        print("Encrypted auto-sync core passed: concurrent CAS reconciliation, conditional idle polls, offline edits/deletions, ciphertext-only wire, account isolation, persisted rollback floor, forged 304 rejection, edits during GET/PUT, stopped response rejection, failed local write, invalid-merge fallback, legacy migration gate. Mock data only; app integration is not verified.")
+        print("Encrypted auto-sync core passed: concurrent CAS reconciliation, conditional idle polls, offline edits/deletions, ciphertext-only wire, account isolation, persisted rollback floor, forged 304 rejection, edits during GET/PUT, stopped response rejection, failed local write, invalid-merge fallback (newest edit wins), legacy migration gate. Mock data only; app integration is not verified.")
     }
 }

@@ -60,6 +60,23 @@ import SQLite3
         var one = first, two = second
         try one.merge(second); try two.merge(first)
         precondition(one == two && one.fields["same"]?.value == Data("two".utf8))
+        // Whoever edited last wins, even against a higher logical counter and
+        // device ID; stamps from older builds carry no time and lose to any edit.
+        var late = EncryptedSettingsJournal(), early = EncryptedSettingsJournal()
+        try late.set(Data("later".utf8), for: "same", deviceID: "aaa", at: Date(timeIntervalSince1970: 2_000))
+        try early.set(Data("x".utf8), for: "other", deviceID: "zzz", at: Date(timeIntervalSince1970: 500))
+        try early.set(Data("earlier".utf8), for: "same", deviceID: "zzz", at: Date(timeIntervalSince1970: 1_000))
+        var lateMerged = late, earlyMerged = early
+        try lateMerged.merge(early); try earlyMerged.merge(late)
+        precondition(lateMerged == earlyMerged && lateMerged.fields["same"]?.value == Data("later".utf8))
+        precondition(lateMerged.latestEdit == 2_000 && lateMerged.counter == 2)
+        let legacyJSON = Data(#"{"fields":{"same":{"stamp":{"counter":9,"deviceID":"zzz"},"value":"b2xk"}},"counter":9}"#.utf8)
+        var legacy = try JSONDecoder().decode(EncryptedSettingsJournal.self, from: legacyJSON)
+        precondition(legacy.fields["same"]?.stamp.editedAt == 0 && legacy.latestEdit == 0)
+        try legacy.merge(late)
+        precondition(legacy.fields["same"]?.value == Data("later".utf8) && legacy.counter == 9)
+        let reencoded = try JSONDecoder().decode(EncryptedSettingsJournal.self, from: JSONEncoder().encode(legacy))
+        precondition(reencoded == legacy, "Timestamps round-trip")
         // An authenticated but inconsistent peer must not partly mutate state.
         var inconsistent = EncryptedSettingsJournal()
         try inconsistent.set(Data("different".utf8), for: "same", deviceID: "a")

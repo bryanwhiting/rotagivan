@@ -143,7 +143,8 @@ import SwiftUI
         work.settings.normal.cursorSpeed += 0.01
         await a.synchronizeAutomatically()
         precondition(a.error != nil)
-        precondition(a.pollDelay > SettingsSync.pollInterval, "Failures back off the poll")
+        precondition(a.pollDelay != SettingsSync.pollInterval && a.pollDelay >= SettingsSync.retryInterval && a.pollDelay <= 300,
+                     "Failures retry sooner than the hourly poll, with bounded backoff")
         precondition(a.error!.hasPrefix("Sync paused. Your local settings are safe."), a.error!)
         cloud.offline = false
         await a.synchronizeAutomatically(); await b.synchronizeAutomatically()

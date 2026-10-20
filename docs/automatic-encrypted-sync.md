@@ -37,13 +37,19 @@ keep the entered key available for retry.
 
 ## Reconciliation
 
-Local edits trigger a debounced transfer; idle Macs poll for remote changes.
-Logical counters and stable per-Mac IDs make same-field concurrent updates
-deterministic without depending on wall clocks. Independent scalar fields and
-profiles merge separately; ordered lists remain atomic to preserve macro steps,
-hotkey ordering, and HUD layout integrity. A CAS race triggers a fresh read and
-merge, never an unconditional overwrite. Offline failures retain local settings
-and retry. Invalid or tampered snapshots fail closed.
+Every local edit uploads after a 750 ms quiet period, so whoever edited last
+wins: each field carries the wall-clock time of its edit, and a later edit
+replaces an earlier one on every Mac (the logical counter and per-Mac ID only
+break ties; fields written by older builds count as oldest). Independent scalar
+fields and profiles merge separately; ordered lists remain atomic to preserve
+macro steps, hotkey ordering, and HUD layout integrity. When concurrent edits
+combine into a document that no longer validates, the side with the newest
+edit wins as a whole document. Other Macs pick up changes with a conditional
+poll once an hour, on wake, when the network returns, and within a minute of
+the HUD or launcher being used. A CAS race triggers a fresh read and merge,
+never an unconditional overwrite. Offline failures retain local settings and
+retry every 60 s, backing off to 5 minutes. Invalid or tampered snapshots fail
+closed.
 
 The first upgraded Mac retains its live settings while replacing the old manual
 cloud snapshot with ciphertext. A newly connected Mac with an existing encrypted

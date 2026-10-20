@@ -188,15 +188,20 @@ actor EncryptedAutoSync {
                 // Concurrent edits can combine into a document that no longer
                 // validates (for example a field edited here inside a profile
                 // deleted on another Mac). Retrying the same merge forever would
-                // stall sync for every Mac. The cloud document validated when its
-                // writer uploaded it, so adopt it and report the dropped edits.
-                // The discarded local stamps were never uploaded, so no other
-                // Mac can hold them; the peer's clock is a safe continuation.
+                // stall sync for every Mac, so whoever edited last wins as a
+                // whole document: this Mac's copy when its newest edit is later
+                // than anything in the cloud, otherwise the cloud copy (which
+                // validated when its writer uploaded it), reporting the drop.
                 var adopted = merged
-                adopted.journal = peer
-                try validate(adopted.journal)
+                if state.journal.latestEdit > peer.latestEdit, (try? validate(state.journal)) != nil {
+                    adopted.journal = state.journal
+                    adopted.journal.adoptClock(of: peer)
+                } else {
+                    adopted.journal = peer
+                    try validate(adopted.journal)
+                    droppedLocalConflict = true
+                }
                 merged = adopted
-                droppedLocalConflict = true
             }
             merged.highestCloudRevision = remote.revision
             merged.acknowledged = peer

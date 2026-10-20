@@ -165,8 +165,22 @@ final class EncryptedSettingsDatabase {
 struct SettingsFieldStamp: Codable, Equatable, Comparable, Sendable {
     let counter: UInt64
     let deviceID: String
+    /// Wall-clock seconds of the edit. Whoever edited last wins; the logical
+    /// clock and device ID only break ties. Stamps from older builds decode as 0.
+    let editedAt: Double
+    init(counter: UInt64, deviceID: String, editedAt: Double = 0) {
+        self.counter = counter; self.deviceID = deviceID; self.editedAt = editedAt
+    }
+    private enum CodingKeys: String, CodingKey { case counter, deviceID, editedAt }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        counter = try container.decode(UInt64.self, forKey: .counter)
+        deviceID = try container.decode(String.self, forKey: .deviceID)
+        editedAt = try container.decodeIfPresent(Double.self, forKey: .editedAt) ?? 0
+    }
     static func < (lhs: Self, rhs: Self) -> Bool {
-        lhs.counter == rhs.counter ? lhs.deviceID < rhs.deviceID : lhs.counter < rhs.counter
+        if lhs.editedAt != rhs.editedAt { return lhs.editedAt < rhs.editedAt }
+        return lhs.counter == rhs.counter ? lhs.deviceID < rhs.deviceID : lhs.counter < rhs.counter
     }
 }
 struct SettingsField: Codable, Equatable, Sendable {
@@ -182,21 +196,32 @@ struct EncryptedSettingsJournal: Codable, Equatable, Sendable {
                   !name.isEmpty && name.utf8.count <= 1024 &&
                   !field.stamp.deviceID.isEmpty && field.stamp.deviceID.utf8.count <= 1024 &&
                   field.stamp.counter > 0 && field.stamp.counter <= counter &&
+                  field.stamp.editedAt.isFinite && field.stamp.editedAt >= 0 &&
                   (field.value?.count ?? 0) <= SettingsCipherEnvelope.maximumBytes
               }) else { throw EncryptedSettingsError.invalidEnvelope }
     }
-    mutating func set(_ value: Data?, for field: String, deviceID: String) throws {
+    mutating func set(_ value: Data?, for field: String, deviceID: String, at date: Date = Date()) throws {
         guard !field.isEmpty, !deviceID.isEmpty, counter < UInt64.max else { throw EncryptedSettingsError.exhaustedClock }
         counter += 1
-        fields[field] = SettingsField(stamp: SettingsFieldStamp(counter: counter, deviceID: deviceID), value: value)
+        fields[field] = SettingsField(stamp: SettingsFieldStamp(counter: counter, deviceID: deviceID,
+            editedAt: max(0, date.timeIntervalSince1970)), value: value)
     }
+    /// The newest edit anywhere in the document; 0 for an empty or pre-timestamp document.
+    var latestEdit: Double { fields.values.map(\.stamp.editedAt).max() ?? 0 }
+    /// Continues another document's logical clock so later edits here order after its fields.
+    mutating func adoptClock(of other: Self) { counter = max(counter, other.counter) }
     mutating func merge(_ remote: Self) throws {
         try remote.validateStructure()
         var merged = fields
         for (name, incoming) in remote.fields {
             if let old = merged[name] {
-                if incoming.stamp == old.stamp, incoming.value != old.value { throw EncryptedSettingsError.invalidEnvelope }
-                if old.stamp < incoming.stamp { merged[name] = incoming }
+                // One device never issues the same counter twice, so a repeat
+                // with a different value is a forged or corrupt peer. (The same
+                // write replayed with another timestamp, as legacy seeding does
+                // on two Macs, is the same write.)
+                if incoming.stamp.counter == old.stamp.counter, incoming.stamp.deviceID == old.stamp.deviceID {
+                    if incoming.value != old.value { throw EncryptedSettingsError.invalidEnvelope }
+                } else if old.stamp < incoming.stamp { merged[name] = incoming }
             } else { merged[name] = incoming }
         }
         fields = merged

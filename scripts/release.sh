@@ -75,6 +75,7 @@ if [[ -n ${DEVELOPER_ID:-} ]]; then
   step "Signing with Developer ID"
   security find-identity -v -p codesigning | grep -Fq "$DEVELOPER_ID" || die "Developer ID identity not found in Keychain: $DEVELOPER_ID"
   codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$staged/Contents/Resources/librota_search.dylib"
+  codesign --force --timestamp --options runtime --identifier local.rotagivan.mcp --sign "$DEVELOPER_ID" "$staged/Contents/MacOS/rotagivan-mcp"
   codesign --force --timestamp --options runtime --entitlements "$repo/Rotagivan/Release.entitlements" \
     --sign "$DEVELOPER_ID" "$staged"
   signing=developer-id

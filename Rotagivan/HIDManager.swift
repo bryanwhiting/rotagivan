@@ -134,6 +134,11 @@ final class NavigatorHIDManager: ObservableObject {
             }
             (explorer as? AppExplorerController)?.hotkeyDictionary = { [weak store] in store?.settings.resolvedHotkeyDictionary ?? [] }
             (explorer as? AppExplorerController)?.editingStore = store
+            // Build and draw the HUD window once, after launch settles, so the
+            // first open is as quick as every later one.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak explorer] in
+                (explorer as? AppExplorerController)?.warmUp()
+            }
             // HUD and search bookmarks share the action path, so a Chrome
             // bookmark reuses its last-opened tab instead of adding a new one.
             (explorer as? AppExplorerController)?.openWebURL = { [weak self] url in

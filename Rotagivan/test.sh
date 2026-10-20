@@ -3,6 +3,15 @@ set -euo pipefail
 script_dir=${0:A:h}
 cd "$script_dir/.."
 test_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/rotagivan-tests.XXXXXX")
+# Tests create throwaway UserDefaults suites, which land in ~/Library/Preferences
+# and survive a failed precondition. Sweep them whenever the run ends so they do
+# not accumulate (tens of thousands were found) and slow cfprefsd for every app.
+cleanup_test_preferences() {
+  local uuid='[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+  ls "$HOME/Library/Preferences" 2>/dev/null | grep -E "^(Rotagivan\.[A-Za-z]+\.${uuid}\.plist|RotagivanSettingsTests\.${uuid}\.plist|local\.rotagivan\.(activation-test|external-shortcut-test|shortcut-atlas-fixture|tests\.[a-z-]+)\.${uuid}(\.settings)?\.plist|local\.rotagivan\.typing-test\.plist|rotagivan-[0-9]+-[a-zA-Z-]+\.plist|rotagivan-actions-organizer-smoke\.plist)$" \
+    | while IFS= read -r name; do rm -f "$HOME/Library/Preferences/$name"; done
+}
+trap cleanup_test_preferences EXIT
 xcrun swiftc Rotagivan/AccessibilitySetup.swift Rotagivan/UIComponents.swift Rotagivan/Tests/AccessibilitySetupTests.swift -framework AppKit -framework SwiftUI -o "$test_dir/AccessibilitySetupTests"
 "$test_dir/AccessibilitySetupTests" "$test_dir"
 swift build --package-path YAML -c release --product ConfigurationYAML
@@ -92,13 +101,13 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rota
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/BrowserBookmarks.swift Rotagivan/Tests/BrowserBookmarkTests.swift \
   -o "$test_dir/BrowserBookmarkTests"
 "$test_dir/BrowserBookmarkTests"
-xcrun swiftc -j 4 "${common[@]}" Rotagivan/WebsiteFavicon.swift Rotagivan/Tests/FaviconTests.swift \
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/UIComponents.swift Rotagivan/WebsiteFavicon.swift Rotagivan/Tests/FaviconTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/FaviconTests"
 "$test_dir/FaviconTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/Tests/WindowTilingTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/WindowTilingTests"
 "$test_dir/WindowTilingTests"
-xcrun swiftc -j 4 "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/ExplorerAppearance.swift Rotagivan/Tests/StarburstTests.swift \
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/UIComponents.swift Rotagivan/WindowTiling.swift Rotagivan/ExplorerAppearance.swift Rotagivan/Tests/StarburstTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/StarburstTests"
 "$test_dir/StarburstTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/WindowTiling.swift Rotagivan/Tests/ExplorerCursorCenteringTests.swift \

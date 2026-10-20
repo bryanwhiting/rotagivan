@@ -74,6 +74,34 @@ private actor Fixture {
         precondition(missingFirst == nil && missingSecond == nil)
         let missingRequests = await missing.requests
         precondition(missingRequests.count == 3, "Missing icons should also be cached")
-        print("Favicon discovery, image bounds, privacy, fallback, cache and concurrent-request tests passed.")
+
+        // Disk cache: a second service over the same folder finds the icon without fetching,
+        // reports it as known synchronously, and ignores files that are not images.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rotagivan-favicons-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let diskFixture = Fixture([origin: html, candidates[0]: png])
+        let diskService = FaviconService(fetch: { await diskFixture.fetch($0, $1) }, directory: folder)
+        let unknown = await diskService.cachedIcon(for: privateURL)
+        precondition(unknown == nil, "Nothing is known before the first fetch")
+        let diskIcon = await diskService.icon(for: privateURL)
+        precondition(diskIcon == thumbnail)
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        precondition(files.count == 1 && files[0].hasSuffix(".png"), "One thumbnail per origin on disk")
+        let reopened = Fixture([:])
+        let reopenedService = FaviconService(fetch: { await reopened.fetch($0, $1) }, directory: folder)
+        let known = await reopenedService.cachedIcon(for: privateURL)
+        precondition(known == .some(thumbnail), "Known from disk without any request")
+        let reopenedIcon = await reopenedService.icon(for: origin)
+        precondition(reopenedIcon == thumbnail)
+        let reopenedRequests = await reopened.requests
+        precondition(reopenedRequests.isEmpty, "A disk hit must not touch the network")
+        try? Data("not an image".utf8).write(to: folder.appendingPathComponent(files[0]))
+        let corrupt = Fixture([:])
+        let corruptService = FaviconService(fetch: { await corrupt.fetch($0, $1) }, directory: folder)
+        let damaged = await corruptService.cachedIcon(for: privateURL)
+        precondition(damaged == nil, "A damaged file is not an icon")
+        let corruptIcon = await corruptService.icon(for: origin)
+        precondition(corruptIcon == nil)
+        print("Favicon discovery, image bounds, privacy, fallback, cache, disk cache and concurrent-request tests passed.")
     }
 }

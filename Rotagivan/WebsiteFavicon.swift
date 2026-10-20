@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -126,17 +127,40 @@ enum FaviconNetwork {
 
 actor FaviconService {
     typealias Fetch = @Sendable (URL, Int) async -> FaviconResponse?
-    static let shared = FaviconService()
+    static let shared = FaviconService(directory: defaultDirectory)
+    /// Icons found are kept as small PNG thumbnails for a week, so tiles are
+    /// complete the first time the HUD opens after a relaunch.
+    static let defaultDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Rotagivan/Favicons", isDirectory: true)
+    static let diskLifetime: TimeInterval = 7 * 86_400
     private struct Entry { let data: Data?; let expires: Date }
     private var cache: [URL: Entry] = [:]
     private var pending: [URL: Task<Data?, Never>] = [:]
     private let fetch: Fetch
+    private let directory: URL?
 
-    init(fetch: @escaping Fetch = { await FaviconNetwork.fetch($0, limit: $1) }) { self.fetch = fetch }
+    init(fetch: @escaping Fetch = { await FaviconNetwork.fetch($0, limit: $1) }, directory: URL? = nil) {
+        self.fetch = fetch
+        self.directory = directory
+    }
+
+    /// An icon already known, in memory or on disk, without any network use.
+    /// `.some(nil)` means the site is known to have none.
+    func cachedIcon(for url: URL) -> Data?? {
+        guard let origin = FaviconDiscovery.origin(for: url) else { return .some(nil) }
+        if let cached = cache[origin], cached.expires > Date() { return .some(cached.data) }
+        guard let stored = readDisk(origin) else { return nil }
+        cache[origin] = Entry(data: stored, expires: Date().addingTimeInterval(86_400))
+        return .some(stored)
+    }
 
     func icon(for url: URL) async -> Data? {
         guard let origin = FaviconDiscovery.origin(for: url) else { return nil }
         if let cached = cache[origin], cached.expires > Date() { return cached.data }
+        if let stored = readDisk(origin) {
+            cache[origin] = Entry(data: stored, expires: Date().addingTimeInterval(86_400))
+            return stored
+        }
         if let task = pending[origin] { return await task.value }
         let fetch = self.fetch
         let task = Task { await Self.load(origin: origin, fetch: fetch) }
@@ -145,7 +169,30 @@ actor FaviconService {
         pending[origin] = nil
         if cache.count >= 128, let oldest = cache.min(by: { $0.value.expires < $1.value.expires })?.key { cache[oldest] = nil }
         cache[origin] = Entry(data: data, expires: Date().addingTimeInterval(data == nil ? 900 : 86400))
+        if let data { writeDisk(origin, data) }
         return data
+    }
+
+    private func diskURL(_ origin: URL) -> URL? {
+        guard let directory else { return nil }
+        let digest = SHA256.hash(data: Data(origin.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(digest + ".png")
+    }
+
+    private func readDisk(_ origin: URL) -> Data? {
+        guard let file = diskURL(origin),
+              let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+              Date().timeIntervalSince(modified) < Self.diskLifetime,
+              let data = try? Data(contentsOf: file), data.count <= FaviconDiscovery.maximumImageBytes,
+              FaviconDiscovery.thumbnail(data) != nil else { return nil }
+        return data
+    }
+
+    private func writeDisk(_ origin: URL, _ data: Data) {
+        guard let directory, let file = diskURL(origin) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try? data.write(to: file, options: .atomic)
     }
 
     private static func load(origin: URL, fetch: Fetch) async -> Data? {
@@ -191,6 +238,12 @@ struct WebsiteFavicon: View {
             .task(id: taskID) {
                 icon = nil
                 guard symbolName == nil, let url else { return }
+                // A known icon shows at once; only unknown sites wait out a quick
+                // swipe-through before touching the network.
+                if let known = await service.cachedIcon(for: url) {
+                    icon = known.flatMap(NSImage.init(data:))
+                    return
+                }
                 do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
                 let data = await service.icon(for: url)
                 guard !Task.isCancelled else { return }

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SQLite3
 
 /// Chrome History records navigations, not switches to an already-open tab.
@@ -121,6 +122,9 @@ enum ChromeLocalHistory {
     private var timer: Timer?
     private var activation: NSObjectProtocol?
     private var sampling = false
+    /// Chrome's focused window title at the last sample. It changes whenever the
+    /// selected tab changes, so an unchanged title skips the AppleScript round trip.
+    private var lastWindowTitle: String?
     private func key(_ tab: ChromeRecentTab) -> String { tab.url.isEmpty ? tab.id : tab.url }
 
     func start() {
@@ -156,14 +160,20 @@ enum ChromeLocalHistory {
         appVisits[identifier] = clock
         if appVisits.count > 512 { appVisits = [identifier: clock] }
         // Stamp the selected tab now rather than at the next two-second sample.
-        if identifier == RecentPlaces.chromeBundleID { sampleIfChromeIsActive() }
+        if identifier == RecentPlaces.chromeBundleID { sampleIfChromeIsActive(force: true) }
     }
 
     func stamp(app identifier: String) -> UInt64? { appVisits[identifier] }
     func stamp(tab: ChromeRecentTab) -> UInt64? { visits[key(tab)] }
 
-    private func sampleIfChromeIsActive() {
-        guard !sampling, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.google.Chrome" else { return }
+    private func sampleIfChromeIsActive(force: Bool = false) {
+        guard !sampling, let chrome = NSWorkspace.shared.frontmostApplication,
+              chrome.bundleIdentifier == "com.google.Chrome" else { return }
+        // The window title is a cheap Accessibility read; the tab's URL costs an
+        // AppleEvent round trip into Chrome, so only pay it when the title moved.
+        let title = Self.focusedWindowTitle(pid: chrome.processIdentifier)
+        if !force, let title, title == lastWindowTitle { return }
+        lastWindowTitle = title
         sampling = true
         Task.detached(priority: .utility) {
             let tab = ChromeBookmarkTabs.activeTab()
@@ -172,6 +182,16 @@ enum ChromeLocalHistory {
                 ChromeTabRecency.shared.sampling = false
             }
         }
+    }
+
+    private static func focusedWindowTitle(pid: pid_t) -> String? {
+        guard AXIsProcessTrusted() else { return nil }
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let window, CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+        var title: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success else { return nil }
+        return title as? String
     }
 
     /// The most recently focused tab URL that starts with `prefix`, if any.
@@ -307,11 +327,12 @@ final class ChromeBookmarkTabs: @unchecked Sendable {
                 repeat with w in windows
                     set wi to index of w
                     set activeIndex to active tab index of w
-                    repeat with ti from 1 to count of tabs of w
-                        set t to tab ti of w
-                        set tabTitle to title of t
-                        set tabURL to URL of t
-                        set rowText to (wi as text) & \(appleScriptFieldSeparator) & (ti as text) & \(appleScriptFieldSeparator) & tabTitle & \(appleScriptFieldSeparator) & tabURL & linefeed
+                    -- Two round trips per window instead of two per tab.
+                    set tabTitles to title of every tab of w
+                    set tabURLs to URL of every tab of w
+                    repeat with ti from 1 to count of tabTitles
+                        if ti > (count of tabURLs) then exit repeat
+                        set rowText to (wi as text) & \(appleScriptFieldSeparator) & (ti as text) & \(appleScriptFieldSeparator) & (item ti of tabTitles) & \(appleScriptFieldSeparator) & (item ti of tabURLs) & linefeed
                         if wi is 1 and ti is activeIndex then
                             set activeOutput to rowText
                         else

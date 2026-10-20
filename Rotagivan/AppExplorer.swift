@@ -31,6 +31,9 @@ extension AppExplorerPresenting {
     private var recents: AppExplorerRecents
     private var observers: [NSObjectProtocol] = []
     private var panel: ExplorerPanel?
+    /// The HUD window and its SwiftUI hierarchy are built once and reused, so
+    /// reopening costs a frame, not a rebuild. Nil until the first open or warm-up.
+    private var hudPanel: ExplorerPanel?
     private var launcherMenuSnapshot: [LauncherAction] = []
     private var launcherMenuRefresh: Task<Void, Never>?
     private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
@@ -349,11 +352,14 @@ extension AppExplorerPresenting {
             tilingTarget = sourcePID.flatMap(captureWindow)
             model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
         }
-        chromeTabsLoaded = false; chromeTabsPage = 0; chromeTabSnapshot = []; chromeSnapshotSession = UUID()
+        // The last Chrome snapshot shows at once while a fresh one loads; it is
+        // only dropped when Chrome itself is gone.
+        chromeTabsLoaded = false; chromeTabsPage = 0; chromeSnapshotSession = UUID()
+        if !workspace.runningApplications.contains(where: { $0.bundleIdentifier == RecentPlaces.chromeBundleID }) { chromeTabSnapshot = [] }
         loadEntries()
         model.selected = nil
         model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
-        pendingMenuAction = nil; launcherMenuSnapshot = []; chromeTabSnapshot = []; folderSnapshot = []
+        pendingMenuAction = nil; launcherMenuSnapshot = []; folderSnapshot = []
         launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
         let menuGeneration = selectionGeneration
         let tabProvider = chromeTabsProvider
@@ -377,29 +383,9 @@ extension AppExplorerPresenting {
         }
         Task { await VoiceApplicationIndex.shared.load() }
         input = makeSelection(waitingForLift: waitingForLift)
-        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
-            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.isReleasedWhenClosed = false
-        panel.title = "App Explorer"
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
+        let panel = preparedHUDPanel()
         panel.hasShadow = !model.theme.isFloating
-        panel.level = .floating
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.onCancel = { [weak self] in self?.dismiss() }
-        panel.onSettings = { [weak self] in self?.openSettings() }
-        panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
-        panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
-            onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
-            onDeepSelect: { [weak self] in self?.chooseDeep($0) },
-            onBack: { [weak self] in self?.centerTap() },
-            onSettings: { [weak self] in self?.openSettings() },
-            onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
-            onWindowPage: { [weak self] in self?.changeWindowPage($0) },
-            onVoiceExit: { [weak self] in self?.endVoiceMode() },
-            onVoiceRetry: { [weak self] in self?.beginVoiceMode() },
-            onVoiceConfirm: { [weak self] in self?.confirmVoiceAction() }))
+        model.presentation &+= 1
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
@@ -428,6 +414,78 @@ extension AppExplorerPresenting {
         if autoStartVoice, !windowManager, layerID == nil, configuration().resolvedVoiceAutoStart {
             beginVoiceMode()
         }
+    }
+
+    /// The reusable HUD window, created on first use. Callbacks are reset on
+    /// every open because the inline editor clears them while it owns the screen.
+    private func preparedHUDPanel() -> ExplorerPanel {
+        let panel = hudPanel ?? makeHUDPanel()
+        hudPanel = panel
+        panel.allowsEditing = false
+        panel.privateEntryEditing = false
+        panel.onCancel = { [weak self] in self?.dismiss() }
+        panel.onSettings = { [weak self] in self?.openSettings() }
+        panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
+        return panel
+    }
+
+    private func makeHUDPanel() -> ExplorerPanel {
+        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.title = "App Explorer"
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
+            onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
+            onDeepSelect: { [weak self] in self?.chooseDeep($0) },
+            onBack: { [weak self] in self?.centerTap() },
+            onSettings: { [weak self] in self?.openSettings() },
+            onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
+            onWindowPage: { [weak self] in self?.changeWindowPage($0) },
+            onVoiceExit: { [weak self] in self?.endVoiceMode() },
+            onVoiceRetry: { [weak self] in self?.beginVoiceMode() },
+            onVoiceConfirm: { [weak self] in self?.confirmVoiceAction() }))
+        return panel
+    }
+
+    /// Builds the HUD window and draws it once, invisibly, so the first real
+    /// open after launch is as quick as every later one. Safe to call anytime;
+    /// it does nothing while the HUD is showing.
+    func warmUp() {
+        guard !isVisible, hudPanel == nil else { return }
+        let panel = preparedHUDPanel()
+        panel.onCancel = nil
+        panel.alphaValue = 0
+        if let frame = NSScreen.main?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
+        }
+        // Draw the real root tiles once so their icons are decoded and cached.
+        let settings = configuration()
+        let dictionary = hotkeyDictionary()
+        entryCache.removeAll(keepingCapacity: true)
+        entryCacheSettings = settings; entryCacheDictionary = dictionary
+        model.theme = settings.resolvedTheme
+        model.slotCount = settings.count(at: [])
+        model.entries = (settings.favorites(at: []) ?? []).map { makeEntry($0, depth: 0) }
+        panel.orderFrontRegardless()
+        panel.displayIfNeeded()
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+        // Bookmark favicons are fetched now (and kept on disk) rather than on
+        // the first open.
+        for url in model.entries.filter(\.isWebURL).compactMap(\.url) {
+            Task.detached(priority: .utility) { _ = await FaviconService.shared.icon(for: url) }
+        }
+        model.entries = []
+        // The first global key monitor is the slow one; install and drop it now.
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { _ in }) {
+            NSEvent.removeMonitor(monitor)
+        }
+        Task { await VoiceApplicationIndex.shared.load() }
     }
 
     func setAlternateHeld(_ held: Bool) {
@@ -812,7 +870,7 @@ extension AppExplorerPresenting {
             chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
             model.page = chromeTabsPage
             model.entries = chromeEntries(count: count, page: chromeTabsPage)
-            model.message = !chromeTabsLoaded ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
+            model.message = !chromeTabsLoaded && chromeTabSnapshot.isEmpty ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
                 ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation."
                 : "Swipe to a tab and lift to focus it · use Previous / Next for more tabs"
             return
@@ -842,7 +900,7 @@ extension AppExplorerPresenting {
             model.entries = chromeTabsPage == 0 ? probe.entries : recentPlaceEntries(count: count, page: chromeTabsPage).entries
             let chromeRunning = workspace.runningApplications.contains { $0.bundleIdentifier == RecentPlaces.chromeBundleID }
             model.message = probe.total == 0 ? "Open another app to see it here"
-                : !chromeTabsLoaded && chromeRunning ? "Loading Chrome tabs…"
+                : !chromeTabsLoaded && chromeRunning && chromeTabSnapshot.isEmpty ? "Loading Chrome tabs…"
                 : chromeTabSnapshot.isEmpty && chromeRunning ? "Chrome tabs unavailable. Allow Rotagivan in Privacy & Security → Automation to include them."
                 : "Swipe to an app or tab and lift to return to it"
             return
@@ -1947,7 +2005,8 @@ extension AppExplorerPresenting {
         let editorWidth = min(ExplorerInlineEditor.preferredWidth, (visibleFrame?.width ?? 792) - 32)
         let editorHeight = min(980, (visibleFrame?.height ?? 1012) - 32)
         previous.onCancel = nil
-        previous.orderOut(nil); previous.close()
+        previous.orderOut(nil)
+        if previous !== hudPanel { previous.close() }
         let editor = ExplorerPanel(contentRect: NSRect(x: frame.midX - editorWidth / 2, y: frame.midY - editorHeight / 2,
             width: editorWidth, height: editorHeight),
             styleMask: [.borderless], backing: .buffered, defer: false)
@@ -2032,7 +2091,7 @@ extension AppExplorerPresenting {
         onPresentationChanged?()
         if model.isEditing { model.isEditing = false; onEditingChanged?(false) }
         panel.orderOut(nil)
-        panel.close()
+        if panel !== hudPanel { panel.close() }
         timer?.invalidate(); timer = nil
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
         model.selected = nil
@@ -2259,6 +2318,8 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
 }
 
 @MainActor final class ExplorerModel: ObservableObject {
+    /// Bumped on every open so the reused view replays its entrance.
+    @Published var presentation = 0
     @Published var realtimeSession: RealtimeLauncherSession?
     @Published var launcherActions: [LauncherAction] = []
     @Published var launcherQuery = ""
@@ -2516,10 +2577,13 @@ struct AppExplorerView: View {
         .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
         .scaleEffect(animates && !appeared ? 0.985 : 1)
         .opacity(animates && !appeared ? 0.85 : 1)
-        .onAppear {
-            reticleRotation = reticleAngle(model.selected)
-            lensAngle = model.selected?.angle ?? lensAngle
-            withAnimation(animates ? .easeOut(duration: 0.16) : nil) { appeared = true }
+        .onAppear(perform: enter)
+        .onChange(of: model.presentation) { _, _ in
+            // The window is reused between opens; restart the entrance from the
+            // resting state without animating the reset itself.
+            var reset = Transaction(); reset.disablesAnimations = true
+            withTransaction(reset) { appeared = false }
+            DispatchQueue.main.async(execute: enter)
         }
         .onReceive(model.$selected.removeDuplicates()) { direction in
             withAnimation(feedback) {
@@ -2959,6 +3023,12 @@ struct AppExplorerView: View {
 
     private func reticleAngle(_ direction: ExplorerSlot?) -> Double {
         (direction?.angle ?? -90) - 45
+    }
+
+    private func enter() {
+        reticleRotation = reticleAngle(model.selected)
+        lensAngle = model.selected?.angle ?? lensAngle
+        withAnimation(animates ? .easeOut(duration: 0.16) : nil) { appeared = true }
     }
 
     private func tile(_ direction: ExplorerSlot) -> some View {

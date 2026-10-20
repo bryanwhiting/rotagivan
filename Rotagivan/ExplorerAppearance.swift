@@ -122,10 +122,13 @@ struct ExplorerSettingsBackdrop: View {
 /// blur filter, continuous animation, or rendering work in the input callback.
 struct ExplorerAirGlass: View {
     var opaque = false
+    /// Settings previews and orbit satellites skip the material and drop shadow,
+    /// which are the expensive parts when a dozen HUDs share one page.
+    var lightweight = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         ZStack {
-            if opaque || reduceTransparency {
+            if opaque || reduceTransparency || lightweight {
                 Circle().fill(ExplorerTheme.starburstAir.surface)
             } else {
                 Circle().fill(.ultraThinMaterial)
@@ -140,7 +143,7 @@ struct ExplorerAirGlass: View {
                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
             Circle().strokeBorder(.white.opacity(0.06), lineWidth: 0.5).padding(3)
         }
-        .shadow(color: .black.opacity(0.4), radius: 12, y: 7)
+        .shadow(color: .black.opacity(lightweight ? 0 : 0.4), radius: lightweight ? 0 : 12, y: lightweight ? 0 : 7)
         .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
@@ -387,6 +390,8 @@ struct ExplorerGlassLensView: View {
             lens.stroke(LinearGradient(colors: [.white.opacity(0.55), blue.opacity(0.35), .white.opacity(0.10)],
                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
         }
+        // Rasterize on the GPU: the blur is re-rendered every frame the lens glides.
+        .drawingGroup()
         .allowsHitTesting(false).accessibilityHidden(true)
     }
 }

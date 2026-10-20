@@ -2272,6 +2272,8 @@ private struct HUDOrbitSatellite: View, Equatable {
         AnyView(AppExplorerView(model: model, onSelect: { _ in }, onCancel: {},
             forceReduceMotion: true, isPreview: true, showsCarousel: false))
             .frame(width: 470, height: 520)
+            // One GPU raster per face instead of CPU blurs for every tile.
+            .drawingGroup()
             .allowsHitTesting(false)
             .onChange(of: theme) { _, _ in refresh() }
             .onChange(of: preview.name) { _, _ in refresh() }
@@ -2807,9 +2809,11 @@ struct AppExplorerView: View {
         let center = CGPoint(x: 209, y: 155)
         return ZStack {
             if model.theme.isFloating {
-                ExplorerAirGlass(opaque: opaqueChrome).frame(width: 304, height: 304).position(center)
+                ExplorerAirGlass(opaque: opaqueChrome, lightweight: isPreview).frame(width: 304, height: 304).position(center)
                 let lensVisible = model.deepFan == nil && model.selected.map { slot in isAvailable(model.entries.first { $0.direction == slot }) } == true
-                if !opaqueChrome {
+                // Previews only draw the lens while something is selected; the
+                // live HUD keeps it mounted so its fade and glide animate.
+                if !opaqueChrome && (!isPreview || lensVisible) {
                     // The lens is the tile shape itself, lit.
                     let tile = ExplorerStarburstLayout.airTile(angle: 0, depth: depth, slotCount: model.slotCount)
                     ExplorerGlassLensView(angle: lensAngle, innerRadius: tile.innerRadius,
@@ -2890,7 +2894,7 @@ struct AppExplorerView: View {
                 VStack(spacing: 3) {
                     if let entry {
                         entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
-                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8.5 : 10, weight: model.theme.isFloating ? (selected ? .semibold : .regular) : .medium))
+                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8.5 : 10, weight: .medium))
                             .lineLimit(entry.chromeTab == nil ? (entry.shortcut == nil ? 2 : 3) : 1).multilineTextAlignment(.center)
                         if let tab = entry.chromeTab, let profile = tab.profileName {
                             Text(profile + (tab.profileIsEstimated ? "?" : ""))
@@ -2911,7 +2915,9 @@ struct AppExplorerView: View {
                 }
                 .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: entry?.chromeTab == nil ? (model.slotCount > 8 ? 40 : 50) : 56)
                 .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(model.theme.isFloating ? 0.92 : 0.85)) : Color.primary)
-                .shadow(color: model.theme.isFloating ? .black.opacity(0.8) : .clear, radius: 1, y: 1)
+                // Previews skip the per-label shadow: a dozen HUDs on one page
+                // would otherwise rasterize ~100 tiny offscreen blurs.
+                .shadow(color: model.theme.isFloating && !isPreview ? .black.opacity(0.8) : .clear, radius: isPreview ? 0 : 1, y: 1)
                 .position(point)
             }
             .frame(width: 418, height: 310)

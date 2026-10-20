@@ -2668,7 +2668,7 @@ final class SettingsStore: ObservableObject {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 80 else { return false }
         configurationProfiles[index].name = trimmed
-        save()
+        save(flushLibrary: true)
         return true
     }
 
@@ -2713,7 +2713,7 @@ final class SettingsStore: ObservableObject {
         restoreShortcuts?(target.shortcuts)
         cursorTelemetry.reset()
         replacingProfile = false
-        save()
+        save(flushLibrary: true)
         NotificationCenter.default.post(name: .configurationProfileChanged, object: settings.resolvedDefaultProfileID)
     }
 
@@ -2898,13 +2898,29 @@ final class SettingsStore: ObservableObject {
         cursorTelemetry.reset()
     }
 
-    private func save() {
+    /// Writes `settings` at once. The profile library mirrors it, so a burst
+    /// of changes (a slider drag) writes the library once per run-loop turn;
+    /// explicit profile operations pass `flushLibrary` to write it immediately.
+    private func save(flushLibrary: Bool = false) {
         guard !replacingProfile else { return }
         if let data = try? JSONEncoder().encode(settings) {
             defaults.set(data, forKey: Self.storageKey)
         }
-        persistLibrary()
+        if flushLibrary {
+            libraryWritePending = false
+            persistLibrary()
+            return
+        }
+        guard !libraryWritePending else { return }
+        libraryWritePending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.libraryWritePending else { return }
+            self.libraryWritePending = false
+            guard !self.replacingProfile else { return }
+            self.persistLibrary()
+        }
     }
+    private var libraryWritePending = false
 
     private func importZSASettingsIfPresent() {
         guard let domain = UserDefaults.standard.persistentDomain(forName: "io.zsa.navigator") else { return }

@@ -2317,6 +2317,7 @@ struct AppExplorerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var appeared = false
     @State private var reticleRotation = -135.0
+    @State private var lensAngle = 0.0
     var onSelect: (ExplorerSlot) -> Void
     var onCancel: () -> Void
     var onDeepSelect: (ExplorerSlot) -> Void = { _ in }
@@ -2517,11 +2518,17 @@ struct AppExplorerView: View {
         .opacity(animates && !appeared ? 0.85 : 1)
         .onAppear {
             reticleRotation = reticleAngle(model.selected)
+            lensAngle = model.selected?.angle ?? lensAngle
             withAnimation(animates ? .easeOut(duration: 0.16) : nil) { appeared = true }
         }
         .onReceive(model.$selected.removeDuplicates()) { direction in
             withAnimation(feedback) {
                 reticleRotation = ExplorerHUDMotion.nearestAngle(from: reticleRotation, to: reticleAngle(direction))
+            }
+            if let direction {
+                withAnimation(animates ? .spring(response: 0.3, dampingFraction: 0.82) : nil) {
+                    lensAngle = ExplorerHUDMotion.nearestAngle(from: lensAngle, to: direction.angle)
+                }
             }
         }
         .transaction { if !animates { $0.animation = nil } }
@@ -2737,6 +2744,14 @@ struct AppExplorerView: View {
         return ZStack {
             if model.theme.isFloating {
                 ExplorerAirGlass(opaque: opaqueChrome).frame(width: 304, height: 304).position(center)
+                let lensVisible = model.deepFan == nil && model.selected.map { slot in isAvailable(model.entries.first { $0.direction == slot }) } == true
+                if !opaqueChrome {
+                    ExplorerGlassLensView(angle: lensAngle, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth) + 1,
+                        outerRadius: 145, halfAngle: 180 / Double(model.slotCount) - 2.5)
+                        .frame(width: 418, height: 310)
+                        .opacity(lensVisible ? 1 : 0)
+                        .animation(feedback, value: lensVisible)
+                }
             }
             // Each completed level leaves a concentric breadcrumb. The lit
             // sector records the direction taken at that level, not a guess

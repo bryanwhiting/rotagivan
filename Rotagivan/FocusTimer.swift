@@ -118,7 +118,7 @@ struct FocusTimerGlow: View {
     @State private var flashes = 0
     @State private var white = false
     @State private var breathing = false
-    private let colors: [Color] = [.orange, .pink, .purple, .blue, .orange]
+    private let colors: [Color] = [RotaTokens.glassBlue, Color(red: 0.80, green: 0.91, blue: 1), RotaTokens.glassBlue.opacity(0.7), Color(red: 0.80, green: 0.91, blue: 1), RotaTokens.glassBlue]
 
     var body: some View {
         GeometryReader { geometry in
@@ -161,6 +161,7 @@ struct FocusTimerAlertCard: View {
     var body: some View {
         VStack(spacing: 14) {
             Label("\(minutes)-minute timer done", systemImage: "timer").font(.title3.weight(.semibold))
+                .foregroundStyle(.primary).symbolRenderingMode(.hierarchical).tint(RotaTokens.glassBlue)
             HStack(spacing: 10) {
                 Button("+5 min", action: onSnooze).buttonStyle(.rotaSecondary)
                     .accessibilityIdentifier("timer-snooze")
@@ -171,6 +172,7 @@ struct FocusTimerAlertCard: View {
         .padding(24)
         .frame(width: 340, height: 150)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.25)))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(LinearGradient(colors: [.white.opacity(0.55), RotaTokens.glassBlue.opacity(0.35), .white.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)))
+        .shadow(color: RotaTokens.glassBlue.opacity(0.35), radius: 18)
     }
 }

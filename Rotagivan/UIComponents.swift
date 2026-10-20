@@ -7,6 +7,8 @@ import SwiftUI
 /// settings surface. Components below read only from these values so the
 /// whole app can be retuned in one place.
 enum RotaTokens {
+    /// The soft light blue behind a selected HUD tile, the timer glow and other HUD accents.
+    static let glassBlue = Color(red: 0.58, green: 0.80, blue: 1.0)
     enum Space {
         static let xxs: CGFloat = 2
         static let xs: CGFloat = 4

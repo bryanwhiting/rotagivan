@@ -68,8 +68,7 @@ extension ExplorerTheme {
         switch self {
         case .native: return .teal
         case .starburst: return Color(red: 0.73, green: 0.65, blue: 1)
-        // Air follows the Mac's own accent color, like menus and sidebars.
-        case .starburstAir: return Color.accentColor
+        case .starburstAir: return RotaTokens.glassBlue
         }
     }
     var surface: Color {
@@ -132,9 +131,14 @@ struct ExplorerAirGlass: View {
                 Circle().fill(.ultraThinMaterial)
                 Circle().fill(ExplorerTheme.starburstAir.surface.opacity(0.42))
             }
-            Circle().fill(LinearGradient(colors: [.white.opacity(0.07), .clear],
-                startPoint: .top, endPoint: .bottom))
-            Circle().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+            // Liquid-glass look: a soft top highlight, a faint blue body and a
+            // specular rim that is brightest where light would catch it.
+            Circle().fill(RadialGradient(colors: [.white.opacity(0.10), .clear], center: UnitPoint(x: 0.35, y: 0.12),
+                startRadius: 0, endRadius: 170))
+            Circle().fill(RotaTokens.glassBlue.opacity(0.035))
+            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.06), .white.opacity(0.10), .white.opacity(0.30)],
+                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            Circle().strokeBorder(.white.opacity(0.06), lineWidth: 0.5).padding(3)
         }
         .shadow(color: .black.opacity(0.4), radius: 12, y: 7)
         .allowsHitTesting(false).accessibilityHidden(true)
@@ -172,11 +176,11 @@ struct ExplorerAirSectorChrome: View {
     var body: some View {
         let accent = ExplorerTheme.starburstAir.accent
         ZStack {
-            shape.fill(opaque ? ExplorerTheme.starburstAir.surface : Color.white.opacity(available ? 0.045 : 0.02))
-            if selected {
-                shape.fill(LinearGradient(colors: [accent.opacity(0.95), accent.opacity(0.78)], startPoint: .top, endPoint: .bottom))
+            shape.fill(opaque ? ExplorerTheme.starburstAir.surface : Color.white.opacity(available ? 0.035 : 0.015))
+            if selected && opaque {
+                shape.fill(accent.opacity(0.35))
             }
-            shape.stroke(selected ? accent : Color.white.opacity(available ? 0.12 : 0.06), lineWidth: selected ? 1 : 0.5)
+            shape.stroke(selected ? accent.opacity(0.85) : Color.white.opacity(available ? 0.10 : 0.05), lineWidth: selected ? 0.75 : 0.5)
                 .shadow(color: accent.opacity(selected ? 0.7 : 0), radius: selected ? 5 : 0)
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
@@ -353,5 +357,50 @@ struct ExplorerLayoutPreview: View {
                     .frame(width: tile.width, height: tile.height).offset(x: tile.minX, y: tile.minY)
             }
         }.frame(width: 72, height: 46).accessibilityHidden(true)
+    }
+}
+
+/// The glass lens that slides between Air sectors as the selection moves.
+/// Its angle animates, so the highlight glides around the ring instead of
+/// jumping from tile to tile.
+struct ExplorerGlassLens: Shape {
+    var angle: Double
+    let innerRadius: Double
+    let outerRadius: Double
+    let halfAngle: Double
+    var animatableData: Double {
+        get { angle }
+        set { angle = newValue }
+    }
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let start = Angle.degrees(angle - halfAngle), end = Angle.degrees(angle + halfAngle)
+        var path = Path()
+        path.addArc(center: center, radius: outerRadius, startAngle: start, endAngle: end, clockwise: false)
+        path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ExplorerGlassLensView: View {
+    let angle: Double
+    let innerRadius: Double
+    let outerRadius: Double
+    let halfAngle: Double
+    var body: some View {
+        let lens = ExplorerGlassLens(angle: angle, innerRadius: innerRadius, outerRadius: outerRadius, halfAngle: halfAngle)
+        let blue = RotaTokens.glassBlue
+        ZStack {
+            // Soft light-blue hue behind the selected tile.
+            lens.fill(RadialGradient(colors: [blue.opacity(0.55), blue.opacity(0.18)], center: .center,
+                startRadius: innerRadius, endRadius: outerRadius)).blur(radius: 9)
+            // The glass itself: a faint body with a bright specular edge.
+            lens.fill(LinearGradient(colors: [.white.opacity(0.16), blue.opacity(0.10), .white.opacity(0.04)],
+                startPoint: .top, endPoint: .bottom))
+            lens.stroke(LinearGradient(colors: [.white.opacity(0.75), blue.opacity(0.45), .white.opacity(0.15)],
+                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.9)
+        }
+        .allowsHitTesting(false).accessibilityHidden(true)
     }
 }

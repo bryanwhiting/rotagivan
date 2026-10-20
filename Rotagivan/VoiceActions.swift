@@ -4,20 +4,28 @@ import CryptoKit
 struct VoiceRegisteredAction: Identifiable, Equatable {
     let action: BindingAction
     let detail: String
-    var appBundleID: String? = nil
-    var appName: String? = nil
-    var actionName: String? = nil
-    var keywordSets: [[String]] = []
-    var overrideTrigger: AppGestureTrigger? = nil
-    var customCommandID: UUID? = nil
-    var enabled = true
-    var title: String { actionName ?? action.title }
-    var id: String {
-        if let customCommandID { return ApplicationCommand.voiceID(for: customCommandID) }
-        guard let appBundleID else { return Self.id(for: action) }
-        let identity = appBundleID + ":" + (overrideTrigger?.rawValue ?? "default") + ":" + action.identity
-        return "action_" + SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+    var appBundleID: String?   // Custom commands keep their id when re-scoped; nothing else re-scopes a record.
+    var appName: String?
+    var actionName: String?
+    var keywordSets: [[String]]
+    let overrideTrigger: AppGestureTrigger?
+    let customCommandID: UUID?
+    var enabled: Bool
+    /// Computed once: hashing the action's JSON identity on every access made
+    /// registry builds and lookups cost tens of milliseconds.
+    let id: String
+    init(action: BindingAction, detail: String, appBundleID: String? = nil, appName: String? = nil, actionName: String? = nil,
+         keywordSets: [[String]] = [], overrideTrigger: AppGestureTrigger? = nil, customCommandID: UUID? = nil, enabled: Bool = true) {
+        self.action = action; self.detail = detail; self.appBundleID = appBundleID; self.appName = appName
+        self.actionName = actionName; self.keywordSets = keywordSets; self.overrideTrigger = overrideTrigger
+        self.customCommandID = customCommandID; self.enabled = enabled
+        if let customCommandID { id = ApplicationCommand.voiceID(for: customCommandID) }
+        else if let appBundleID {
+            let identity = appBundleID + ":" + (overrideTrigger?.rawValue ?? "default") + ":" + action.identity
+            id = "action_" + SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+        } else { id = Self.id(for: action) }
     }
+    var title: String { actionName ?? action.title }
     var matchingDescription: String {
         detail + (keywordSets.isEmpty ? "" : " User vocabulary (alternative phrases): " + keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "; "))
     }
@@ -30,8 +38,78 @@ struct VoiceRegisteredAction: Identifiable, Equatable {
 enum VoiceActionRegistry {
     /// Learned, device-local actions (recent Slack channels). Set once at launch.
     nonisolated(unsafe) static var supplementalActions: () -> [VoiceRegisteredAction] = { [] }
+    /// Everything that depends only on settings and the application index.
+    /// Building it walks the whole settings document, so one copy is kept and
+    /// reused until either input changes (an HUD open, an MCP call and the
+    /// usage tracker all ask for it).
+    private struct Base {
+        let settingsKey: Data
+        let applicationsKey: String
+        let records: [String: VoiceRegisteredAction]
+        let scoped: [VoiceRegisteredAction]
+    }
+    private struct Result {
+        let settingsKey: Data
+        let applicationsKey: String
+        let activeBundleID: String?
+        let includeInactive: Bool
+        let supplementalKey: String
+        let records: [VoiceRegisteredAction]
+    }
+    private static let baseLock = NSLock()
+    nonisolated(unsafe) private static var cachedBase: Base?
+    nonisolated(unsafe) private static var cachedResult: Result?
+
     static func make(settings: StoredSettings, applications: [ExplorerApplication] = [], activeBundleID: String? = nil,
                      includeInactiveApplications: Bool = false) -> [VoiceRegisteredAction] {
+        let base = self.base(settings: settings, applications: applications)
+        let supplemental = supplementalActions().filter(\.action.isValid)
+        let supplementalKey = supplemental.map(\.id).joined(separator: ",")
+        baseLock.lock()
+        let cached = cachedResult
+        baseLock.unlock()
+        if let cached {
+            let sameInputs = cached.settingsKey == base.settingsKey && cached.applicationsKey == base.applicationsKey
+            let sameScope: Bool = cached.activeBundleID == activeBundleID && cached.includeInactive == includeInactiveApplications
+            if sameInputs && sameScope && cached.supplementalKey == supplementalKey { return cached.records }
+        }
+        var records = base.records
+        for record in supplemental where records[record.id] == nil { records[record.id] = record }
+        for record in base.scoped where includeInactiveApplications || (record.enabled && record.appBundleID == activeBundleID) {
+            records[record.id] = record
+        }
+        let vocabularyByID = Dictionary((settings.actionVocabulary ?? []).map { ($0.actionID, $0.keywordSets) },
+            uniquingKeysWith: { first, _ in first })
+        // The sort's localized comparison is the slow part, which is why the
+        // finished list is cached as well.
+        var enrichedRecords: [VoiceRegisteredAction] = []
+        enrichedRecords.reserveCapacity(records.count)
+        for record in records.values {
+            var enriched = record
+            enriched.keywordSets = vocabularyByID[record.id] ?? []
+            enrichedRecords.append(enriched)
+        }
+        let sorted = enrichedRecords.sorted { (lhs: VoiceRegisteredAction, rhs: VoiceRegisteredAction) -> Bool in
+            if lhs.title == rhs.title { return lhs.id < rhs.id }
+            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+        baseLock.lock()
+        cachedResult = Result(settingsKey: base.settingsKey, applicationsKey: base.applicationsKey, activeBundleID: activeBundleID,
+            includeInactive: includeInactiveApplications, supplementalKey: supplementalKey, records: sorted)
+        baseLock.unlock()
+        return sorted
+    }
+
+    private static func base(settings: StoredSettings, applications: [ExplorerApplication]) -> Base {
+        // Sorted keys make the encoding deterministic, so equal settings hit the cache.
+        let keyEncoder = JSONEncoder()
+        keyEncoder.outputFormatting = .sortedKeys
+        let settingsKey = (try? keyEncoder.encode(settings)) ?? Data()
+        let applicationsKey = applications.map { $0.bundleID + "\u{1f}" + $0.name }.joined(separator: "\u{1e}")
+        baseLock.lock()
+        let existing = cachedBase
+        baseLock.unlock()
+        if let existing, existing.settingsKey == settingsKey, existing.applicationsKey == applicationsKey { return existing }
         var records: [String: VoiceRegisteredAction] = [:]
         func add(_ action: BindingAction, detail: String? = nil) {
             guard action.isValid else { return }
@@ -65,9 +143,8 @@ enum VoiceActionRegistry {
             let inputFields: Set<String> = ["trigger", "activationShortcut", "holdShortcut", "shortcuts", "appOverrides", "applicationCommands", "actionVocabulary"]
             for (key, child) in object where !inputFields.contains(key) { visit(child) }
         }
-        if let data = try? JSONEncoder().encode(settings), let object = try? JSONSerialization.jsonObject(with: data) { visit(object) }
+        if let object = try? JSONSerialization.jsonObject(with: settingsKey) { visit(object) }
         applications.forEach { add(.openApp(bundleID: $0.bundleID, name: $0.name)) }
-        for record in supplementalActions() where record.action.isValid && records[record.id] == nil { records[record.id] = record }
         let builtInCommands = slackDefaults + chromeDefaults
         var scoped = builtInCommands
         for command in settings.resolvedApplicationCommands where command.isValid {
@@ -90,16 +167,9 @@ enum VoiceActionRegistry {
                     overrideTrigger: binding.trigger, enabled: app.enabled))
             }
         }
-        for record in scoped where includeInactiveApplications || (record.enabled && record.appBundleID == activeBundleID) {
-            records[record.id] = record
-        }
-        let vocabularyByID = Dictionary((settings.actionVocabulary ?? []).map { ($0.actionID, $0.keywordSets) },
-            uniquingKeysWith: { first, _ in first })
-        return records.values.map { record in
-            var enriched = record
-            enriched.keywordSets = vocabularyByID[record.id] ?? []
-            return enriched
-        }.sorted { $0.title == $1.title ? $0.id < $1.id : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        let built = Base(settingsKey: settingsKey, applicationsKey: applicationsKey, records: records, scoped: scoped)
+        baseLock.lock(); cachedBase = built; baseLock.unlock()
+        return built
     }
 
     // Chrome's English-layout Mac defaults, verified September 26, 2026:

@@ -48,6 +48,32 @@ import QuartzCore
         let fields = try SyncConfigurationCodec.fields(AppConfiguration(store: store))
         measure("sync: changes(unchanged)") { _ = SyncConfigurationCodec.changes(from: fields, to: fields) }
         let apps = (0..<600).map { ExplorerApplication(bundleID: "bench.app.\($0)", name: "Application \($0)", url: URL(fileURLWithPath: "/Applications/App\($0).app")) }
+        // MCP: one tool call round trip through the Unix socket into the main actor.
+        let socketURL = URL(fileURLWithPath: "/tmp/rb-\(Int.random(in: 1000...9999))/bridge.sock")
+        defaults.set(true, forKey: MCPBridgeEndpoint.enabledKey)
+        let bridge = MCPBridgeServer(defaults: defaults, socketURL: socketURL)
+        bridge.attach(store: store, applications: { apps })
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        print("mcp listening:", bridge.isListening, bridge.error ?? "")
+        measure("registry: VoiceActionRegistry.make (cached)") { _ = VoiceActionRegistry.make(settings: store.settings, applications: apps, includeInactiveApplications: true) }
+        measure("mcp: perform(get_settings_summary) on main") { _ = bridge.perform("get_settings_summary", arguments: [:]) }
+        measure("mcp: perform(list_huds) on main") { _ = bridge.perform("list_huds", arguments: [:]) }
+        measure("mcp: perform(list_actions) on main") { _ = bridge.perform("list_actions", arguments: [:]) }
+        var mcpSamples: [Double] = []
+        for _ in 0..<15 {
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                let start = DispatchTime.now().uptimeNanoseconds
+                _ = MCPBridgeClient.call(tool: "get_settings_summary", arguments: [:], socketPath: socketURL.path)
+                mcpSamples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
+                done.signal()
+            }
+            while done.wait(timeout: .now()) == .timedOut { RunLoop.main.run(until: Date().addingTimeInterval(0.0005)) }
+        }
+        mcpSamples.sort()
+        print(String(format: "%-46@ median %7.2f ms   max %7.2f ms", "mcp: socket round trip (main pumped 0.5 ms)", mcpSamples[mcpSamples.count / 2], mcpSamples.last!))
+        bridge.stop()
+        if CommandLine.arguments.contains("--only-mcp") { return }
         let registered = VoiceActionRegistry.make(settings: store.settings, applications: apps, includeInactiveApplications: true)
         let actions = LauncherAction.apps(apps) + [.settings] + LauncherAction.registered(registered.filter { $0.enabled && $0.action.kind != .openApp })
         print("launcher catalog rows:", actions.count)
@@ -98,6 +124,19 @@ import QuartzCore
             let image = hudHost.bitmapImageRepForCachingDisplay(in: hudHost.bounds)!
             hudHost.cacheDisplay(in: hudHost.bounds, to: image)
         }
+        // Timer alert: CPU the glowing edges burn while shown (breathing animation on every screen).
+        func cpuSeconds() -> Double {
+            var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+            return Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+        }
+        let alert = FocusTimerAlert(minutes: 1, onDone: {}, onSnooze: {})
+        alert.show()
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))   // past the three flashes
+        let cpuBefore = cpuSeconds(); let wallBefore = Date()
+        RunLoop.main.run(until: Date().addingTimeInterval(3))
+        let alertCPU = (cpuSeconds() - cpuBefore) / Date().timeIntervalSince(wallBefore) * 100
+        alert.close()
+        print(String(format: "%-46@ %5.1f%% of one core", "timer alert: CPU while breathing", alertCPU))
         if CommandLine.arguments.contains("--loop-frame") {
             let until = Date().addingTimeInterval(6)
             while Date() < until {

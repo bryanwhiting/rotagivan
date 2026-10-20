@@ -17,16 +17,19 @@ and after any change that touches these paths.
 | Chrome tabs HUD open | blank until AppleScript | previous snapshot at once | Fresh snapshot replaces it; the script asks Chrome per window, not per tab. |
 | Chrome recency sampler (every 2 s while Chrome is frontmost) | AppleScript each tick | AX title read; AppleScript only when the title changed | |
 | Settings slider tick (one `settings` change) | 2.4 ms | 0.6 ms | Profile library written once per run-loop turn; explicit renames still write at once. |
-| Sync after an edit (snapshot + field diff, debounced 750 ms) | 5.4 ms | — | Runs once per quiet period, not per keystroke. Left as is. |
-| Launcher search per keystroke (966 rows) | 2.2–2.8 ms | — | Under a frame; left as is. |
+| Launcher search per keystroke (966 rows, Rust engine + usage order) | 2.2–2.8 ms | — | Under a frame; left as is. |
 | Profile switch (`selectConfiguration`) | 2.4 ms | — | Plus HID restart, which is device-bound. |
 | Settings window: Actions / General first render | 33 / 37 ms | — | |
 | Settings window: HUD page, no layers | 108 ms | 94 ms | Preview faces drop the material, drop shadow and per-label shadows. |
 | Settings window: HUD page, 12 layers | 360 ms | 198 ms | Each satellite face is one GPU raster (`drawingGroup`). Remaining cost is one full HUD layout per layer. |
 | Settings window: Calibration tab (opened on demand) | — | 190 ms | Tap calibration cards; only paid when the tab is chosen. Candidate for a lazier layout. |
+| Voice/action registry build (`VoiceActionRegistry.make`, 600 apps) — every HUD open, MCP call and usage-tracker refresh | 60 ms | 0.6 ms | Base and finished lists cached per settings/applications/scope; record ids computed once instead of hashing JSON on every access. |
+| MCP tool call round trip (`get_settings_summary`) | 62 ms | 0.7 ms | Same cache; the socket itself costs under 0.1 ms. `list_actions` 82 → 4 ms. |
+| Launcher catalog per keystroke | rebuilt 966 rows + compared | reused | Catalog array rebuilt only when a snapshot arrives. |
+| Sync after an edit | 5.4 ms on main | ~0 on main | Field encoding runs on a background task; only the snapshot copy stays on the main actor. |
+| Timer alert glow (breathing, every screen) | 5.4% of a core | — | Compositing only; left as is. |
 | Idle CPU (app in background) | 0.0% | 0.0% | Timers: Slack/Chrome title sampling 2 s (cheap AX reads), usage tracker 5 s, update check hourly, sync poll hourly. |
 | Timer, media controls, built-in HUD switches | model updates only | — | Same render path as the HUD above. |
-| MCP tool call | one Unix-socket round trip + a main-actor settings write | — | Local only; not measured separately. |
 
 Also found and fixed: 25,174 leftover `UserDefaults` suite files from test runs in
 `~/Library/Preferences` (test.sh now sweeps them), which slowed every

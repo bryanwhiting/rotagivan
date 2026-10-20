@@ -503,7 +503,10 @@ struct SyncCredentials {
         do {
             // Edits that do not touch a portable setting (window focus, the
             // enable switch, a remote change just applied) never hit the network.
-            let initial = try SyncConfigurationCodec.fields(snapshot())
+            // Encoding every field is a few milliseconds; keep it off the main thread.
+            let initialConfiguration = snapshot()
+            let initial = try await Task.detached(priority: .utility) { try SyncConfigurationCodec.fields(initialConfiguration) }.value
+            guard account == signed, !shuttingDown else { return }
             if trigger == .localChange, let observedFields, reconciler != nil,
                SyncConfigurationCodec.changes(from: observedFields, to: initial).isEmpty { return }
             await vault.awaitLocalRestore()
@@ -610,7 +613,9 @@ struct SyncCredentials {
                 state = await reconciler.snapshot()
             }
             // Preserve edits made while a request was in flight.
-            let current = try SyncConfigurationCodec.fields(snapshot())
+            let currentConfiguration = snapshot()
+            let current = try await Task.detached(priority: .utility) { try SyncConfigurationCodec.fields(currentConfiguration) }.value
+            guard account == signed, !shuttingDown else { return }
             let duringRequest = SyncConfigurationCodec.changes(from: initial, to: current)
             if !duringRequest.isEmpty {
                 try await reconciler.edit(duringRequest)

@@ -38,6 +38,11 @@ extension AppExplorerPresenting {
     private var launcherMenuRefresh: Task<Void, Never>?
     private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
     private var launcherActionSnapshot: [LauncherAction] = []
+    /// The catalog only changes when a snapshot (apps, folders, tabs, menus)
+    /// arrives, not per keystroke; reusing the same array lets the search
+    /// index skip its element-by-element comparison.
+    private var launcherCatalogDirty = true
+    private var launcherCatalogAppCount = -1
     private var chromeTabSnapshot: [ChromeRecentTab] = []
     private var chromeTabsLoaded = false
     private var chromeTabsPage = 0
@@ -361,6 +366,7 @@ extension AppExplorerPresenting {
         model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
         pendingMenuAction = nil; launcherMenuSnapshot = []; folderSnapshot = []
         launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
+        launcherCatalogDirty = true
         let menuGeneration = selectionGeneration
         let tabProvider = chromeTabsProvider
         let tabSession = chromeSnapshotSession
@@ -374,6 +380,7 @@ extension AppExplorerPresenting {
                 let menus = await Task.detached(priority: .utility) { LauncherMenuCatalog.scan(pid: pid) }.value
                 guard let self, self.isVisible, self.selectionGeneration == menuGeneration, !Task.isCancelled else { return }
                 self.launcherMenuSnapshot = menus
+                self.launcherCatalogDirty = true
                 if !self.model.launcherQuery.isEmpty { self.updateLauncherResults(VoiceApplicationIndex.shared.applications) }
             }
         }
@@ -566,6 +573,7 @@ extension AppExplorerPresenting {
         chromeTabSnapshot = ChromeTabRecency.shared.ranked(tabs)
         chromeTabsLoaded = true
         folderSnapshot = folders
+        launcherCatalogDirty = true
         if model.showingChromeTabs || model.showingRecentPlaces { refreshGroup() }
         if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
     }
@@ -573,7 +581,11 @@ extension AppExplorerPresenting {
     private func updateLauncherResults(_ apps: [ExplorerApplication]) {
         let selectedID = model.launcherActions.indices.contains(model.launcherSelection)
             ? model.launcherActions[model.launcherSelection].id : nil
-        launcherActionSnapshot = LauncherAction.apps(apps) + LauncherAction.folders(folderSnapshot) + LauncherAction.chromeTabs(chromeTabSnapshot) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot
+        if launcherCatalogDirty || launcherCatalogAppCount != apps.count {
+            launcherActionSnapshot = LauncherAction.apps(apps) + LauncherAction.folders(folderSnapshot) + LauncherAction.chromeTabs(chromeTabSnapshot) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot
+            launcherCatalogDirty = false
+            launcherCatalogAppCount = apps.count
+        }
         model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot)
         model.launcherResults = model.launcherActions.compactMap { if case .app(let app) = $0.target { return app }; return nil }
         model.launcherSelection = selectedID.flatMap { id in model.launcherActions.firstIndex { $0.id == id } } ?? 0
@@ -2079,6 +2091,7 @@ extension AppExplorerPresenting {
     func dismiss() {
         launcherMenuRefresh?.cancel(); launcherMenuRefresh = nil
         launcherMenuSnapshot = []; launcherActionSnapshot = []; launcherRegisteredSnapshot = []; pendingMenuAction = nil
+        launcherCatalogDirty = true
         searchObservation = nil
         model.launcherQuery = ""; model.launcherResults = []; model.launcherSelection = 0
         endVoiceMode()

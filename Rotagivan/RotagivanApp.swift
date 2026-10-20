@@ -34,6 +34,7 @@ struct RotagivanApp: App {
         // do not depend on either the settings window or menu being presented.
         DispatchQueue.main.async {
             VoiceApplicationIndex.shared.start()
+            MCPBridgeServer.shared.attach(store: store, applications: { VoiceApplicationIndex.shared.applications })
             LocalUsageTracker.shared.actionCatalogue = {
                 VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications,
                     includeInactiveApplications: true).map {
@@ -106,7 +107,7 @@ struct RotagivanApp: App {
     }
 
     private func start() {
-        delegate.onQuit = { hid.stop(); ChromeTabRecency.shared.stop(); SlackChannelRecents.shared.stop() }
+        delegate.onQuit = { MCPBridgeServer.shared.stop(); hid.stop(); ChromeTabRecency.shared.stop(); SlackChannelRecents.shared.stop() }
         delegate.beforeQuit = {
             await LocalUsageTracker.shared.prepareToQuit()
             await sync.prepareToQuit()

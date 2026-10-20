@@ -43,6 +43,12 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKe
   Rotagivan/Tests/ActionCatalogSnapshotTests.swift -framework AppKit -framework Carbon -framework Security \
   -o "$test_dir/ActionCatalogSnapshotTests"
 "$test_dir/ActionCatalogSnapshotTests"
+xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKeyManager.swift \
+  Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
+  Rotagivan/VaultCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift \
+  Rotagivan/MCPProtocol.swift Rotagivan/MCPSettingsTools.swift Rotagivan/MCPBridge.swift \
+  Rotagivan/Tests/MCPTests.swift -framework AppKit -framework Carbon -framework Security -o "$test_dir/MCPTests"
+"$test_dir/MCPTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/MacroAuditTests.swift -o "$test_dir/MacroAuditTests"
 "$test_dir/MacroAuditTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/UIComponents.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \

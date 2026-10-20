@@ -741,6 +741,7 @@ struct ContentView: View {
             RotaCard("Startup", systemImage: "power") {
                 Toggle("Launch at login", isOn: launchAtLoginBinding).toggleStyle(.rotaSwitch)
             }
+            MCPSettingsCard()
             Text("Rotagivan is an independent, editable implementation. Quit ZSA Navigator before using Rotagivan’s Navigator driver. Apple trackpad actions are independent of that driver.")
                 .font(.callout)
                 .foregroundStyle(.secondary)

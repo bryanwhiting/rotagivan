@@ -92,6 +92,10 @@ sources=(
   "$script_dir/CalibrationSettingsView.swift"
   "$script_dir/AccessibilitySetup.swift"
   "$script_dir/UpdateChecker.swift"
+  "$script_dir/MCPProtocol.swift"
+  "$script_dir/MCPSettingsTools.swift"
+  "$script_dir/MCPBridge.swift"
+  "$script_dir/MCPSettingsView.swift"
   "$script_dir/ContentView.swift"
   "$script_dir/ShortcutRecorder.swift"
   "$script_dir/RotagivanApp.swift"
@@ -103,7 +107,7 @@ yaml_dir="$script_dir/../YAML"
 python3 "$script_dir/build-provenance.py" --repo "$script_dir/.." \
   --template "$script_dir/Info.plist" --output "$app_dir/Contents/Info.plist" \
   --manifest "$app_dir/Contents/Resources/BuildProvenance.json" -- \
-  "${sources[@]}" "$script_dir/build.sh" "$script_dir/build-provenance.py" \
+  "${sources[@]}" "$script_dir/MCPHelperMain.swift" "$script_dir/build.sh" "$script_dir/build-provenance.py" \
   "$script_dir/DrawIcon.swift" "$script_dir/DefaultConfiguration.yaml" \
   "$script_dir/RustSearch/search.rs" "$yaml_dir/Package.swift" "$yaml_dir/Package.resolved" \
   "$yaml_dir/Sources" "$yaml_dir/LibYAML-LICENSE.txt"
@@ -131,6 +135,10 @@ xcrun swiftc -O -parse-as-library \
   -framework Security \
   "${sources[@]}" \
   -o "$app_dir/Contents/MacOS/Rotagivan"
+# Stdio MCP helper that agents launch; it forwards tool calls to the running app.
+xcrun swiftc -O -parse-as-library "$script_dir/MCPProtocol.swift" "$script_dir/MCPHelperMain.swift" \
+  -o "$app_dir/Contents/MacOS/rotagivan-mcp"
+codesign --force --sign "$signing_identity" --identifier "local.rotagivan.mcp" "$app_dir/Contents/MacOS/rotagivan-mcp"
 python3 "$script_dir/build-provenance.py" --repo "$script_dir/.." \
   --manifest "$app_dir/Contents/Resources/BuildProvenance.json" --verify
 codesign --force --sign "$signing_identity" \

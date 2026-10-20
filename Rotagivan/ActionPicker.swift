@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 enum ActionPickerCategory: String, CaseIterable, Identifiable {
     case all = "All actions", shortcuts = "Shortcuts", macros = "Macros", apps = "Applications"
-    case mac = "Mac controls", windows = "Windows", media = "Audio & media", hud = "HUD layers", pointer = "Pointer"
+    case mac = "Mac controls", windows = "Windows", media = "Audio & media", hud = "HUD layers", builtInHUDs = "Built-in HUDs", pointer = "Pointer"
     var id: Self { self }
     var symbol: String {
         switch self {
@@ -16,6 +16,7 @@ enum ActionPickerCategory: String, CaseIterable, Identifiable {
         case .windows: return "macwindow"
         case .media: return "speaker.wave.2"
         case .hud: return "circle.hexagongrid"
+        case .builtInHUDs: return "circle.hexagongrid.fill"
         case .pointer: return "cursorarrow"
         }
     }
@@ -27,8 +28,11 @@ struct ActionPickerItem: Identifiable {
     let title: String
     let detail: String
     var applicationURL: URL? = nil
-    var id: String { action.identity }
-    var symbol: String { action.pickerSymbol }
+    /// A generated HUD (Recent Apps, Chrome tabs…) offered to tile editors only;
+    /// `action` is a placeholder for these rows.
+    var builtIn: ExplorerReservedGroup? = nil
+    var id: String { builtIn.map { "builtin:" + $0.rawValue } ?? action.identity }
+    var symbol: String { builtIn?.symbol ?? action.pickerSymbol }
 }
 
 /// Resolve icons only for visible rows, using the indexed application path.
@@ -78,7 +82,7 @@ extension BindingAction {
 
 enum ActionPickerCatalog {
     static func make(dictionary: [NamedHotkey], layers: [ExplorerHoldLayer], destinations: [HUDActionDestination],
-                     applications: [ExplorerApplication], allowPointer: Bool) -> [ActionPickerItem] {
+                     applications: [ExplorerApplication], allowPointer: Bool, builtInHUDs: Bool = false) -> [ActionPickerItem] {
         var items: [ActionPickerItem] = []
         var seen = Set<String>()
         func add(_ action: BindingAction, _ category: ActionPickerCategory, detail: String? = nil, applicationURL: URL? = nil) {
@@ -97,9 +101,16 @@ enum ActionPickerCatalog {
             }
         }
         ExplorerMediaAction.allCases.forEach { add(.media($0), .media) }
-        add(.command(.mediaControls), .hud)
+        if builtInHUDs {
+            // One way to put a generated HUD on a tile: this category.
+            for group in ExplorerReservedGroup.allCases {
+                items.append(ActionPickerItem(action: .tap(.none), category: .builtInHUDs, title: group.title, detail: group.summary, builtIn: group))
+            }
+        } else {
+            add(.command(.mediaControls), .hud)
+            add(.command(.windowManager), .hud)
+        }
         add(.command(.timer), .hud)
-        add(.command(.windowManager), .hud)
         add(.command(.activateVoiceMode), .hud)
         HUDNavigationAction.allCases.forEach { add(.hudNavigation($0), .hud) }
         if destinations.isEmpty {
@@ -140,6 +151,8 @@ struct ActionPickerModal: View {
     var loadApplications: (@Sendable () -> [ExplorerApplication])? = nil
     @ObservedObject var applicationIndex = VoiceApplicationIndex.shared
     let onSelect: (BindingAction) -> Void
+    /// Offered by tile editors: choosing a Built-in HUD row places that generated HUD on the tile.
+    var onSelectBuiltIn: ((ExplorerReservedGroup) -> Void)? = nil
     let onCancel: () -> Void
     @State private var applications: [ExplorerApplication] = []
     @State private var loadingApps = true
@@ -167,13 +180,20 @@ struct ActionPickerModal: View {
 
     private var items: [ActionPickerItem] {
         ActionPickerCatalog.make(dictionary: dictionary, layers: layers, destinations: destinations,
-            applications: loadApplications == nil ? applicationIndex.applications : applications, allowPointer: allowPointerActions)
+            applications: loadApplications == nil ? applicationIndex.applications : applications, allowPointer: allowPointerActions,
+            builtInHUDs: onSelectBuiltIn != nil)
     }
     private var results: [ActionPickerItem] { ActionPickerCatalog.search(items, query: query, category: category) }
+    private var selectedItem: ActionPickerItem? { custom == nil ? results.first { $0.id == selectedID } : nil }
+    private var selectedBuiltIn: ExplorerReservedGroup? { selectedItem?.builtIn }
     private var selected: BindingAction? {
         if custom == "Website" { return websiteDraft }
         if custom != nil { return draft }
-        return results.first { $0.id == selectedID }?.action
+        return selectedItem?.action
+    }
+    private var canConfirm: Bool { selectedBuiltIn != nil || selected?.isValid == true }
+    private var categories: [ActionPickerCategory] {
+        ActionPickerCategory.allCases.filter { (allowPointerActions || $0 != .pointer) && (onSelectBuiltIn != nil || $0 != .builtInHUDs) }
     }
 
     var body: some View {
@@ -206,7 +226,7 @@ struct ActionPickerModal: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 4) {
-                    ForEach(ActionPickerCategory.allCases.filter { allowPointerActions || $0 != .pointer }) { value in
+                    ForEach(categories) { value in
                         Button {
                             category = value; custom = nil; draft = nil; selectFirst()
                         } label: {
@@ -273,14 +293,14 @@ struct ActionPickerModal: View {
             Divider()
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(selected.map { dictionary.title(for: $0) } ?? "Select an action")
+                    Text(selectedBuiltIn?.title ?? selected.map { dictionary.title(for: $0) } ?? "Select an action")
                         .font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(selected?.description ?? "Nothing changes until you choose Use action.")
+                    Text(selectedBuiltIn?.summary ?? selected?.description ?? "Nothing changes until you choose Use action.")
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Button("Use action", action: confirm).buttonStyle(.rotaPrimary)
-                    .keyboardShortcut(.defaultAction).disabled(selected?.isValid != true)
+                    .keyboardShortcut(.defaultAction).disabled(!canConfirm)
                     .accessibilityIdentifier("action-picker-confirm")
             }.padding(20)
         }
@@ -329,7 +349,10 @@ struct ActionPickerModal: View {
     }
 
     private func selectFirst() { selectedID = results.first?.id }
-    private func confirm() { if let selected, selected.isValid { onSelect(selected) } }
+    private func confirm() {
+        if let group = selectedBuiltIn { onSelectBuiltIn?(group); return }
+        if let selected, selected.isValid { onSelect(selected) }
+    }
 
     private func customEditor(_ name: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {

@@ -38,9 +38,11 @@ import SwiftUI
             fatalError("Tile actions must be backed by a native macOS menu")
         }
         let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
-        for title in ["Actions", "App launches", "Built-in HUD layers", "Create HUD layer…", "Window management", "Mac commands", "Media controls"] {
+        for title in ["Actions", "App launches", "Window management", "Mac commands", "Media controls"] {
             precondition(titles.contains(title), "Missing action category: \(title)")
         }
+        // Built-in HUDs have one home: the tile's action picker, not this menu.
+        precondition(!titles.contains("Built-in HUD layers") && !titles.contains("Create HUD layer…"))
         func submenu(_ title: String, in menu: NSMenu) -> NSMenu {
             let result = menu.items.first { $0.title == title }!.submenu!
             result.update()
@@ -48,8 +50,6 @@ import SwiftUI
         }
         let windows = submenu("Window management", in: menu)
         let macCommands = submenu("Mac commands", in: menu)
-        let reserved = submenu("Built-in HUD layers", in: menu)
-        precondition(reserved.items.map(\.title) == ExplorerReservedGroup.allCases.map(\.title))
         let resize = submenu("Resize window", in: windows)
         precondition(resize.items.contains { $0.title == "Fill desktop" })
         for layout in ExplorerWindowLayout.allCases {

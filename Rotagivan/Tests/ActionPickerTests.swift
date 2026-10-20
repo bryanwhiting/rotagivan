@@ -24,6 +24,16 @@ import SwiftUI
         precondition(ActionPickerCatalog.search(items, query: "zzzz-no-match", category: .all).isEmpty)
         precondition(!ActionPickerCatalog.make(dictionary: [], layers: [], destinations: [], applications: [], allowPointer: false)
             .contains { $0.category == .pointer })
+        // Tile editors get a Built-in HUDs category holding every generated HUD exactly
+        // once; the same HUDs then leave the HUD layers category so there is one way to assign.
+        precondition(!items.contains { $0.builtIn != nil })
+        let tileItems = ActionPickerCatalog.make(dictionary: [], layers: [], destinations: [], applications: [], allowPointer: true, builtInHUDs: true)
+        precondition(Set(tileItems.map(\.id)).count == tileItems.count)
+        precondition(tileItems.filter { $0.category == .builtInHUDs }.compactMap(\.builtIn) == ExplorerReservedGroup.allCases)
+        precondition(tileItems.allSatisfy { ($0.category == .builtInHUDs) == ($0.builtIn != nil) })
+        precondition(!tileItems.contains { $0.action == .command(.mediaControls) || $0.action == .command(.windowManager) })
+        precondition(ActionPickerCatalog.search(tileItems, query: "chrome", category: .builtInHUDs).first?.builtIn == .chromeTabs)
+        precondition(ActionPickerCatalog.search(tileItems, query: "slack", category: .all).contains { $0.builtIn == .slackChannels })
         // Assignment dialogs have only a bundle ID, not a catalog row's URL.
         // They must render the same real icon as the indexed picker and refresh
         // when the selected action changes, without launching an application.

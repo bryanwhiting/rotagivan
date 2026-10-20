@@ -84,6 +84,50 @@ struct BindingActionPicker: View {
     }
 }
 
+/// A HUD tile's one way to assign: the current assignment is itself the button
+/// that opens the picker, which also offers the generated built-in HUDs.
+struct TileActionPicker<Icon: View>: View {
+    @Environment(\.hotkeyDictionary) private var dictionary
+    @Environment(\.hudActionLayers) private var hudLayers
+    @Environment(\.hudActionDestinations) private var hudDestinations
+    let current: BindingAction?
+    let name: String?
+    @ViewBuilder let icon: () -> Icon
+    let onSelect: (BindingAction) -> Void
+    let onSelectBuiltIn: (ExplorerReservedGroup) -> Void
+    @State private var presenting = false
+
+    var body: some View {
+        Button { presenting = true } label: {
+            HStack(spacing: 10) {
+                icon().frame(width: 26, height: 26)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name ?? "Choose action…").fontWeight(.medium).lineLimit(1)
+                    Text(name == nil ? "Apps, websites, shortcuts, macros or built-in HUDs" : "Current assignment · click to change")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Search and choose what this tile does")
+        .accessibilityLabel("Action: \(name ?? "none"). Choose action")
+        .accessibilityIdentifier("binding-action-picker")
+        .sheet(isPresented: $presenting) {
+            ActionPickerModal(current: current ?? .tap(.none), dictionary: dictionary, layers: hudLayers,
+                destinations: hudDestinations, allowPointerActions: true,
+                onSelect: { onSelect($0); presenting = false },
+                onSelectBuiltIn: { onSelectBuiltIn($0); presenting = false },
+                onCancel: { presenting = false })
+        }
+    }
+}
+
 struct BindingEditor: View {
     @State var binding: ActionBinding
     let existing: [ActionBinding]

@@ -106,7 +106,7 @@ struct BuiltInHUDDefaultEditor: View {
                 workspace: true)
                 .frame(height: 410).accessibilityIdentifier("builtin-hud-preview")
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            Text("Add this layer from Add HUD or choose it in a tile’s Built-in HUD layers menu.").font(.caption).foregroundStyle(.secondary)
+            Text("Add this layer from Add HUD or choose it under Built-in HUDs in a tile’s action picker.").font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
         .task { await loadChromeTabs() }
         .confirmationDialog("Restore the original \(group.title) default?", isPresented: $restoring) {
@@ -1075,20 +1075,24 @@ struct AppExplorerSettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 12) {
+                TileActionPicker(current: favorite.flatMap(BindingAction.from(favorite:)), name: favorite?.name, icon: {
+                    if let favorite { tileAssignmentIcon(favorite) }
+                    else { Image(systemName: "plus").foregroundStyle(.teal) }
+                }, onSelect: { selected in
+                    guard let replacement = selected.favorite(at: direction) else { return }
+                    edit { $0.setFavorite(preservingHotkey(replacement, at: groupPath + [direction]), at: direction, in: groupPath) }
+                }, onSelectBuiltIn: { group in
+                    guard groupPath.count < AppExplorerSettings.maximumGroupDepth || (group == .windowManager && !windowManagerOnly) else { return }
+                    let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
+                        at: groupPath + [direction])
+                    edit { $0.setFavorite(tile, at: direction, in: groupPath) }
+                    previewEditing = nil
+                })
+                if let selected = favorite.flatMap(BindingAction.from(favorite:)) {
+                    Text(selected.description).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let favorite {
-                    HStack(spacing: 10) {
-                        tileAssignmentIcon(favorite)
-                            .frame(width: 26, height: 26)
-                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(favorite.name).fontWeight(.medium).lineLimit(1)
-                            Text("Current assignment").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
-
                     Button("Assign tap or swipe to this action…") {
                         guard let assigned = tileBindingAction(favorite, at: direction) else { return }
                         editingTileBinding = ActionBinding(trigger: BindingTrigger(), action: assigned)
@@ -1096,43 +1100,11 @@ struct AppExplorerSettingsView: View {
                     .disabled(tileBindingAction(favorite, at: direction) == nil)
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("ACTION")
-                        .font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.secondary)
-                    BindingActionPicker(action: Binding(get: {
-                        favorite.flatMap(BindingAction.from(favorite:)) ?? .tap(.none)
-                    }, set: { selected in
-                        guard let replacement = selected.favorite(at: direction) else { return }
-                        edit { $0.setFavorite(preservingHotkey(replacement,
-                            at: groupPath + [direction]), at: direction, in: groupPath) }
-                    }))
-                    if let selected = favorite.flatMap(BindingAction.from(favorite:)) {
-                        Text(selected.description).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
                 if let favorite, favorite.bundleID != nil {
                     Toggle("Show this app’s windows", isOn: Binding(get: { favorite.showsWindows == true }, set: { enabled in
                         var updated = favorite; updated.showsWindows = enabled
                         edit { $0.setFavorite(updated, at: direction, in: groupPath) }
                     }))
-                }
-                RotaMenuButton("Groups & nested HUDs", systemImage: "square.stack.3d.up", kind: .field) {
-                    ForEach(ExplorerReservedGroup.allCases) { group in
-                        Button(group.title, systemImage: group.symbol) {
-                            let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
-                                at: groupPath + [direction])
-                            edit { $0.setFavorite(tile, at: direction, in: groupPath) }
-                            previewEditing = nil
-                        }
-                        .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth &&
-                            (group != .windowManager || windowManagerOnly))
-                    }
-                    Divider()
-                    Button("Create HUD layer…", systemImage: "square.3.layers.3d") {
-                        editingGroupPath = groupPath + [direction]
-                    }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
                 }
 
                 if favorite != nil {
@@ -1361,17 +1333,7 @@ struct AppExplorerSettingsView: View {
                 }))
             }
         } label: { Label("App launches", systemImage: "app") }
-        Menu {
-            ForEach(ExplorerReservedGroup.allCases) { group in
-                Button(group.title, systemImage: group.symbol) {
-                    let tile = preservingHotkey(baseSettings.builtInTile(group, at: direction, insideWindowManager: windowManagerOnly),
-                        at: groupPath + [direction])
-                    edit { $0.setFavorite(tile, at: direction, in: groupPath) }
-                }.disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth && (group != .windowManager || windowManagerOnly))
-            }
-        } label: { Label("Built-in HUD layers", systemImage: "square.stack.3d.up") }
-        Button("Create HUD layer…", systemImage: "square.3.layers.3d") { editingGroupPath = groupPath + [direction] }
-            .disabled(groupPath.count >= AppExplorerSettings.maximumGroupDepth)
+        // Built-in HUDs are assigned in one place only: the tile's action picker.
         Divider()
         Menu {
             Menu("Resize window") {

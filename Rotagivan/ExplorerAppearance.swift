@@ -180,8 +180,10 @@ struct ExplorerAirSectorChrome: View {
             if selected && opaque {
                 shape.fill(accent.opacity(0.35))
             }
-            shape.stroke(selected ? accent.opacity(0.85) : Color.white.opacity(available ? 0.10 : 0.05), lineWidth: selected ? 0.75 : 0.5)
-                .shadow(color: accent.opacity(selected ? 0.7 : 0), radius: selected ? 5 : 0)
+            // The glass lens carries the selection; the sector itself only
+            // lights up when transparency is reduced and there is no lens.
+            shape.stroke(selected && opaque ? accent.opacity(0.85) : Color.white.opacity(available ? 0.10 : 0.05), lineWidth: selected && opaque ? 0.75 : 0.5)
+                .shadow(color: accent.opacity(selected && opaque ? 0.7 : 0), radius: selected && opaque ? 5 : 0)
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
@@ -368,16 +370,35 @@ struct ExplorerGlassLens: Shape {
     let innerRadius: Double
     let outerRadius: Double
     let halfAngle: Double
+    var cornerRadius = 10.0
     var animatableData: Double {
         get { angle }
         set { angle = newValue }
     }
+    /// An annular wedge whose four corners are rounded, so the highlight reads
+    /// as one soft pill rather than a cut-out of the ring.
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let start = Angle.degrees(angle - halfAngle), end = Angle.degrees(angle + halfAngle)
+        let radius = max(0, min(cornerRadius, (outerRadius - innerRadius) / 2 - 0.5))
+        let lead = Angle.degrees(angle - halfAngle), trail = Angle.degrees(angle + halfAngle)
+        // Corner-arc centres sit `radius` inside both edges they join.
+        let outerInset = Angle.radians(asin(min(1, radius / max(1, outerRadius - radius))))
+        let innerInset = Angle.radians(asin(min(1, radius / max(1, innerRadius + radius))))
+        func point(_ value: Angle, _ distance: Double) -> CGPoint {
+            CGPoint(x: center.x + cos(value.radians) * distance, y: center.y + sin(value.radians) * distance)
+        }
         var path = Path()
-        path.addArc(center: center, radius: outerRadius, startAngle: start, endAngle: end, clockwise: false)
-        path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
+        path.move(to: point(lead + outerInset, outerRadius))
+        path.addArc(center: center, radius: outerRadius, startAngle: lead + outerInset, endAngle: trail - outerInset, clockwise: false)
+        path.addArc(center: point(trail - outerInset, outerRadius - radius), radius: radius,
+                    startAngle: trail - outerInset, endAngle: trail + .degrees(90), clockwise: false)
+        path.addArc(center: point(trail - innerInset, innerRadius + radius), radius: radius,
+                    startAngle: trail + .degrees(90), endAngle: trail - innerInset + .degrees(180), clockwise: false)
+        path.addArc(center: center, radius: innerRadius, startAngle: trail - innerInset, endAngle: lead + innerInset, clockwise: true)
+        path.addArc(center: point(lead + innerInset, innerRadius + radius), radius: radius,
+                    startAngle: lead + innerInset + .degrees(180), endAngle: lead + .degrees(270), clockwise: false)
+        path.addArc(center: point(lead + outerInset, outerRadius - radius), radius: radius,
+                    startAngle: lead + .degrees(270), endAngle: lead + outerInset + .degrees(360), clockwise: false)
         path.closeSubpath()
         return path
     }
@@ -395,11 +416,11 @@ struct ExplorerGlassLensView: View {
             // Soft light-blue hue behind the selected tile.
             lens.fill(RadialGradient(colors: [blue.opacity(0.55), blue.opacity(0.18)], center: .center,
                 startRadius: innerRadius, endRadius: outerRadius)).blur(radius: 9)
-            // The glass itself: a faint body with a bright specular edge.
+            // The glass itself: a faint body with one soft specular edge.
             lens.fill(LinearGradient(colors: [.white.opacity(0.16), blue.opacity(0.10), .white.opacity(0.04)],
                 startPoint: .top, endPoint: .bottom))
-            lens.stroke(LinearGradient(colors: [.white.opacity(0.75), blue.opacity(0.45), .white.opacity(0.15)],
-                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.9)
+            lens.stroke(LinearGradient(colors: [.white.opacity(0.55), blue.opacity(0.35), .white.opacity(0.10)],
+                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
         }
         .allowsHitTesting(false).accessibilityHidden(true)
     }

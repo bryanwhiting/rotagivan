@@ -2810,8 +2810,10 @@ struct AppExplorerView: View {
                 ExplorerAirGlass(opaque: opaqueChrome).frame(width: 304, height: 304).position(center)
                 let lensVisible = model.deepFan == nil && model.selected.map { slot in isAvailable(model.entries.first { $0.direction == slot }) } == true
                 if !opaqueChrome {
-                    ExplorerGlassLensView(angle: lensAngle, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth) + 1,
-                        outerRadius: 145, halfAngle: 180 / Double(model.slotCount) - 2.5)
+                    // The lens hugs the icon and label instead of filling the
+                    // whole wedge from hub to rim.
+                    ExplorerGlassLensView(angle: lensAngle, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth) + 26,
+                        outerRadius: 139, halfAngle: 180 / Double(model.slotCount) - 3.5)
                         .frame(width: 418, height: 310)
                         .opacity(lensVisible ? 1 : 0)
                         .animation(feedback, value: lensVisible)
@@ -2878,7 +2880,7 @@ struct AppExplorerView: View {
                     available: available, opaque: opaqueChrome)
                 if model.theme.isFloating {
                     Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
-                        .stroke(selected ? accent : Color.white.opacity(available ? 0.22 : 0.08), style: StrokeStyle(lineWidth: selected ? 1.5 : 0.5, lineCap: .round))
+                        .stroke(selected && opaqueChrome ? accent : Color.white.opacity(available ? 0.22 : 0.08), style: StrokeStyle(lineWidth: selected && opaqueChrome ? 1.5 : 0.5, lineCap: .round))
                         .frame(width: 294, height: 294)
                         .rotationEffect(.degrees(direction.angle - 180 / Double(model.slotCount) + 4))
                         .position(center)

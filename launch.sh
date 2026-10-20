@@ -56,7 +56,7 @@ fi
 
 if /usr/bin/pgrep -f "$process_pattern" >/dev/null; then
   print -- "Quitting Rotagivan and waiting for settings to save…"
-  /usr/bin/osascript -e 'tell application id "local.rotagivan" to quit'
+  /usr/bin/osascript -e 'tell application id "local.rotagivan" to quit' 2>/dev/null || true
   for attempt in {1..80}; do
     if ! /usr/bin/pgrep -f "$process_pattern" >/dev/null; then break; fi
     /bin/sleep 0.25

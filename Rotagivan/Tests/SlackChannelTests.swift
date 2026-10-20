@@ -35,6 +35,13 @@ import AppKit
         VoiceActionRegistry.supplementalActions = { actions }
         let registry = VoiceActionRegistry.make(settings: StoredSettings())
         precondition(registry.contains { $0.action == .slackChannel("general") }, "Recent channels reach voice and Actions")
+        let ranked = SlackChannelRecents.ranked([
+            SlackChannelVisit(name: "eng", workspace: "A", visits: 2, lastVisit: now),
+            SlackChannelVisit(name: "eng", workspace: "B", visits: 3, lastVisit: now),
+            SlackChannelVisit(name: "random", workspace: "A", visits: 4, lastVisit: now)], now: now)
+        precondition(ranked.map(\.name) == ["eng", "random"] && ranked[0].visits == 5, "HUD ranks channels across workspaces by activity")
+        let tile = ExplorerReservedGroup.slackChannels.tile(at: .up)
+        precondition(tile.isSlackChannelsGroup && tile.isDynamicGroup && HUDLayerBuiltIn.allCases.contains(.slackChannels))
         recents.forget("general")
         precondition(!SlackChannelRecents.storedVisits(defaults).contains { $0.name == "general" })
         print("Slack channels passed: title parsing (channels only, never DMs), once-per-visit counting, local persistence, frecency ranking, validation, voice registry.")

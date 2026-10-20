@@ -797,6 +797,9 @@ extension AppExplorerPresenting {
         model.showingRecentPlaces = !model.showingChromeTabs && (model.showingWindowManager
             ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isRecentAppsAndTabsGroup == true
             : settings.favorite(at: groupPath)?.isRecentAppsAndTabsGroup == true || mappedBuiltIn == .recentAppsAndTabs)
+        model.showingSlackChannels = !model.showingChromeTabs && !model.showingRecentPlaces && (model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isSlackChannelsGroup == true
+            : settings.favorite(at: groupPath)?.isSlackChannelsGroup == true || mappedBuiltIn == .slackChannels)
         model.page = 0; model.pageCount = 1
         model.showingRecents = model.mode == .recent || recentGroup
         model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingControlHUD && layer == nil
@@ -812,6 +815,20 @@ extension AppExplorerPresenting {
             model.message = !chromeTabsLoaded ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
                 ? "No Chrome tabs available. Open Chrome and allow Rotagivan in Privacy & Security → Automation."
                 : "Swipe to a tab and lift to focus it · use Previous / Next for more tabs"
+            return
+        }
+        if model.showingSlackChannels {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            let channels = SlackChannelRecents.shared.ranked()
+            model.pageCount = max(1, (channels.count + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = slackEntries(channels, count: count, page: chromeTabsPage)
+            model.message = channels.isEmpty
+                ? "No Slack channels yet. Visit a few channels in Slack and they appear here, most used first."
+                : "Swipe to a channel and lift to jump there · use Previous / Next for more channels"
             return
         }
         if model.showingRecentPlaces {
@@ -906,6 +923,20 @@ extension AppExplorerPresenting {
                 name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
             entry.chromeTab = tab
             entry.isActiveApp = page == 0 && offset == 0
+            return entry
+        }
+    }
+
+    /// Most active channel on the left, the rest clockwise from top-left, like Chrome tabs.
+    private func slackEntries(_ channels: [SlackChannelVisit], count: Int, page: Int) -> [ExplorerEntry] {
+        let icon = applicationURL(SlackChannelRecents.bundleID).map { workspace.icon(forFile: $0.path) }
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return channels.dropFirst(page * count).prefix(count).enumerated().map { offset, channel in
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: SlackChannelRecents.bundleID,
+                name: "#" + channel.name, icon: icon, url: nil)
+            entry.slackChannel = channel.name
             return entry
         }
     }
@@ -1456,6 +1487,12 @@ extension AppExplorerPresenting {
         guard isVisible, !isEditing, model.launcherQuery.isEmpty else { return }
         guard contextIsValid?() != false else { dismiss(); return }
         let entry = model.entries.first { $0.direction == direction }
+        if let channel = entry?.slackChannel {
+            RotaActionUsage.record(.slackChannel(channel))
+            dismiss()
+            SlackChannelOpener.open(channel)
+            return
+        }
         if let tab = entry?.chromeTab {
             dismiss()
             Task.detached(priority: .userInitiated) {
@@ -1667,7 +1704,7 @@ extension AppExplorerPresenting {
     }
 
     func changeWindowPage(_ delta: Int) {
-        if model.showingChromeTabs || model.showingRecentPlaces {
+        if model.showingChromeTabs || model.showingRecentPlaces || model.showingSlackChannels {
             chromeTabsPage = max(0, min(model.pageCount - 1, chromeTabsPage + delta))
             refreshGroup(); return
         }
@@ -2073,6 +2110,7 @@ struct ExplorerEntry: Equatable {
     var isMediaControls: Bool
     var mediaAction: ExplorerMediaAction?
     var timerMinutes: Int? = nil
+    var slackChannel: String? = nil
     var command: AppExplorerAction?
     var showsWindows: Bool
     var windowIndex: Int?
@@ -2267,6 +2305,7 @@ private struct HUDOrbitTransform: ViewModifier, Animatable {
     @Published var windowFullScreen = false
     @Published var showingAppWindows = false
     @Published var showingChromeTabs = false
+    @Published var showingSlackChannels = false
     @Published var showingRecentPlaces = false
     @Published var page = 0
     @Published var pageCount = 1
@@ -2525,7 +2564,7 @@ struct AppExplorerView: View {
                 Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).lineLimit(3)
             }
-            if model.showingAppWindows || model.showingChromeTabs || (model.showingRecentPlaces && model.pageCount > 1) {
+            if model.showingAppWindows || model.showingChromeTabs || (model.showingRecentPlaces && model.pageCount > 1) || (model.showingSlackChannels && model.pageCount > 1) {
                 HStack {
                     Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
                     Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
@@ -2862,11 +2901,16 @@ struct AppExplorerView: View {
         if isPreview { return true }
         guard let entry else { return false }
         return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
-            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.timerMinutes != nil || entry.command != nil || entry.windowIndex != nil
+            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.timerMinutes != nil || entry.slackChannel != nil || entry.command != nil || entry.windowIndex != nil
     }
 
     @ViewBuilder private func entrySymbol(_ entry: ExplorerEntry) -> some View {
-        if let minutes = entry.timerMinutes {
+        if entry.slackChannel != nil {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "number").font(.system(size: 28, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+                if let icon = entry.icon { Image(nsImage: icon).resizable().frame(width: 18, height: 18).offset(x: 5, y: 5) }
+            }
+        } else if let minutes = entry.timerMinutes {
             Text("\(minutes)").font(.system(size: 28, weight: .light, design: .rounded)).monospacedDigit()
                 .foregroundStyle(accent).frame(width: 42, height: 42)
         } else if let command = entry.command {

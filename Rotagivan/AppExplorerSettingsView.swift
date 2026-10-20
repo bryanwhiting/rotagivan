@@ -38,7 +38,7 @@ struct BuiltInHUDDefaultEditor: View {
                 ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
             } : ExplorerSlot.slots(layout.slotCount)
             result.favorites = slots.enumerated().map { index, slot in
-                AppExplorerFavorite(direction: slot, name: group == .chromeTabs ? "Chrome tab \(index + 1)" : index == 0 ? "Active app" : "Recent app \(index)",
+                AppExplorerFavorite(direction: slot, name: group == .chromeTabs ? "Chrome tab \(index + 1)" : group == .slackChannels ? "#channel \(index + 1)" : index == 0 ? "Active app" : "Recent app \(index)",
                     action: .appWindows)
             }
         }
@@ -718,7 +718,7 @@ struct AppExplorerSettingsView: View {
                             Text("The active app is outlined on the left. Other recent apps start at top-left and continue clockwise.")
                         } else if builtIn == .chromeTabs {
                             Text("Open Chrome tabs fill this HUD. Swipe to a tab and lift to focus it. Allow Google Chrome under Privacy & Security → Automation if requested.")
-                        } else if builtIn == .recentAppsAndTabs {
+                        } else if builtIn == .recentAppsAndTabs || builtIn == .slackChannels {
                             Text(builtInDescription(builtIn))
                         } else {
                             Text("Volume, mute, previous/next track, and play/pause. Single tap plays or pauses.")
@@ -2008,6 +2008,7 @@ extension AppExplorerSettingsView {
         case .windowManager: return "Window positions, full screen, minimize and close."
         case .mediaControls: return "Volume, mute, previous/next track, and play/pause. Single tap plays or pauses."
         case .actions: return ExplorerReservedGroup.actions.summary
+        case .slackChannels: return "The Slack channels you use most fill this HUD, most active first. Rotagivan learns them as you visit channels in Slack. Swipe to a channel and lift to jump there."
         }
     }
 

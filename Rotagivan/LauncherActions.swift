@@ -46,7 +46,7 @@ struct LauncherAction: Identifiable, Hashable, Sendable {
     }
     static func registered(_ records: [VoiceRegisteredAction]) -> [Self] {
         records.filter { $0.enabled && $0.action.kind != .openApp }.map {
-            let category = $0.action.kind == .macro ? "Macro" : ($0.action.kind == .openURL ? "Website bookmark" : ($0.appName ?? "Mac action"))
+            let category = $0.action.kind == .macro ? "Macro" : $0.action.kind == .slackChannel ? "Slack channel" : ($0.action.kind == .openURL ? "Website bookmark" : ($0.appName ?? "Mac action"))
             return Self(id: "registered:" + $0.id, name: $0.title,
                 detail: category + " · Return to run", target: .registered($0.id))
         }

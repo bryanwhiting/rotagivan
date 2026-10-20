@@ -712,7 +712,7 @@ private final class BindingPoster: GestureEventPosting {
                 precondition(builtInController.displayedEntries.contains { $0.tilingDirection != nil })
             case .recentApps?, .recentAppsAndTabs?:
                 precondition(builtInController.displayedEntries.allSatisfy { $0.bundleID != nil })
-            case .chromeTabs?:
+            case .chromeTabs?, .slackChannels?:
                 break
             }
             // Default inverted motion back toward Main from each assigned position.

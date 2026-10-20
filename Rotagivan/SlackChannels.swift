@@ -111,6 +111,20 @@ enum SlackWindowTitle {
         defaults.set(try? JSONEncoder().encode(visits), forKey: Self.storageKey)
     }
 
+    /// Channels merged across workspaces, most active first.
+    func ranked(now: Date = Date()) -> [SlackChannelVisit] { Self.ranked(visits, now: now) }
+    nonisolated static func ranked(_ visits: [SlackChannelVisit], now: Date = Date()) -> [SlackChannelVisit] {
+        var merged: [String: SlackChannelVisit] = [:]
+        for visit in visits {
+            if var existing = merged[visit.name] {
+                existing.visits += visit.visits
+                existing.lastVisit = max(existing.lastVisit, visit.lastVisit)
+                merged[visit.name] = existing
+            } else { merged[visit.name] = visit }
+        }
+        return merged.values.sorted { $0.score(now: now) > $1.score(now: now) }
+    }
+
     func forget(_ name: String) {
         visits.removeAll { $0.name == name }
         defaults.set(try? JSONEncoder().encode(visits), forKey: Self.storageKey)

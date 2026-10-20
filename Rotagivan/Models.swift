@@ -577,13 +577,14 @@ struct ConfigurationLibrary: Codable {
 }
 
 enum AppExplorerMode: String, Codable, CaseIterable {
-    case favorites, recent, chromeTabs, recentAppsAndTabs
+    case favorites, recent, chromeTabs, recentAppsAndTabs, slackChannels
     var title: String {
         switch self {
         case .favorites: return "Favorites"
         case .recent: return "Recent apps"
         case .chromeTabs: return "Google Chrome Tabs"
         case .recentAppsAndTabs: return "Recent apps & tabs"
+        case .slackChannels: return "Slack channels"
         }
     }
     var alternate: Self { self == .favorites ? .recent : .favorites }
@@ -592,7 +593,7 @@ enum AppExplorerMode: String, Codable, CaseIterable {
 /// Reserved catalog entries are always available. Assigned instances use the
 /// existing group/shortcut schema, so exports and older saved groups stay intact.
 enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
-    case windowManager, recentApps, actions, chromeTabs, recentAppsAndTabs, mediaControls
+    case windowManager, recentApps, actions, chromeTabs, recentAppsAndTabs, mediaControls, slackChannels
     var id: Self { self }
     var hasEditableDefaults: Bool { self == .actions || self == .mediaControls }
     var showsChromeTabs: Bool { self == .chromeTabs || self == .recentAppsAndTabs }
@@ -604,6 +605,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .chromeTabs: return "Google Chrome Tabs"
         case .recentAppsAndTabs: return "Recent Apps & Tabs"
         case .mediaControls: return "Media Controls"
+        case .slackChannels: return "Slack Channels"
         }
     }
     var symbol: String {
@@ -614,6 +616,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .chromeTabs: return "rectangle.on.rectangle"
         case .recentAppsAndTabs: return "clock.arrow.2.circlepath"
         case .mediaControls: return "playpause.fill"
+        case .slackChannels: return "number"
         }
     }
     var summary: String {
@@ -624,6 +627,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .chromeTabs: return "Open tabs from Google Chrome. Choose a tile to focus that existing tab."
         case .recentAppsAndTabs: return "Recent apps and individual Chrome tabs in one list, most recently used first."
         case .mediaControls: return "Play/pause, previous and next track, volume and mute."
+        case .slackChannels: return "Your most-used Slack channels, most active first. Choose a tile to jump to that channel."
         }
     }
     func tile(at slot: ExplorerSlot, insideWindowManager: Bool = false) -> AppExplorerFavorite {
@@ -638,6 +642,8 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .chromeTabs, slotCount: 8)
         case .recentAppsAndTabs:
             return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .recentAppsAndTabs, slotCount: 8)
+        case .slackChannels:
+            return AppExplorerFavorite(direction: slot, name: title, children: [], groupMode: .slackChannels, slotCount: 8)
         case .mediaControls:
             return AppExplorerFavorite(direction: slot, name: title, children: HUDLayerTemplate.mediaControls.favorites, slotCount: 8)
         case .actions:
@@ -968,7 +974,7 @@ enum HUDLayerTemplate: String, CaseIterable, Identifiable {
 }
 
 enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
-    case recentApps, actions, windowManager, mediaControls, chromeTabs, recentAppsAndTabs
+    case recentApps, actions, windowManager, mediaControls, chromeTabs, recentAppsAndTabs, slackChannels
     var id: Self { self }
     var title: String {
         switch self {
@@ -978,6 +984,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .mediaControls: return "Media Controls"
         case .chromeTabs: return "Google Chrome Tabs"
         case .recentAppsAndTabs: return "Recent Apps & Tabs"
+        case .slackChannels: return "Slack Channels"
         }
     }
     var symbol: String {
@@ -988,6 +995,7 @@ enum HUDLayerBuiltIn: String, Codable, CaseIterable, Identifiable {
         case .mediaControls: return "playpause.fill"
         case .chromeTabs: return "rectangle.on.rectangle"
         case .recentAppsAndTabs: return "clock.arrow.2.circlepath"
+        case .slackChannels: return "number"
         }
     }
 }
@@ -1081,7 +1089,8 @@ struct AppExplorerFavorite: Codable, Equatable {
     var isRecentGroup: Bool { isGroup && groupMode == .recent }
     var isChromeTabsGroup: Bool { isGroup && groupMode == .chromeTabs }
     var isRecentAppsAndTabsGroup: Bool { isGroup && groupMode == .recentAppsAndTabs }
-    var isDynamicGroup: Bool { isRecentGroup || isChromeTabsGroup || isRecentAppsAndTabsGroup }
+    var isSlackChannelsGroup: Bool { isGroup && groupMode == .slackChannels }
+    var isDynamicGroup: Bool { isRecentGroup || isChromeTabsGroup || isRecentAppsAndTabsGroup || isSlackChannelsGroup }
 
     var resolvedWebURL: URL? { url.flatMap(Self.webURL) }
     var isValidDestination: Bool {

@@ -39,12 +39,13 @@ import SwiftUI
         }
         precondition(ExplorerStarburstLayout.angle(.up) == -90)
         precondition(ExplorerStarburstLayout.angle(.left) == 180)
+        // Only Starburst Air ships: retired themes still decode, but resolve to Air and are never offered.
         let settings = AppExplorerSettings(theme: .starburst)
         let restored = try JSONDecoder().decode(AppExplorerSettings.self, from: JSONEncoder().encode(settings))
-        precondition(restored.resolvedTheme == .starburst)
-        precondition(ExplorerTheme.allCases == [.native, .starburst, .starburstAir])
+        precondition(restored.resolvedTheme == .starburstAir && restored.theme == .starburstAir)
+        precondition(ExplorerTheme.allCases == [.starburstAir])
         precondition(AppExplorerSettings().resolvedTheme == .starburstAir)
-        for legacy in ["vector", "ember"] {
+        for legacy in ["vector", "ember", "native", "starburst"] {
             let current = try JSONEncoder().encode(AppExplorerSettings(theme: .starburstAir))
             let legacyJSON = String(decoding: current, as: UTF8.self).replacingOccurrences(of: "starburstAir", with: legacy)
             let migrated = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(legacyJSON.utf8))

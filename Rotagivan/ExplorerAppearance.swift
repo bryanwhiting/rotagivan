@@ -259,60 +259,6 @@ struct ExplorerTileChrome: View {
     }
 }
 
-struct ExplorerThemePicker: View {
-    @Binding var theme: ExplorerTheme
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(ExplorerTheme.allCases, id: \.self) { option in
-                Button { theme = option } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ZStack {
-                            ExplorerHUDBackdrop(theme: option)
-                            if option.isRadial {
-                                ZStack {
-                                    if option.isFloating { ExplorerAirGlass().frame(width: 54, height: 54) }
-                                    ForEach(ExplorerSlot.allCases, id: \.self) { direction in
-                                        ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3, roundedRim: option.isFloating)
-                                            .fill(option.isFloating ? (direction == .topRight ? option.accent.opacity(0.6) : option.surface.opacity(0.55)) : option.accent.opacity(direction == .topRight ? 0.9 : 0.3))
-                                            .overlay {
-                                                if option.isFloating {
-                                                    ExplorerStarburstSector(direction: direction, innerRadius: 9, outerRadius: 24, tip: 3, roundedRim: true)
-                                                        .stroke(direction == .topRight ? option.accent : option.accent.opacity(0.65), lineWidth: 0.75)
-                                                }
-                                            }
-                                    }
-                                    Circle().stroke(option.accent.opacity(0.8), lineWidth: 1).frame(width: 12, height: 12)
-                                }.frame(width: 58, height: 58)
-                            } else {
-                            HStack(spacing: 5) {
-                                ForEach(0..<3) { index in
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(option.accent.opacity(index == 1 ? 0.75 : 0.16))
-                                        .frame(width: 22, height: index == 1 ? 30 : 24)
-                                }
-                            }
-                            }
-                        }.frame(height: 60).clipShape(RoundedRectangle(cornerRadius: 9))
-                        HStack(spacing: 4) {
-                            Text(option.title).font(.system(size: 11, weight: .semibold))
-                            Spacer(minLength: 0)
-                            Image(systemName: theme == option ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(theme == option ? Color.accentColor : .secondary)
-                        }
-                        Text(option.subtitle).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
-                    }.padding(8).frame(maxWidth: .infinity)
-                        .background(Color.primary.opacity(theme == option ? 0.07 : 0.025), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(theme == option ? 0.3 : 0.08)))
-                }.buttonStyle(.plain)
-                    .accessibilityLabel("\(option.title) theme")
-                    .accessibilityAddTraits(theme == option ? .isSelected : [])
-            }
-        }
-    }
-}
-
-/// Fixed direction geometry: labels and hit targets never rotate when drilling
-/// into groups. Ancestors add inner rings; the current choices stay on the rim.
 enum ExplorerStarburstLayout {
     static func angle(_ direction: ExplorerSlot) -> Double {
         direction.angle

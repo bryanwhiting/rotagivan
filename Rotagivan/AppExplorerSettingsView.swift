@@ -321,11 +321,6 @@ struct AppExplorerSettingsView: View {
             favorite.url ?? (favorite.shortcut?.assignedAction?.kind == .openURL ? favorite.shortcut?.assignedAction?.url : nil)
         })
     }
-    private var themeBinding: Binding<ExplorerTheme> {
-        Binding(get: { baseSettings.resolvedTheme }, set: { theme in
-            var next = baseSettings; next.theme = theme; saveBase(next)
-        })
-    }
     private var animationBinding: Binding<Bool> {
         Binding(get: { baseSettings.resolvedAnimationsEnabled }, set: { enabled in
             var next = baseSettings; next.animationsEnabled = enabled; saveBase(next)
@@ -421,12 +416,8 @@ struct AppExplorerSettingsView: View {
         }
     }
     private var workspaceOptions: some View {
-        RotaMenuButton("Options", systemImage: "slider.horizontal.3", help: "Theme and HUD options",
-                       accessibilityTitle: "Theme and HUD options") {
-            Picker("Theme", selection: themeBinding) {
-                ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-                Divider()
+        RotaMenuButton("Options", systemImage: "slider.horizontal.3", help: "HUD options",
+                       accessibilityTitle: "HUD options") {
                 Toggle("Invert picker direction", isOn: invertPickerBinding)
                 Picker("Two-finger HUD navigation", selection: swipeDirectionBinding) {
                     ForEach(HUDSwipeDirection.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -650,8 +641,6 @@ struct AppExplorerSettingsView: View {
                 HStack {
                     Label("HUD layout", systemImage: "safari").font(.headline)
                     Spacer()
-                    RotaSelect("Theme", selection: themeBinding, values: ExplorerTheme.allCases, fill: true) { $0.title }
-                        .frame(width: 230)
                     RotaMenuButton("Options", systemImage: "slider.horizontal.3") {
                         Toggle("Invert picker direction", isOn: invertPickerBinding)
                             .help("Reverse one-finger tile selection, including voice, window, and deep choices.")
@@ -671,9 +660,6 @@ struct AppExplorerSettingsView: View {
                 HStack {
                     if scopeTitle == nil {
                         RotaMenuButton("Explorer appearance", systemImage: "paintpalette", kind: .icon) {
-                            Picker("Theme", selection: themeBinding) {
-                                ForEach(ExplorerTheme.allCases, id: \.self) { Text($0.title).tag($0) }
-                            }
                             Toggle("Animate HUD feedback", isOn: animationBinding)
                             Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
                         }
@@ -1828,7 +1814,6 @@ extension AppExplorerSettingsView {
     private var workspaceOptionsForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("HUD options").font(.headline)
-            RotaSelect("Theme", selection: themeBinding, values: ExplorerTheme.allCases) { $0.title }
             Toggle("Animate HUD feedback", isOn: animationBinding)
             Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
             Text("Swipe directions live under Taps & swipes › Swipes.").font(.caption).foregroundStyle(.secondary)

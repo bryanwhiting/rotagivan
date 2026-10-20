@@ -913,12 +913,15 @@ struct ExplorerWindowPlacement: Codable, Equatable {
     }
 }
 
+/// Only Starburst Air ships. The retired Classic and Starburst looks decode
+/// to Air so older saved settings still load; nothing offers them any more.
 enum ExplorerTheme: String, Codable, CaseIterable {
     case native, starburst, starburstAir
+    static let allCases: [ExplorerTheme] = [.starburstAir]
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let value = try container.decode(String.self)
-        if value == "vector" || value == "ember" { self = .starburstAir; return }
+        if value == "vector" || value == "ember" || value == "native" || value == "starburst" { self = .starburstAir; return }
         guard let theme = Self(rawValue: value) else {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown HUD theme")
         }
@@ -1169,7 +1172,7 @@ struct AppExplorerSettings: Codable, Equatable {
     var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
     var invertPickerDirection: Bool? = nil
     var resolvedInvertPickerDirection: Bool { invertPickerDirection ?? false }
-    var resolvedTheme: ExplorerTheme { theme ?? .starburstAir }
+    var resolvedTheme: ExplorerTheme { .starburstAir }
     var resolvedAnimationsEnabled: Bool { animationsEnabled ?? true }
     var resolvedCenterCursorOnAppSwitch: Bool { centerCursorOnAppSwitch ?? false }
     var resolvedHUDPositions: [UUID: HUDLayerPosition] {

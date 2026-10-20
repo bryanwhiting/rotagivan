@@ -379,7 +379,7 @@ struct ConfigurationTests {
             let restored = try AppConfiguration.parse(themeYAML)
             precondition(restored.settings.appExplorer == themed.settings.appExplorer)
             if theme == .starburstAir {
-                for legacy in ["vector", "ember"] {
+                for legacy in ["vector", "ember", "native", "starburst"] {
                     let imported = try AppConfiguration.parse(themeYAML.replacingOccurrences(of: "theme: starburstAir", with: "theme: \(legacy)"))
                     precondition(imported.settings.appExplorer == themed.settings.appExplorer, "Retired themes migrate without changing layouts or other preferences")
                 }

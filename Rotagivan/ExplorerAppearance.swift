@@ -149,6 +149,7 @@ struct ExplorerAirGlass: View {
 struct ExplorerSectorFocus: ViewModifier {
     let theme: ExplorerTheme
     let shape: ExplorerStarburstSector
+    var airShape: ExplorerGlassLens? = nil
     @FocusState private var focused: Bool
 
     @ViewBuilder func body(content: Content) -> some View {
@@ -158,8 +159,13 @@ struct ExplorerSectorFocus: ViewModifier {
                 .focused($focused)
                 .overlay {
                     if focused {
-                        shape.stroke(theme.accent.opacity(0.9), lineWidth: 1.5)
-                            .allowsHitTesting(false).accessibilityHidden(true)
+                        if let airShape {
+                            airShape.stroke(theme.accent.opacity(0.9), lineWidth: 1.5)
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        } else {
+                            shape.stroke(theme.accent.opacity(0.9), lineWidth: 1.5)
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        }
                     }
                 }
         } else {
@@ -168,8 +174,8 @@ struct ExplorerSectorFocus: ViewModifier {
     }
 }
 
-struct ExplorerAirSectorChrome: View {
-    let shape: ExplorerStarburstSector
+struct ExplorerAirSectorChrome<S: Shape>: View {
+    let shape: S
     let selected: Bool
     let available: Bool
     var opaque = false
@@ -195,9 +201,15 @@ struct ExplorerSectorChrome: View {
     let selected: Bool
     let available: Bool
     var opaque = false
+    /// The rounded wedge Air tiles are drawn with; the starburst sector stays the hit area.
+    var airShape: ExplorerGlassLens? = nil
     var body: some View {
         if theme.isFloating {
-            ExplorerAirSectorChrome(shape: shape, selected: selected, available: available, opaque: opaque)
+            if let airShape {
+                ExplorerAirSectorChrome(shape: airShape, selected: selected, available: available, opaque: opaque)
+            } else {
+                ExplorerAirSectorChrome(shape: shape, selected: selected, available: available, opaque: opaque)
+            }
         } else {
             ZStack {
                 shape.fill(LinearGradient(colors: [theme.accent.opacity(selected ? 0.38 : 0.08),
@@ -311,6 +323,13 @@ enum ExplorerStarburstLayout {
     }
     static func ringRadius(_ level: Int) -> Double { 35 + Double(max(0, min(4, level))) * 9 }
     static func innerRadius(depth: Int) -> Double { 48 + Double(max(0, min(5, depth))) * 9 }
+    /// Air tiles and the selection lens share one rounded wedge, so a tile's
+    /// border is exactly the highlight's border.
+    static let airOuterRadius = 139.0
+    static func airTile(angle: Double, depth: Int, slotCount: Int) -> ExplorerGlassLens {
+        ExplorerGlassLens(angle: angle, innerRadius: innerRadius(depth: depth) + 26, outerRadius: airOuterRadius,
+                          halfAngle: 180 / Double(slotCount) - 3.5)
+    }
 }
 
 struct ExplorerStarburstSector: Shape {

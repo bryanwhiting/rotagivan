@@ -2810,10 +2810,10 @@ struct AppExplorerView: View {
                 ExplorerAirGlass(opaque: opaqueChrome).frame(width: 304, height: 304).position(center)
                 let lensVisible = model.deepFan == nil && model.selected.map { slot in isAvailable(model.entries.first { $0.direction == slot }) } == true
                 if !opaqueChrome {
-                    // The lens hugs the icon and label instead of filling the
-                    // whole wedge from hub to rim.
-                    ExplorerGlassLensView(angle: lensAngle, innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth) + 26,
-                        outerRadius: 139, halfAngle: 180 / Double(model.slotCount) - 3.5)
+                    // The lens is the tile shape itself, lit.
+                    let tile = ExplorerStarburstLayout.airTile(angle: 0, depth: depth, slotCount: model.slotCount)
+                    ExplorerGlassLensView(angle: lensAngle, innerRadius: tile.innerRadius,
+                        outerRadius: tile.outerRadius, halfAngle: tile.halfAngle)
                         .frame(width: 418, height: 310)
                         .opacity(lensVisible ? 1 : 0)
                         .animation(feedback, value: lensVisible)
@@ -2874,21 +2874,18 @@ struct AppExplorerView: View {
         let chromeProfileDescription = entry?.chromeTab.map { tab in
             tab.profileName.map { $0 + (tab.profileIsEstimated ? " (estimated)" : "") } ?? "unknown"
         }
+        let airTile = model.theme.isFloating
+            ? ExplorerStarburstLayout.airTile(angle: direction.angle, depth: depth, slotCount: model.slotCount) : nil
         return Button { onSelect(direction) } label: {
             ZStack {
                 ExplorerSectorChrome(theme: model.theme, shape: shape, selected: selected,
-                    available: available, opaque: opaqueChrome)
-                if model.theme.isFloating {
-                    Circle().trim(from: 0, to: (360 / Double(model.slotCount) - 8) / 360)
-                        .stroke(selected && opaqueChrome ? accent : Color.white.opacity(available ? 0.22 : 0.08), style: StrokeStyle(lineWidth: selected && opaqueChrome ? 1.5 : 0.5, lineCap: .round))
-                        .frame(width: 294, height: 294)
-                        .rotationEffect(.degrees(direction.angle - 180 / Double(model.slotCount) + 4))
-                        .position(center)
-                        .allowsHitTesting(false)
-                }
+                    available: available, opaque: opaqueChrome, airShape: airTile)
                 if entry?.isActiveApp == true {
-                    shape.stroke(Color.orange.opacity(model.theme.isFloating ? 0.85 : 1), lineWidth: model.theme.isFloating ? 1.2 : 2)
-                        .allowsHitTesting(false)
+                    if let airTile {
+                        airTile.stroke(Color.orange.opacity(0.85), lineWidth: 1.2).allowsHitTesting(false)
+                    } else {
+                        shape.stroke(Color.orange, lineWidth: 2).allowsHitTesting(false)
+                    }
                 }
                 VStack(spacing: 3) {
                     if let entry {
@@ -2921,7 +2918,7 @@ struct AppExplorerView: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain).disabled(!available)
-        .modifier(ExplorerSectorFocus(theme: model.theme, shape: shape))
+        .modifier(ExplorerSectorFocus(theme: model.theme, shape: shape, airShape: airTile))
         .modifier(previewDrag(direction))
         .anchorPreference(key: ExplorerTileAnchors.self, value: .rect(CGRect(x: point.x - 26, y: point.y - 24, width: 52, height: 48))) {
             isPreview ? [direction: $0] : [:]

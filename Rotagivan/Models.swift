@@ -2669,12 +2669,15 @@ final class SettingsStore: ObservableObject {
         return true
     }
 
-    @discardableResult func addConfiguration() -> String {
+    /// Adds a profile and switches to it: a copy of the current one, or with
+    /// `fresh` the factory defaults. Profile-switching shortcuts carry over either way.
+    @discardableResult func addConfiguration(fresh: Bool = false) -> String {
         guard configurationProfiles.count < 20 else { return activeConfigurationID }
         configurationProfiles = profileSnapshot()
         let id = UUID().uuidString
         configurationProfiles.append(ConfigurationProfile(id: id, name: "Profile \(configurationProfiles.count + 1)",
-            settings: settings, shortcuts: captureShortcuts?() ?? configurationProfiles.first { $0.id == activeConfigurationID }!.shortcuts))
+            settings: fresh ? (factorySettings ?? StoredSettings()) : settings,
+            shortcuts: captureShortcuts?() ?? configurationProfiles.first { $0.id == activeConfigurationID }!.shortcuts))
         selectConfiguration(id)
         return id
     }

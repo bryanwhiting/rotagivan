@@ -25,6 +25,13 @@ import Foundation
         let id = store.addConfiguration()
         precondition(store.activeConfigurationID == id && store.configurationProfiles.count == 2)
         precondition(store.settings.normal == oldMotion && store.settings.appExplorer == oldExplorer && store.profiles.map(\.id) == oldLayers)
+        // Add profile starts from factory defaults instead of copying the current profile.
+        store.settings.normal.cursorSpeed = 0.91
+        let fresh = store.addConfiguration(fresh: true)
+        precondition(store.activeConfigurationID == fresh && store.configurationProfiles.count == 3)
+        precondition(store.settings.normal.cursorSpeed != 0.91, "A fresh profile does not copy the current one")
+        precondition(store.deleteConfiguration(fresh) && store.activeConfigurationID == id)
+        precondition(store.settings.normal.cursorSpeed == 0.91, "Deleting the fresh profile returns to the previous one intact")
         store.renameConfiguration("Travel")
         keys.normal.keyCode = 101
         keys.dragShortcut = ProfileShortcut(keyCode: 90, modifiers: 0, enabled: true)

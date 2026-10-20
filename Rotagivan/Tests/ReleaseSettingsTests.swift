@@ -91,13 +91,20 @@ import SwiftUI
             precondition(find("voice-auto-select", in: host) == nil)
             precondition(find("voice-auto-start", in: host) == nil)
         }
-        for section in ["Actions", "Calibration", "App overrides"] {
+        for section in ["Actions", "App overrides"] {
             render(section) { host in
                 precondition(find("actions-options", in: host) != nil,
                     "Overrides must remain reachable with no application rows, including legacy navigation")
-                precondition(find("tap-calibration", in: host) != nil,
-                    "Actions and legacy calibration navigation must expose shared tap calibration")
+                precondition(find("tap-calibration", in: host) == nil,
+                    "Tap calibration has one home, under HUD › Taps & swipes")
             }
+        }
+        // Legacy "Calibration" navigation lands on the HUD page's Calibration tab.
+        render("Calibration") { host in
+            precondition(find("hud-calibration", in: host) != nil && find("hud-swipes", in: host) != nil,
+                "The HUD page lists Calibration and Swipes under Taps & swipes")
+            precondition(find("tap-calibration", in: host) != nil,
+                "Legacy calibration navigation opens the Calibration tab")
         }
         store.settings.appOverrides = [AppGestureOverride(bundleID: "test.disabled", name: "Disabled", enabled: false)]
         func tableViewport(in view: NSView) -> NSScrollView? {

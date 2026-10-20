@@ -3,17 +3,23 @@ import SwiftUI
 struct HUDSettingsView: View {
     @ObservedObject var store: SettingsStore
     private let initialGroup: ExplorerReservedGroup?
+    private let initialFocus: HUDWorkspaceFocus?
     private let defaultTaps: (() -> AnyView)?
+    private let calibration: (() -> AnyView)?
 
-    init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil, defaultTaps: (() -> AnyView)? = nil) {
+    init(store: SettingsStore, initialGroup: ExplorerReservedGroup? = nil, initialFocus: HUDWorkspaceFocus? = nil,
+         defaultTaps: (() -> AnyView)? = nil, calibration: (() -> AnyView)? = nil) {
         self.store = store
         self.initialGroup = initialGroup
+        self.initialFocus = initialFocus
         self.defaultTaps = defaultTaps
+        self.calibration = calibration
     }
 
     var body: some View {
         AppExplorerSettingsView(store: store, workspace: true,
-            initialFocus: initialGroup.map { .builtInDefault($0) } ?? .hud, defaultTaps: defaultTaps)
+            initialFocus: initialFocus ?? initialGroup.map { .builtInDefault($0) } ?? .hud,
+            defaultTaps: defaultTaps, calibration: calibration)
     }
 }
 
@@ -265,6 +271,7 @@ struct AppExplorerSettingsView: View {
     @State private var pendingConversion: HUDLayerBuiltIn?
     @State private var confirmingConversion = false
     let defaultTaps: (() -> AnyView)?
+    let calibration: (() -> AnyView)?
     private let transferRoot: (() -> AppExplorerSettings)?
     private let transferSave: ((AppExplorerSettings) -> Bool)?
     private let transferPrefix: [ExplorerTilePathStep]
@@ -588,10 +595,11 @@ struct AppExplorerSettingsView: View {
          transferRoot: (() -> AppExplorerSettings)? = nil, transferSave: ((AppExplorerSettings) -> Bool)? = nil,
          transferPrefix: [ExplorerTilePathStep] = [], windowOwnerPath: [ExplorerTilePathStep]? = nil,
          onGroupPathChange: (([ExplorerSlot]) -> Void)? = nil,
-         initialFocus: HUDWorkspaceFocus = .hud, defaultTaps: (() -> AnyView)? = nil) {
+         initialFocus: HUDWorkspaceFocus = .hud, defaultTaps: (() -> AnyView)? = nil, calibration: (() -> AnyView)? = nil) {
         self.store = store
         _workspaceFocus = State(initialValue: initialFocus)
         self.defaultTaps = defaultTaps
+        self.calibration = calibration
         _groupPath = State(initialValue: groupPath)
         _selectedLayerID = State(initialValue: initialLayerID)
         self.compact = compact
@@ -1590,7 +1598,7 @@ struct AppExplorerSettingsView: View {
 
 /// Gives first-click tile actions equal visual weight while keeping native menu behavior.
 enum HUDWorkspaceFocus: Hashable {
-    case hud, defaultTaps, builtInDefault(ExplorerReservedGroup)
+    case hud, defaultTaps, swipes, calibration, builtInDefault(ExplorerReservedGroup)
 }
 
 /// HUD workspace: a HUD list, the live HUD canvas, and an inspector for the
@@ -1615,6 +1623,15 @@ extension AppExplorerSettingsView {
                 ScrollView { defaultTaps?().padding(20) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.thinMaterial)
+            case .swipes:
+                ScrollView { swipesPane.padding(20) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.thinMaterial)
+            case .calibration:
+                ScrollView { calibration?().padding(20) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.thinMaterial)
+                    .accessibilityIdentifier("tap-calibration")
             case .builtInDefault(let group):
                 builtInDefaultPane(group)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1644,13 +1661,27 @@ extension AppExplorerSettingsView {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    if defaultTaps != nil {
-                        navigatorHeading("Taps")
-                        navigatorRow("Default taps", symbol: "hand.tap", selected: workspaceFocus == .defaultTaps,
-                            id: "hud-default-taps") { workspaceFocus = .defaultTaps; previewEditing = nil }
-                            .help("Tap and swipe actions used whenever no HUD is open")
+                    let showsSwipes = scopeTitle == nil && !windowManagerOnly
+                    let tapsSection = defaultTaps != nil || calibration != nil || showsSwipes
+                    if tapsSection {
+                        navigatorHeading("Taps & swipes")
+                        if defaultTaps != nil {
+                            navigatorRow("Default taps", symbol: "hand.tap", selected: workspaceFocus == .defaultTaps,
+                                id: "hud-default-taps") { workspaceFocus = .defaultTaps; previewEditing = nil }
+                                .help("Tap and swipe actions used whenever no HUD is open")
+                        }
+                        if showsSwipes {
+                            navigatorRow("Swipes", symbol: "hand.draw", selected: workspaceFocus == .swipes,
+                                id: "hud-swipes") { workspaceFocus = .swipes; previewEditing = nil }
+                                .help("Which way one-finger tile selection and two-finger HUD navigation go")
+                        }
+                        if calibration != nil {
+                            navigatorRow("Calibration", symbol: "waveform.path.ecg", selected: workspaceFocus == .calibration,
+                                id: "hud-calibration") { workspaceFocus = .calibration; previewEditing = nil }
+                                .help("Teach Rotagivan your double-tap speed and tune tap recognition")
+                        }
                     }
-                    navigatorHeading("HUDs").padding(.top, defaultTaps == nil ? 0 : 10)
+                    navigatorHeading("HUDs").padding(.top, tapsSection ? 10 : 0)
                     hudRows(nil, name: scopeTitle ?? "Main HUD", symbol: "safari", position: nil)
                     ForEach(baseSettings.holdLayers ?? []) { layer in
                         hudRows(layer.id, name: layer.name, symbol: layer.builtIn?.symbol ?? "square.3.layers.3d",
@@ -1798,15 +1829,50 @@ extension AppExplorerSettingsView {
         VStack(alignment: .leading, spacing: 12) {
             Text("HUD options").font(.headline)
             RotaSelect("Theme", selection: themeBinding, values: ExplorerTheme.allCases) { $0.title }
-            RotaSelect("Two-finger navigation", selection: swipeDirectionBinding, values: HUDSwipeDirection.allCases) { $0.title }
-            .help("Default navigation in every direction: inverted drags down to the HUD above; regular swipes down to the HUD below. Explicit gesture assignments keep their assigned actions.")
-            Toggle("Invert picker direction", isOn: invertPickerBinding)
-                .help("Reverse one-finger tile selection, including voice, window, and deep choices.")
             Toggle("Animate HUD feedback", isOn: animationBinding)
             Toggle("Put mouse in center of selected app", isOn: centerCursorBinding)
+            Text("Swipe directions live under Taps & swipes › Swipes.").font(.caption).foregroundStyle(.secondary)
         }
         .padding(16).frame(width: 340)
         .accessibilityIdentifier("hud-workspace-options-form")
+    }
+
+    /// Taps & swipes › Swipes: the one place that decides which way swipes go.
+    private var swipesPane: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Swipes").font(.system(size: 24, weight: .semibold))
+                Text("Which way the HUD responds to a swipe. Changes apply to every HUD at once.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            RotaCard("One-finger tile selection", systemImage: "hand.point.up.left") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Invert selection direction", isOn: invertPickerBinding)
+                        .toggleStyle(.rotaSwitch)
+                        .accessibilityIdentifier("hud-invert-picker")
+                    Text(baseSettings.resolvedInvertPickerDirection
+                        ? "Inverted: swiping up selects the tile at the bottom, as if pulling the wheel toward you. Turn this off to select the tile in the direction you swipe."
+                        : "Swiping toward a tile selects it. Turn this on to select the opposite tile, as if pulling the wheel toward you.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("Also applies to voice choices, window placement and deep swipe options.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            RotaCard("Two-finger HUD navigation", systemImage: "hand.draw") {
+                VStack(alignment: .leading, spacing: 8) {
+                    RotaSelect("Direction", selection: swipeDirectionBinding, values: HUDSwipeDirection.allCases) { $0.title }
+                        .accessibilityIdentifier("hud-swipe-direction")
+                    Text(baseSettings.resolvedSwipeDirection == .inverted
+                        ? "Inverted (default): dragging two fingers down moves to the HUD above, like scrolling content. Choose Regular to move to the HUD below instead."
+                        : "Regular: swiping two fingers down moves to the HUD below. Choose Inverted to drag the map like content.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("Gestures you assigned explicitly in Default taps keep their own actions.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+        .accessibilityIdentifier("hud-swipes")
     }
 
     // MARK: Inspector

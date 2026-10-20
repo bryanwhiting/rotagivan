@@ -135,6 +135,7 @@ struct ContentView: View {
     @AppStorage("settings.sidebarCollapsed") private var sidebarCollapsed = false
     @State private var pendingLayerDeletion: PendingLayerDeletion?
     private let initialHUDGroup: ExplorerReservedGroup?
+    private let initialHUDFocus: HUDWorkspaceFocus?
     private let layerColumnWidth: CGFloat = 468
 
     private let sections = [("Devices", "computermouse"), ("HUD", "safari"),
@@ -149,13 +150,15 @@ struct ContentView: View {
         self.intentionStore = intentionStore
         let resolvedSection: String
         switch initialSection {
-        case "Hotkeys", "Keybindings and Macros", "Macros", "Calibration", "App overrides": resolvedSection = "Actions"
+        case "Hotkeys", "Keybindings and Macros", "Macros", "App overrides": resolvedSection = "Actions"
+        case "Calibration": resolvedSection = "HUD"
         case "Profiles", "Pointer layers": resolvedSection = "Pointer & scrolling"
         case "Devices", "HUD", "Actions", "Voice mode", "Pointer & scrolling", "General", "Sync & backup": resolvedSection = initialSection
         default: resolvedSection = "HUD"
         }
         _selection = State(initialValue: resolvedSection)
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
+        initialHUDFocus = initialSection == "Calibration" ? .calibration : nil
         _actionDevice = State(initialValue: initialDevice)
         _pointerDevice = State(initialValue: initialDevice)
     }
@@ -278,6 +281,7 @@ struct ContentView: View {
             Spacer()
             RotaProfileSwitcher(profiles: store.configurationProfiles, activeID: store.activeConfigurationID,
                 onSelect: { switchProfile($0) },
+                onAdd: { switchProfile(nil, fresh: true) },
                 onRename: { renamingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID } },
                 onDuplicate: { switchProfile(nil) },
                 onDelete: { deletingProfile = store.configurationProfiles.first { $0.id == store.activeConfigurationID } })
@@ -377,11 +381,6 @@ struct ContentView: View {
         case "HUD": hudAndTapSettings
         case "Actions":
             HotkeyOrganizerView(store: store)
-            RotaDisclosureSection("Tap calibration") {
-                CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)
-                    .padding(.top, 12)
-            }
-            .accessibilityIdentifier("tap-calibration")
         case "Voice mode": VoiceModeSettingsView(store: store, intentionStore: intentionStore)
         case "Pointer & scrolling": pointerSettings
         default: hudAndTapSettings
@@ -389,8 +388,9 @@ struct ContentView: View {
     }
 
     private var hudAndTapSettings: some View {
-        HUDSettingsView(store: store, initialGroup: initialHUDGroup,
-                        defaultTaps: { AnyView(defaultTapSettings.accessibilityIdentifier("default-tap-settings")) })
+        HUDSettingsView(store: store, initialGroup: initialHUDGroup, initialFocus: initialHUDFocus,
+                        defaultTaps: { AnyView(defaultTapSettings.accessibilityIdentifier("default-tap-settings")) },
+                        calibration: { AnyView(CalibrationSettingsView(store: store, hid: hid, initialDevice: actionDevice)) })
     }
 
     private var defaultTapSettings: some View {
@@ -773,10 +773,10 @@ struct ContentView: View {
         }
     }
 
-    private func switchProfile(_ id: String?) {
+    private func switchProfile(_ id: String?, fresh: Bool = false) {
         NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
         hid.stop()
-        if let id { store.selectConfiguration(id) } else { store.addConfiguration() }
+        if let id { store.selectConfiguration(id) } else { store.addConfiguration(fresh: fresh) }
         actionDevice = .navigator
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
@@ -964,6 +964,7 @@ struct RotaProfileSwitcher: View {
     let profiles: [ConfigurationProfile]
     let activeID: String
     var onSelect: (String) -> Void
+    var onAdd: () -> Void = {}
     var onRename: () -> Void
     var onDuplicate: () -> Void
     var onDelete: () -> Void
@@ -989,11 +990,14 @@ struct RotaProfileSwitcher: View {
                     }
                 }
                 Divider()
-                Button("Rename…", action: onRename)
-                    .accessibilityIdentifier("rename-profile")
+                Button("Add profile", systemImage: "plus", action: onAdd)
+                    .disabled(profiles.count >= maximumProfiles)
+                    .accessibilityIdentifier("add-profile")
                 Button("Duplicate", action: onDuplicate)
                     .disabled(profiles.count >= maximumProfiles)
                     .accessibilityIdentifier("duplicate-profile")
+                Button("Rename…", action: onRename)
+                    .accessibilityIdentifier("rename-profile")
                 Button("Delete…", role: .destructive, action: onDelete)
                     .disabled(profiles.count <= 1)
                     .accessibilityIdentifier("delete-profile")
@@ -1002,6 +1006,6 @@ struct RotaProfileSwitcher: View {
             .accessibilityValue(activeName)
             .accessibilityIdentifier("profile-switcher")
         }
-        .help("Switch, rename, duplicate or delete profiles")
+        .help("Switch, add, duplicate, rename or delete profiles")
     }
 }

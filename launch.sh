@@ -62,6 +62,20 @@ if /usr/bin/pgrep -f "$process_pattern" >/dev/null; then
     /bin/sleep 0.25
   done
   if /usr/bin/pgrep -f "$process_pattern" >/dev/null; then
+    # A modal dialog or a stalled quit leaves the Apple Event unhandled.
+    # Settings are saved as they change, so a signal loses nothing.
+    print -- "Rotagivan did not answer the quit request; stopping it directly…"
+    /usr/bin/pkill -TERM -f "$process_pattern" || true
+    for attempt in {1..20}; do
+      if ! /usr/bin/pgrep -f "$process_pattern" >/dev/null; then break; fi
+      /bin/sleep 0.25
+    done
+    if /usr/bin/pgrep -f "$process_pattern" >/dev/null; then
+      /usr/bin/pkill -KILL -f "$process_pattern" || true
+      /bin/sleep 0.5
+    fi
+  fi
+  if /usr/bin/pgrep -f "$process_pattern" >/dev/null; then
     fail "Rotagivan is still running. Quit all copies, then retry. Nothing was installed."
   fi
 fi

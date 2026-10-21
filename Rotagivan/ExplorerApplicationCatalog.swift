@@ -169,9 +169,11 @@ enum ExplorerApplicationCatalog {
         return texts
     }
 
-    static func search(_ query: String, in applications: [ExplorerApplication]) -> [ExplorerApplication] {
+    /// With `limit`, only the best `limit` matches are ordered (a bounded
+    /// insertion instead of a full sort), which is what every picker shows.
+    static func search(_ query: String, in applications: [ExplorerApplication], limit: Int? = nil) -> [ExplorerApplication] {
         let tokens = normalized(query).split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        return applications.compactMap { app -> (ExplorerApplication, Int)? in
+        let scored = applications.compactMap { app -> (ExplorerApplication, Int)? in
             var score = 0
             let texts = foldedTexts(app)
             for token in tokens {
@@ -181,11 +183,22 @@ enum ExplorerApplicationCatalog {
                 score += best
             }
             return (app, score)
-        }.sorted {
-            if $0.1 != $1.1 { return $0.1 > $1.1 }
-            let order = $0.0.name.localizedStandardCompare($1.0.name)
-            return order == .orderedSame ? $0.0.id < $1.0.id : order == .orderedAscending
-        }.map(\.0)
+        }
+        func precedes(_ lhs: (ExplorerApplication, Int), _ rhs: (ExplorerApplication, Int)) -> Bool {
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            let order = lhs.0.name.localizedStandardCompare(rhs.0.name)
+            return order == .orderedSame ? lhs.0.id < rhs.0.id : order == .orderedAscending
+        }
+        guard let limit, limit < scored.count / 2 else { return scored.sorted(by: precedes).map(\.0) }
+        var best: [(ExplorerApplication, Int)] = []
+        best.reserveCapacity(limit + 1)
+        for candidate in scored {
+            if best.count == limit, let last = best.last, !precedes(candidate, last) { continue }
+            let index = best.firstIndex { precedes(candidate, $0) } ?? best.count
+            best.insert(candidate, at: index)
+            if best.count > limit { best.removeLast() }
+        }
+        return best.map(\.0)
     }
 
     private static func normalized(_ value: String) -> String {
@@ -309,7 +322,7 @@ final class RustApplicationSearch: @unchecked Sendable {
     func search(_ text: String, applications: [ExplorerApplication], limit: Int = 12) -> [ExplorerApplication] {
         lock.lock(); defer { lock.unlock() }
         guard let query, let create, let add else {
-            return Array(ExplorerApplicationCatalog.search(text, in: applications).prefix(max(0, limit)))
+            return ExplorerApplicationCatalog.search(text, in: applications, limit: max(0, limit))
         }
         if index == nil || cached != applications {
             destroy?(index); index = create(); cached = applications

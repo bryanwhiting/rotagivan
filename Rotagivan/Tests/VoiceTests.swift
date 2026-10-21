@@ -852,6 +852,8 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         // get Escape, and it may be a new window if the editor was re-presented.
         let openPopup = NSApp.windows.first { $0.isVisible && nativeControl("temporary-intention-input", window: $0) != nil } ?? popup
         openPopup.makeKeyAndOrderFront(nil)
+        // Escape reaches the popover through its field editor, as it does for a user typing.
+        openPopup.contentView.flatMap({ nativeViews($0).compactMap { $0 as? NSTextField }.first { $0.isEditable } })?.selectText(nil)
         openPopup.sendEvent(escape)
         // The popover closes with an animation; wait in wall time, not yields.
         for _ in 0..<50 where hudPrivateGate.privateEntryActive { try await Task.sleep(nanoseconds: 40_000_000) }

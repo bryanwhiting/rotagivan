@@ -775,12 +775,22 @@ struct ContentView: View {
 
     private func switchProfile(_ id: String?, fresh: Bool = false) {
         NotificationCenter.default.post(name: .shortcutRecordingStarted, object: nil)
-        hid.stop()
+        let before = store.settings
         if let id { store.selectConfiguration(id) } else { store.addConfiguration(fresh: fresh) }
-        actionDevice = .navigator
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
-            if store.settings.enabled { hid.start() }
+        actionDevice = .apple
+        // Same devices on both profiles: keep the trackpad open and only reset
+        // gesture state. Otherwise reopen the devices for the new settings.
+        let sameDevices = before.enabled == store.settings.enabled && before.devices == store.settings.devices
+            && before.resolvedDevices == store.settings.resolvedDevices
+        if sameDevices && store.settings.enabled {
+            hid.reloadProfile()
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil) }
+        } else {
+            hid.stop()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil)
+                if store.settings.enabled { hid.start() }
+            }
         }
     }
 

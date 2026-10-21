@@ -684,6 +684,28 @@ final class NavigatorHIDManager: ObservableObject {
         state = .stopped
     }
 
+    /// A profile switch that keeps the same device settings: gesture state
+    /// resets and Apple input re-reads its settings, but the Navigator stays
+    /// open. A full stop/start would leave and re-enter precision mode, which
+    /// blinks the pointer and costs the device round trips.
+    func reloadProfile() {
+        guard started else { return }
+        stopClickObservation()
+        explorerPointer.setLocked(false)
+        appleInput.stop()
+        appleGestures.reset()
+        inputRouting.reset()
+        contactsDown = false
+        suppressUntilLift = false
+        explorerSource = nil
+        calibrationSource = nil
+        explorer?.dismiss()
+        cancelCalibration(reason: "The profile changed. Start a new calibration.")
+        gestures.reset()
+        updateDistanceScale(navigatorDistanceScale ?? (appleTrackpadConnected ? appleDistanceScale : nil))
+        startAppleInput()
+    }
+
     private func didMatch(_ device: IOHIDDevice) {
         guard manager != nil, self.device == nil, store.settings.enabled else { return }
         UserDefaults.standard.set(Date(), forKey: "debug.lastDeviceMatch")

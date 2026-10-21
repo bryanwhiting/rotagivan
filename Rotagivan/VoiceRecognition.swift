@@ -505,6 +505,10 @@ struct VoiceHUDView: View {
                     admission: session.microphoneAdmission,
                     onPresent: { session.onPrivateEditorChanged?(true) },
                     onDismiss: { session.onPrivateEditorChanged?(false) })
+                    // The HUD view is reused between opens, so the control's
+                    // state must follow the session's dictation object, not the
+                    // first one it ever saw.
+                    .id(session.noteDictation.map { ObjectIdentifier($0) })
                 Button(action: onExit) { Image(systemName: "xmark").font(.system(size: 11)) }
                     .buttonStyle(.plain).frame(width: 24, height: 24)
                     .accessibilityLabel("Cancel voice mode").accessibilityIdentifier("voice.cancel")

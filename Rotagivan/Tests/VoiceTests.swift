@@ -783,6 +783,14 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
             let nodes: [AnyObject] = nativeViews(view).flatMap { axNodes($0) }
             return nodes.first { $0.accessibilityIdentifier?() == id }
         }
+        /// Controls appear a frame after the state that enables them; press once they can be pressed.
+        func pressWhenReady(_ id: String, window: NSWindow) async -> Bool {
+            for _ in 0..<2_000 {
+                if nativeControl(id, window: window)?.accessibilityPerformPress?() == true { return true }
+                await Task.yield()
+            }
+            return false
+        }
         guard let realHUD = NSApp.windows.first(where: { $0 is ExplorerPanel && $0.isVisible }),
               let intentButton = nativeControl("temporary-intention-control", window: realHUD) else {
             preconditionFailure("Missing actual HUD intention control")
@@ -829,20 +837,29 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         // The cancelled voice session releases the microphone asynchronously; dictation
         // fails closed ("still stopping") until it has, exactly as it would for a user.
         await voiceEventually({ !hudPrivateGate.occupied }, "Cancelled voice must release the microphone")
-        precondition(nativeControl("temporary-intention-dictate", window: popup)?.accessibilityPerformPress?() == true)
+        let dictatePressed = await pressWhenReady("temporary-intention-dictate", window: popup)
+        precondition(dictatePressed)
         await voiceEventually({ hudNote.phase == .listening }, "Actual HUD note dictation fixture")
-        precondition(nativeControl("temporary-intention-dictation-stop", window: popup)?.accessibilityPerformPress?() == true)
+        let stopPressed = await pressWhenReady("temporary-intention-dictation-stop", window: popup)
+        precondition(stopPressed)
         await voiceEventually({ hudNote.phase == .finished }, "Note transcription must finish without action classification")
         precondition(hudNoteCloud.requests == 1 && hudNoteCloud.classifications == 0 && hudNote.transcript == "open Slack")
         precondition(fake.requests == previousRequests && executed.count == previousExecutions,
             "Note STT stays separate from action voice and never executes actions")
         let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: popup.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
-        NSApp.sendEvent(escape)
-        try await Task.sleep(nanoseconds: 200_000_000)
-        precondition(controller.isVisible && !controller.isEditing && !hudPrivateGate.privateEntryActive &&
-            controller.displayedVoiceSession?.phase == .cancelled && executed.count == previousExecutions,
-            "Escape closes private popup without dispatch, HUD dismissal or cloud restart")
+        // NSApp routes key events to whichever window is key; the popup itself must
+        // get Escape, and it may be a new window if the editor was re-presented.
+        let openPopup = NSApp.windows.first { $0.isVisible && nativeControl("temporary-intention-input", window: $0) != nil } ?? popup
+        openPopup.makeKeyAndOrderFront(nil)
+        openPopup.sendEvent(escape)
+        // The popover closes with an animation; wait in wall time, not yields.
+        for _ in 0..<50 where hudPrivateGate.privateEntryActive { try await Task.sleep(nanoseconds: 40_000_000) }
+        precondition(!hudPrivateGate.privateEntryActive, "Escape closes the private popup and releases private entry")
+        precondition(controller.isVisible, "Escape in the popup must not dismiss the HUD")
+        precondition(!controller.isEditing, "Escape leaves inline editing")
+        precondition(controller.displayedVoiceSession?.phase == .cancelled, "Closing the popup must not restart cloud voice")
+        precondition(executed.count == previousExecutions, "Closing the popup dispatches nothing")
         precondition(intentButton.accessibilityPerformPress?() == true)
         try await Task.sleep(nanoseconds: 100_000_000)
         controller.dismiss()

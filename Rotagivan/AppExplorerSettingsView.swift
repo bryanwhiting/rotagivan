@@ -1624,25 +1624,25 @@ extension AppExplorerSettingsView {
                 Divider()
                 ScrollView { workspaceInspector.frame(maxWidth: .infinity, alignment: .leading) }
                     .frame(width: Self.inspectorWidth)
-                    .background(.thinMaterial)
+                    .background(RotaTokens.paneFill)
                     .accessibilityIdentifier("hud-inspector")
             case .defaultTaps:
                 ScrollView { defaultTaps?().padding(20) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.thinMaterial)
+                    .background(RotaTokens.paneFill)
             case .swipes:
                 ScrollView { swipesPane.padding(20) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.thinMaterial)
+                    .background(RotaTokens.paneFill)
             case .calibration:
                 ScrollView { calibration?().padding(20) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.thinMaterial)
+                    .background(RotaTokens.paneFill)
                     .accessibilityIdentifier("tap-calibration")
             case .builtInDefault(let group):
                 builtInDefaultPane(group)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(.thinMaterial)
+                    .background(RotaTokens.paneFill)
             }
         }
     }
@@ -1711,7 +1711,7 @@ extension AppExplorerSettingsView {
                 Spacer()
             }.padding(.horizontal, 10).padding(.vertical, 8)
         }
-        .background(.thinMaterial)
+        .background(RotaTokens.paneFill)
         .accessibilityIdentifier("hud-navigator")
     }
 

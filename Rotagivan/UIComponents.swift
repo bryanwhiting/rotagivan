@@ -9,6 +9,9 @@ import SwiftUI
 enum RotaTokens {
     /// The soft light blue behind a selected HUD tile, the timer glow and other HUD accents.
     static let glassBlue = Color(red: 0.58, green: 0.80, blue: 1.0)
+    /// Settings panes beside the HUD canvas: a flat tint instead of a material,
+    /// which costs a backdrop blur on every redraw for no visible gain over an opaque window.
+    static let paneFill = Color(nsColor: .underPageBackgroundColor).opacity(0.35)
     enum Space {
         static let xxs: CGFloat = 2
         static let xs: CGFloat = 4

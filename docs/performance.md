@@ -20,9 +20,9 @@ and after any change that touches these paths.
 | Launcher search per keystroke, Swift fallback engine (966 rows) | 2.2–2.8 ms | 1.5–2.0 ms | Folded names and bundle ids cached per app instead of refolded on every keystroke; the rest is scoring plus a localized sort of the matches. The bundled Rust engine keeps its own index. |
 | Profile switch (`selectConfiguration`) | 2.4 ms | — | The HID restart around it costs ~10 ms without a device (IOHIDManager create/open) plus the device's own open time; no sleeps or synchronous waits. Rare interaction, left as is. |
 | Settings window: Actions / General first render | 33 / 37 ms | — | Sampled: rasterizing the cards (fills, masks, materials); app code is under 2% of samples. Two frames, once per page switch. |
-| Settings window: HUD page, no layers | 108 ms | 94 ms | Preview faces drop the material, drop shadow and per-label shadows. |
-| Settings window: HUD page, 12 layers | 360 ms | 198 ms | Each satellite face is one GPU raster (`drawingGroup`). Remaining cost is one full HUD layout per layer. |
-| Settings window: Calibration tab (opened on demand) | 188 ms | 72 ms | The scope bar and calibration control show at once; the recognition cards lay out one frame later. |
+| Settings window: HUD page, no layers | 108 ms | 81 ms | Preview faces drop the material, drop shadow and per-label shadows; the navigator and side panes use a flat tint instead of a material over the opaque window. |
+| Settings window: HUD page, 12 layers | 360 ms | 173 ms | Each satellite face is one GPU raster (`drawingGroup`). Remaining cost is one full HUD layout per layer. |
+| Settings window: Calibration tab (opened on demand) | 188 ms | 59 ms | The scope bar and calibration control show at once; the recognition cards lay out one frame later. |
 | Voice/action registry build (`VoiceActionRegistry.make`, 600 apps) — every HUD open, MCP call and usage-tracker refresh | 60 ms | 0.6 ms | Base and finished lists cached per settings/applications/scope; record ids computed once instead of hashing JSON on every access. |
 | MCP tool call round trip (`get_settings_summary`) | 62 ms | 0.7 ms | Same cache; the socket itself costs under 0.1 ms. `list_actions` 82 → 4 ms. |
 | Launcher catalog per keystroke | rebuilt 966 rows + compared | reused | Catalog array rebuilt only when a snapshot arrives. |

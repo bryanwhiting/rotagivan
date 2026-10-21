@@ -826,6 +826,9 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         precondition(hudIntent.snapshot().text == "Private marketing campaign")
         try captureHUDPrivate(realHUD, name: "private-intention-hud-open")
         try captureHUDPrivate(popup, name: "private-intention-hud-popup")
+        // The cancelled voice session releases the microphone asynchronously; dictation
+        // fails closed ("still stopping") until it has, exactly as it would for a user.
+        await voiceEventually({ !hudPrivateGate.occupied }, "Cancelled voice must release the microphone")
         precondition(nativeControl("temporary-intention-dictate", window: popup)?.accessibilityPerformPress?() == true)
         await voiceEventually({ hudNote.phase == .listening }, "Actual HUD note dictation fixture")
         precondition(nativeControl("temporary-intention-dictation-stop", window: popup)?.accessibilityPerformPress?() == true)

@@ -75,7 +75,13 @@ struct RotaControlChrome: View {
                 RoundedRectangle(cornerRadius: RotaTokens.Radius.m, style: .continuous)
                     .strokeBorder(active ? RotaTokens.accent.opacity(0.85) : RotaTokens.hairline, lineWidth: active ? 1.5 : 1)
             }
-            .shadow(color: .black.opacity(enabled ? 0.06 : 0), radius: 0.5, y: 0.5)
+            // A half-point shadow needs an offscreen blur per button; the same
+            // hairline below the edge reads identically.
+            .overlay(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: RotaTokens.Radius.m, style: .continuous)
+                    .strokeBorder(Color.black.opacity(enabled ? 0.06 : 0), lineWidth: 0.5)
+                    .offset(y: 0.5)
+            }
     }
 }
 
@@ -497,7 +503,8 @@ struct RotaSegmented<Value: Hashable>: View {
                         if selected {
                             RoundedRectangle(cornerRadius: RotaTokens.Radius.s + 1, style: .continuous)
                                 .fill(RotaTokens.fieldFill)
-                                .shadow(color: .black.opacity(0.14), radius: 1.5, y: 0.5)
+                                .overlay(RoundedRectangle(cornerRadius: RotaTokens.Radius.s + 1, style: .continuous)
+                                    .strokeBorder(Color.black.opacity(0.14), lineWidth: 0.5).offset(y: 0.5))
                                 .overlay(RoundedRectangle(cornerRadius: RotaTokens.Radius.s + 1, style: .continuous)
                                     .strokeBorder(RotaTokens.accent.opacity(0.35)))
                                 .matchedGeometryEffect(id: "thumb", in: thumb)
@@ -552,7 +559,7 @@ private struct RotaSwitchBody: View {
                 .frame(width: width, height: height)
                 .overlay(alignment: configuration.isOn ? .trailing : .leading) {
                     Circle().fill(.white)
-                        .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                        .overlay(Circle().strokeBorder(Color.black.opacity(0.2), lineWidth: 0.5).offset(y: 0.5))
                         .padding(1.5)
                 }
                 .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: configuration.isOn)

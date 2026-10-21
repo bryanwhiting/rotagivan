@@ -102,6 +102,8 @@ private func transportEventually(_ condition: () -> Bool) async {
         precondition(VoiceFixtureProtocol.snapshot().0.count == 1)
         client.cancelRequests()
         do { _ = try await first.value; preconditionFailure("Cancelled request succeeded") } catch {}
+        // The URLProtocol acknowledges stopLoading on its own thread; give it a moment.
+        await transportEventually { VoiceFixtureProtocol.snapshot().1 >= 1 }
         precondition(VoiceFixtureProtocol.snapshot().1 >= 1,
             "Admitted call completion must follow URLProtocol cancellation acknowledgement")
         let finalText = try await client.transcribe(Data([3, 4]))

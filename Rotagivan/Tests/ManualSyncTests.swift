@@ -238,12 +238,18 @@ import SwiftUI
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to:
                 URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("manual-sync.png"))
-            let capture = Process()
-            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            capture.arguments = ["-x", "-l", String(panel.windowNumber),
-                URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("manual-sync-native.png").path]
-            try capture.run(); capture.waitUntilExit()
-            precondition(capture.terminationStatus == 0)
+            // The native window capture needs Screen Recording; without it the
+            // SwiftUI render above is still verified and saved.
+            if CGPreflightScreenCaptureAccess() {
+                let capture = Process()
+                capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                capture.arguments = ["-x", "-l", String(panel.windowNumber),
+                    URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("manual-sync-native.png").path]
+                try capture.run(); capture.waitUntilExit()
+                precondition(capture.terminationStatus == 0)
+            } else {
+                print("ManualSyncTests: Screen Recording not granted; skipped the native window capture")
+            }
             panel.orderOut(nil); panel.close()
         }
         let beforeQuit = try await files.rawDigest()

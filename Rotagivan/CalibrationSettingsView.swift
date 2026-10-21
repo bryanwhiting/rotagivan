@@ -5,6 +5,7 @@ struct CalibrationSettingsView: View {
     @ObservedObject var hid: NavigatorHIDManager
 
     @State private var device: GestureDevice
+    @State private var cardsReady = false
     private var layerID: UInt32 { store.defaultProfileID }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, initialDevice: GestureDevice = .apple) {
@@ -51,7 +52,12 @@ struct CalibrationSettingsView: View {
 
             TapCalibrationSettingsView(store: store, hid: hid, device: $device)
 
-            if needsCustomization {
+            // The recognition cards are the bulk of this pane's layout; showing the
+            // scope bar first and the cards a frame later makes the tab open at once.
+            if !cardsReady {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                    .task { cardsReady = true }
+            } else if needsCustomization {
                 inheritedCard
             } else {
                 tapRecognitionCard

@@ -79,6 +79,9 @@ import QuartzCore
         print("launcher catalog rows:", actions.count)
         measure("launcher: search per keystroke ('mail')") { _ = LauncherAction.search("mail", actions: actions) }
         measure("launcher: search per keystroke ('a')") { _ = LauncherAction.search("a", actions: actions) }
+        measure("profile switch: hid.stop() + hid.start() (no device)", runs: 10) {
+            let manager = NavigatorHIDManager(store: store); manager.stop(); manager.start(); manager.stop()
+        }
         measure("profile switch: selectConfiguration", runs: 10) {
             let other = store.configurationProfiles.first { $0.id != store.activeConfigurationID }!.id
             store.selectConfiguration(other)
@@ -123,6 +126,17 @@ import QuartzCore
             RunLoop.main.run(until: Date().addingTimeInterval(0.001))
             let image = hudHost.bitmapImageRepForCachingDisplay(in: hudHost.bounds)!
             hudHost.cacheDisplay(in: hudHost.bounds, to: image)
+        }
+        if CommandLine.arguments.contains("--loop-general") {
+            let until = Date().addingTimeInterval(6)
+            while Date() < until {
+                let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "General").defaultAppStorage(defaults))
+                host.frame = NSRect(x: 0, y: 0, width: 1100, height: 740)
+                host.layoutSubtreeIfNeeded()
+                let image = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+                host.cacheDisplay(in: host.bounds, to: image)
+            }
+            return
         }
         if CommandLine.arguments.contains("--loop-calibration") {
             let until = Date().addingTimeInterval(6)

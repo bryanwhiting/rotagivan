@@ -820,6 +820,8 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
         editor.insertText("campaign", replacementRange: editor.selectedRange())
         precondition(editor.string == "Private marketing campaign" && executed.count == previousExecutions)
         popup.makeFirstResponder(nil)
+        // The field commits its draft on focus loss during the next run-loop turn.
+        try await Task.sleep(nanoseconds: 150_000_000)
         precondition(nativeControl("temporary-intention-set", window: popup)?.accessibilityPerformPress?() == true)
         precondition(hudIntent.snapshot().text == "Private marketing campaign")
         try captureHUDPrivate(realHUD, name: "private-intention-hud-open")

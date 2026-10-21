@@ -152,13 +152,31 @@ enum ExplorerApplicationCatalog {
                           errors: errors)
     }
 
+    /// Folded name and bundle id per application, kept between keystrokes:
+    /// folding ~1,000 strings twice per keystroke was most of a search.
+    private static let foldedLock = NSLock()
+    nonisolated(unsafe) private static var folded: [String: (name: String, id: String)] = [:]
+    private static func foldedTexts(_ app: ExplorerApplication) -> (name: String, id: String) {
+        let key = app.bundleID + "\u{1f}" + app.name
+        foldedLock.lock()
+        if let hit = folded[key] { foldedLock.unlock(); return hit }
+        foldedLock.unlock()
+        let texts = (normalized(app.name), normalized(app.bundleID))
+        foldedLock.lock()
+        if folded.count > 4_096 { folded.removeAll(keepingCapacity: true) }
+        folded[key] = texts
+        foldedLock.unlock()
+        return texts
+    }
+
     static func search(_ query: String, in applications: [ExplorerApplication]) -> [ExplorerApplication] {
         let tokens = normalized(query).split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return applications.compactMap { app -> (ExplorerApplication, Int)? in
             var score = 0
+            let texts = foldedTexts(app)
             for token in tokens {
-                let nameScore = fuzzyScore(token, in: normalized(app.name))
-                let idScore = fuzzyScore(token, in: normalized(app.bundleID)).map { $0 - 250 }
+                let nameScore = fuzzyScore(token, in: texts.name)
+                let idScore = fuzzyScore(token, in: texts.id).map { $0 - 250 }
                 guard let best = [nameScore, idScore].compactMap({ $0 }).max() else { return nil }
                 score += best
             }

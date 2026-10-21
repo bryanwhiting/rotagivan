@@ -124,11 +124,23 @@ import QuartzCore
             let image = hudHost.bitmapImageRepForCachingDisplay(in: hudHost.bounds)!
             hudHost.cacheDisplay(in: hudHost.bounds, to: image)
         }
+        if CommandLine.arguments.contains("--loop-calibration") {
+            let until = Date().addingTimeInterval(6)
+            while Date() < until {
+                let host = NSHostingView(rootView: CalibrationSettingsView(store: store, hid: hid).frame(width: 800).defaultAppStorage(defaults))
+                host.frame = NSRect(x: 0, y: 0, width: 800, height: 1400)
+                host.layoutSubtreeIfNeeded()
+                let image = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+                host.cacheDisplay(in: host.bounds, to: image)
+            }
+            return
+        }
         // Timer alert: CPU the glowing edges burn while shown (breathing animation on every screen).
         func cpuSeconds() -> Double {
             var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
             return Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
         }
+        if CommandLine.arguments.contains("--only-timer") { /* fallthrough: timer measured next */ }
         let alert = FocusTimerAlert(minutes: 1, onDone: {}, onSnooze: {})
         alert.show()
         RunLoop.main.run(until: Date().addingTimeInterval(2.5))   // past the three flashes
@@ -137,6 +149,7 @@ import QuartzCore
         let alertCPU = (cpuSeconds() - cpuBefore) / Date().timeIntervalSince(wallBefore) * 100
         alert.close()
         print(String(format: "%-46@ %5.1f%% of one core", "timer alert: CPU while breathing", alertCPU))
+        if CommandLine.arguments.contains("--only-timer") { return }
         if CommandLine.arguments.contains("--loop-frame") {
             let until = Date().addingTimeInterval(6)
             while Date() < until {

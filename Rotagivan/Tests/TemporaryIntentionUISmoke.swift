@@ -6,19 +6,6 @@ import SwiftUI
     var wall = Date(timeIntervalSince1970: 1_700_000_000)
 }
 
-@MainActor private final class IntentionUISpeechBackend: LocalIntentionSpeechBackend {
-    var supportsOnDeviceRecognition = true
-    var permissionGranted = true
-    var permissions = 0, starts = 0, stops = 0, cancellations = 0
-    var transcript: (@MainActor (String, Bool) -> Void)?
-    var failure: (@MainActor () -> Void)?
-    func requestPermissions() async throws -> Bool { permissions += 1; return permissionGranted }
-    func start(onTranscript: @escaping @MainActor (String, Bool) -> Void, onError: @escaping @MainActor () -> Void) throws {
-        starts += 1; transcript = onTranscript; failure = onError
-    }
-    func stop() { stops += 1 }
-    func cancel() { cancellations += 1 }
-}
 
 @main struct TemporaryIntentionUISmoke {
     @MainActor static func main() throws {
@@ -31,13 +18,14 @@ import SwiftUI
         })
         defer { store.clear() }
         let admission = VoiceMicrophoneAdmission()
+        // Dictation itself is covered by VoiceTests with fake microphones and
+        // cloud sessions; here the session never starts, so no permission prompt.
+        let speech = NoteDictationSession(admission: admission, requestPermission: { false })
         let cloudID = UUID()
         var cloudCancellations = 0
         precondition(admission.acquireCloud(cloudID, cancel: {
             cloudCancellations += 1; admission.release(cloudID); admission.endCloud(cloudID)
         }))
-        let backend = IntentionUISpeechBackend()
-        let speech = LocalIntentionSpeech(backend: backend, admission: admission)
         let suite = "Rotagivan.TemporaryIntentionUI.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.set("unchanged", forKey: "fixture")
@@ -89,8 +77,7 @@ import SwiftUI
                 URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent(name + ".png"))
         }
         settle()
-        precondition(backend.permissions == 0 && backend.starts == 0 && admission.privateEntryActive,
-            "Opening the private editor blocks cloud voice but must not request permissions or start capture")
+        precondition(admission.privateEntryActive, "Opening the private editor blocks cloud voice")
         precondition(cloudCancellations == 1 && !admission.acquireCloud(UUID(), cancel: {}),
             "Private editor entry must synchronously cancel existing cloud capture and reject new cloud sessions")
         try capture("intention-local-initial")
@@ -106,38 +93,6 @@ import SwiftUI
         precondition(store.snapshot().text == "Preparing the launch" && store.remainingSeconds == 1800,
             "Replace uses the same store and resets the thirty-minute lifetime")
         let current = store.snapshot()
-        press("temporary-intention-dictate")
-        precondition(backend.permissions == 1 && backend.starts == 1 && speech.phase == .listening)
-        panel.setContentSize(NSSize(width: 300, height: 560)); settle()
-        let listeningBounds = panel.convertToScreen(host.convert(host.bounds, to: nil)).insetBy(dx: -1, dy: -1)
-        for id in ["temporary-intention-dictate", "temporary-intention-dictation-stop", "temporary-intention-dictation-cancel"] {
-            precondition(listeningBounds.contains(find(id).accessibilityFrame?() ?? .zero), "Narrow dictation controls must remain reachable")
-        }
-        try capture("intention-local-listening-narrow")
-        backend.transcript?("Locally dictated draft", false); settle()
-        precondition(store.snapshot() == current, "Partial dictation must never commit an intention")
-        precondition(views(host).compactMap { $0 as? NSTextField }.first { $0.isEditable }!.stringValue == "Locally dictated draft")
-        press("temporary-intention-dictation-stop")
-        backend.transcript?("Locally dictated final", true); settle()
-        precondition(store.snapshot() == current && speech.phase == .finished)
-        press("temporary-intention-set")
-        precondition(store.snapshot().text == "Locally dictated final")
-        let dictated = store.snapshot()
-        press("temporary-intention-dictate")
-        let lateTranscript = backend.transcript
-        press("temporary-intention-dictation-cancel")
-        lateTranscript?("Late cancelled private text", true); settle()
-        precondition(store.snapshot() == dictated && speech.phase == .cancelled)
-        backend.permissionGranted = false
-        press("temporary-intention-dictate")
-        precondition(speech.phase == .failed && store.snapshot() == dictated)
-        _ = find("temporary-intention-dictation-status")
-        backend.supportsOnDeviceRecognition = false
-        let permissionCount = backend.permissions
-        press("temporary-intention-dictate")
-        precondition(backend.permissions == permissionCount && store.snapshot() == dictated,
-            "Unavailable on-device recognition must use typed fallback without permission or network work")
-        type("Preparing the launch"); press("temporary-intention-set")
         let currentAfterDictation = store.snapshot()
         type(String(repeating: "x", count: 501))
         precondition(find("temporary-intention-set").isAccessibilityEnabled?() == false)
@@ -187,6 +142,6 @@ import SwiftUI
         _ = find("temporary-intention-empty", in: reopened)
         precondition(defaults.persistentDomain(forName: suite)! as NSDictionary == saved,
             "The isolated fixture defaults sentinel must remain unchanged")
-        print("Local temporary intention UI passed native set/replace/clear, fake on-device dictation draft/stop/cancel/failure/fallback, invalid input, narrow controls, shared popover, expiry/reopen, and untouched isolated defaults sentinel; no microphone/provider access.")
+        print("Temporary intention UI passed native set/replace/clear, invalid input, narrow controls, shared popover, expiry/reopen, and untouched isolated defaults sentinel; no microphone/provider access.")
     }
 }

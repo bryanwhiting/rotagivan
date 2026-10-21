@@ -128,6 +128,8 @@ struct FocusTimerGlow: View {
                 shape.strokeBorder(AngularGradient(colors: colors, center: .center), lineWidth: 10).blur(radius: 6)
                 shape.strokeBorder(Color.white, lineWidth: 14).blur(radius: 10).opacity(white ? 1 : 0)
             }
+            // One GPU raster for the blurred ring; only its opacity animates.
+            .drawingGroup()
             .opacity(breathing ? 0.65 : 1)
             .frame(width: geometry.size.width, height: geometry.size.height)
         }

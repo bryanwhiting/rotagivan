@@ -144,20 +144,30 @@ struct AppExplorerRecents {
     }
 }
 
-enum RecentPlace<Tab: Equatable>: Equatable { case app(String), tab(Tab) }
+enum RecentPlace<Tab: Equatable>: Equatable { case app(String), tab(Tab), slack(String) }
 
-/// One most-recent-first list of apps and Chrome tabs. Chrome appears only as its
-/// tabs. Stamps come from one shared clock; unstamped places keep their input order.
+/// One most-recent-first list of apps, Chrome tabs and Slack channels. Chrome and
+/// Slack appear only as their tabs and channels. Stamps come from one shared
+/// clock; unstamped places keep their input order.
 enum RecentPlaces {
     static let chromeBundleID = "com.google.Chrome"
-    /// `apps` arrive in MRU order and `tabs` with Chrome's selected tab first.
-    /// The current place (the active app, or Chrome's selected tab) always leads.
-    static func merged<Tab: Equatable>(apps: [String], tabs: [Tab], active: String?,
-                                       appStamp: (String) -> UInt64?, tabStamp: (Tab) -> UInt64?) -> [RecentPlace<Tab>] {
-        let current: RecentPlace<Tab>? = active == chromeBundleID ? tabs.first.map { .tab($0) }
-            : active.flatMap { apps.contains($0) ? .app($0) : nil }
-        let candidates = apps.filter { $0 != chromeBundleID }.map { (RecentPlace<Tab>.app($0), appStamp($0) ?? 0) }
-            + tabs.map { (RecentPlace<Tab>.tab($0), tabStamp($0) ?? 0) }
+    static let slackBundleID = "com.tinyspeck.slackmacgap"
+    /// `apps` arrive in MRU order, `tabs` with Chrome's selected tab first and
+    /// `slack` most active first. The current place (the active app, Chrome's
+    /// selected tab, or Slack's open channel) always leads.
+    static func merged<Tab: Equatable>(apps: [String], tabs: [Tab], slack: [String] = [], active: String?,
+                                       appStamp: (String) -> UInt64?, tabStamp: (Tab) -> UInt64?,
+                                       slackStamp: (String) -> UInt64? = { _ in nil }) -> [RecentPlace<Tab>] {
+        var current: RecentPlace<Tab>?
+        if active == chromeBundleID { current = tabs.first.map { .tab($0) } }
+        else if active == slackBundleID, let first = slack.first { current = .slack(first) }
+        else if let active, apps.contains(active) { current = .app(active) }
+        var candidates: [(RecentPlace<Tab>, UInt64)] = []
+        for app in apps where app != chromeBundleID && (app != slackBundleID || slack.isEmpty) {
+            candidates.append((.app(app), appStamp(app) ?? 0))
+        }
+        for tab in tabs { candidates.append((.tab(tab), tabStamp(tab) ?? 0)) }
+        for channel in slack { candidates.append((.slack(channel), slackStamp(channel) ?? 0)) }
         let rest = candidates.enumerated().filter { $0.element.0 != current }.sorted { lhs, rhs in
             lhs.element.1 == rhs.element.1 ? lhs.offset < rhs.offset : lhs.element.1 > rhs.element.1
         }.map(\.element.0)

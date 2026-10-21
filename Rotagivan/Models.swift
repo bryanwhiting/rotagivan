@@ -66,7 +66,7 @@ enum HUDNavigationAction: String, Codable, CaseIterable {
 
 enum HUDSwipeDirection: String, Codable, CaseIterable {
     case inverted, regular
-    var title: String { self == .inverted ? "Inverted (default)" : "Regular" }
+    var title: String { self == .inverted ? "Inverted" : "Regular (default)" }
 
     /// Equal 45-degree sectors; hardware Y grows downward.
     func navigation(dx: Double, dy: Double) -> HUDNavigationAction {
@@ -503,7 +503,8 @@ struct ShortcutConfiguration: Codable {
 }
 
 enum GestureDevice: String, Codable, CaseIterable {
-    case navigator, apple
+    // Declaration order is display order: the Apple trackpad comes first.
+    case apple, navigator
     var title: String { self == .navigator ? "ZSA Navigator" : "Apple trackpad" }
 }
 
@@ -625,7 +626,7 @@ enum ExplorerReservedGroup: String, CaseIterable, Identifiable {
         case .recentApps: return "Running apps, ordered by most recently used."
         case .actions: return "Copy, Paste, Cut, Undo, Redo, Select All, Find and Save."
         case .chromeTabs: return "Open tabs from Google Chrome. Choose a tile to focus that existing tab."
-        case .recentAppsAndTabs: return "Recent apps and individual Chrome tabs in one list, most recently used first."
+        case .recentAppsAndTabs: return "Recent apps, Chrome tabs and Slack channels in one list, most recently used first. Choose which to include in its built-in default."
         case .mediaControls: return "Play/pause, previous and next track, volume and mute."
         case .slackChannels: return "Your most-used Slack channels, most active first. Choose a tile to jump to that channel."
         }
@@ -1130,9 +1131,18 @@ struct AppExplorerFavorite: Codable, Equatable {
     }
 }
 
+/// Which sources the Recent Apps & Tabs HUD mixes. All on unless turned off.
+struct RecentPlaceSources: Codable, Equatable {
+    var apps = true
+    var chromeTabs = true
+    var slackChannels = true
+}
+
 struct HUDDefaultLayout: Codable, Equatable {
     var favorites: [AppExplorerFavorite] = []
     var slotCount: Int = 8
+    var recentSources: RecentPlaceSources? = nil
+    var resolvedRecentSources: RecentPlaceSources { recentSources ?? RecentPlaceSources() }
 }
 
 struct AppExplorerSettings: Codable, Equatable {
@@ -1169,7 +1179,7 @@ struct AppExplorerSettings: Codable, Equatable {
     var voiceAutoSelect: Bool? = nil
     var resolvedVoiceAutoSelect: Bool { voiceAutoSelect ?? true }
     var swipeDirection: HUDSwipeDirection? = nil
-    var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .inverted }
+    var resolvedSwipeDirection: HUDSwipeDirection { swipeDirection ?? .regular }
     var invertPickerDirection: Bool? = nil
     var resolvedInvertPickerDirection: Bool { invertPickerDirection ?? false }
     var resolvedTheme: ExplorerTheme { .starburstAir }

@@ -100,6 +100,7 @@ enum SlackWindowTitle {
         let key = channel.workspace + "/" + channel.name
         guard key != lastSeen else { return }
         lastSeen = key
+        ChromeTabRecency.shared.recordSlack(channel.name)
         if let index = visits.firstIndex(where: { $0.name == channel.name && $0.workspace == channel.workspace }) {
             visits[index].visits += 1; visits[index].lastVisit = now
         } else {

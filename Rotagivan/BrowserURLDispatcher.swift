@@ -118,6 +118,7 @@ enum ChromeLocalHistory {
     static let shared = ChromeTabRecency()
     private var visits: [String: UInt64] = [:]
     private var appVisits: [String: UInt64] = [:]
+    private var slackVisits: [String: UInt64] = [:]
     private var clock: UInt64 = 0
     private var timer: Timer?
     private var activation: NSObjectProtocol?
@@ -165,6 +166,14 @@ enum ChromeLocalHistory {
 
     func stamp(app identifier: String) -> UInt64? { appVisits[identifier] }
     func stamp(tab: ChromeRecentTab) -> UInt64? { visits[key(tab)] }
+    func stamp(slack channel: String) -> UInt64? { slackVisits[channel] }
+
+    /// A Slack channel came to the front; it competes with apps and tabs on the same clock.
+    func recordSlack(_ channel: String) {
+        clock &+= 1
+        slackVisits[channel] = clock
+        if slackVisits.count > 256 { slackVisits = [channel: clock] }
+    }
 
     private func sampleIfChromeIsActive(force: Bool = false) {
         guard !sampling, let chrome = NSWorkspace.shared.frontmostApplication,

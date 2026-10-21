@@ -52,7 +52,8 @@ struct BuiltInHUDDefaultEditor: View {
     }
     private var chromePreviewEntries: [ExplorerEntry]? {
         if group == .recentAppsAndTabs {
-            return chromeTabsLoaded ? AppExplorerController.previewRecentPlaceEntries(tabs: chromeTabs, count: layout.slotCount) : []
+            return chromeTabsLoaded ? AppExplorerController.previewRecentPlaceEntries(tabs: chromeTabs, count: layout.slotCount,
+                sources: layout.resolvedRecentSources) : []
         }
         guard group == .chromeTabs else { return nil }
         let slots = ExplorerSlot.slots(layout.slotCount).sorted {
@@ -82,8 +83,28 @@ struct BuiltInHUDDefaultEditor: View {
         guard next.hasValidFavorites else { error = "Remove occupied tiles before reducing the number of slots."; return }
         store.settings.appExplorer = next; error = nil
     }
+    private func sourceToggle(_ title: String, _ keyPath: WritableKeyPath<RecentPlaceSources, Bool>, id: String) -> some View {
+        Toggle(title, isOn: Binding(get: { layout.resolvedRecentSources[keyPath: keyPath] }, set: { enabled in
+            var next = layout
+            var sources = layout.resolvedRecentSources
+            sources[keyPath: keyPath] = enabled
+            next.recentSources = sources
+            save(next)
+        }))
+        .toggleStyle(.rotaSwitch)
+        .accessibilityIdentifier(id)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if group == .recentAppsAndTabs {
+                HStack(spacing: 18) {
+                    Text("Include").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    sourceToggle("Apps", \.apps, id: "recent-source-apps")
+                    sourceToggle("Chrome tabs", \.chromeTabs, id: "recent-source-chrome")
+                    sourceToggle("Slack channels", \.slackChannels, id: "recent-source-slack")
+                }
+            }
             HStack {
                 RotaSelect("Tiles", selection: Binding(get: { layout.slotCount }, set: { count in
                     var next = layout; next.slotCount = count; save(next)
@@ -95,7 +116,7 @@ struct BuiltInHUDDefaultEditor: View {
                 Button("Restore original…") { restoring = true }.accessibilityIdentifier("builtin-hud-restore")
             }
             Text(group.hasEditableDefaults ? "Click a tile to edit the default. New \(group.title) HUDs use this layout; existing copies stay unchanged."
-                : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : group == .recentAppsAndTabs ? "Running apps and Chrome tabs" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
+                : "Preview positions only. \(group == .chromeTabs ? "Open Chrome tabs" : group == .recentAppsAndTabs ? "Running apps, Chrome tabs and Slack channels" : "Running apps") fill these tiles on this Mac. Choose how many tiles new layers show.")
                 .font(.callout).foregroundStyle(.secondary)
             ExplorerHUDSettingsPreview(settings: preview, theme: settings.resolvedTheme,
                 dictionary: store.settings.resolvedHotkeyDictionary, groupPath: [], layerName: group.title,
@@ -1845,11 +1866,13 @@ extension AppExplorerSettingsView {
             }
             RotaCard("Two-finger HUD navigation", systemImage: "hand.draw") {
                 VStack(alignment: .leading, spacing: 8) {
-                    RotaSelect("Direction", selection: swipeDirectionBinding, values: HUDSwipeDirection.allCases) { $0.title }
+                    Toggle("Invert navigation direction", isOn: Binding(get: { baseSettings.resolvedSwipeDirection == .inverted },
+                        set: { swipeDirectionBinding.wrappedValue = $0 ? .inverted : .regular }))
+                        .toggleStyle(.rotaSwitch)
                         .accessibilityIdentifier("hud-swipe-direction")
                     Text(baseSettings.resolvedSwipeDirection == .inverted
-                        ? "Inverted (default): dragging two fingers down moves to the HUD above, like scrolling content. Choose Regular to move to the HUD below instead."
-                        : "Regular: swiping two fingers down moves to the HUD below. Choose Inverted to drag the map like content.")
+                        ? "Inverted: dragging two fingers down moves to the HUD above, like scrolling content. Turn this off to move to the HUD below."
+                        : "Swiping two fingers down moves to the HUD below. Turn this on to drag the map like content instead.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Text("Gestures you assigned explicitly in Default taps keep their own actions.")
                         .font(.caption).foregroundStyle(.secondary)

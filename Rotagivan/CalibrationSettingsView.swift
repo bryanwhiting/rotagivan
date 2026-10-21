@@ -7,7 +7,7 @@ struct CalibrationSettingsView: View {
     @State private var device: GestureDevice
     private var layerID: UInt32 { store.defaultProfileID }
 
-    init(store: SettingsStore, hid: NavigatorHIDManager, initialDevice: GestureDevice = .navigator) {
+    init(store: SettingsStore, hid: NavigatorHIDManager, initialDevice: GestureDevice = .apple) {
         self.store = store
         self.hid = hid
         _device = State(initialValue: initialDevice)

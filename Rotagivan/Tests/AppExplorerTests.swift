@@ -339,6 +339,17 @@ import Foundation
         precondition(places(chrome, tabs: []) == [.app("mail"), .app("slack"), .app("notes"), .app("idle")], "Without tabs, only apps remain")
         precondition(places(nil).first == .app("mail") && places("gone").first == .app("mail"))
         precondition(!places(nil).contains(.app(chrome)))
+        // Slack channels join the same clock; Slack itself appears only as channels once any are known.
+        let slackApp = RecentPlaces.slackBundleID
+        let slackStamps: [String: UInt64] = ["general": 10, "design": 4]
+        func mixed(_ active: String?, slack: [String] = ["general", "design", "random"]) -> [RecentPlace<String>] {
+            RecentPlaces.merged(apps: ["mail", slackApp, "notes"], tabs: ["docs"], slack: slack, active: active,
+                appStamp: { appStamps[$0] }, tabStamp: { tabStamps[$0] }, slackStamp: { slackStamps[$0] })
+        }
+        precondition(mixed("mail") == [.app("mail"), .slack("general"), .tab("docs"), .slack("design"), .app("notes"), .slack("random")])
+        precondition(mixed(slackApp).first == .slack("general"), "In Slack, its most active channel is the current place")
+        precondition(mixed(slackApp, slack: []).contains(.app(slackApp)), "Without known channels Slack is an ordinary app")
+        precondition(!mixed(nil).contains(.app(slackApp)))
         let clockwise = ExplorerSlot.slots(8).sorted {
             ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
         }

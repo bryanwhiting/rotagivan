@@ -1012,11 +1012,16 @@ extension AppExplorerPresenting {
     }
 
     private func recentPlaceEntries(count: Int, page: Int) -> (entries: [ExplorerEntry], total: Int) {
+        let sources = configuration().defaultLayout(for: .recentAppsAndTabs).resolvedRecentSources
         let running = Self.recentRunningApps()
-        let order = recents.mostRecentFirst(available: running.compactMap(\.bundleIdentifier))
-        let places = Self.recentPlaces(running: running, order: order, tabs: chromeTabSnapshot, sourcePID: sourcePID)
+        let order = sources.apps ? recents.mostRecentFirst(available: running.compactMap(\.bundleIdentifier)) : []
+        let slack = sources.slackChannels ? SlackChannelRecents.shared.ranked().map(\.name) : []
+        let places = Self.recentPlaces(running: running, order: order, tabs: sources.chromeTabs ? chromeTabSnapshot : [],
+            slack: slack, sourcePID: sourcePID)
         let icon = applicationURL(RecentPlaces.chromeBundleID).map { workspace.icon(forFile: $0.path) }
-        return (Self.recentPlaceEntries(places, running: running, sourcePID: sourcePID, chromeIcon: icon, count: count, page: page), places.count)
+        let slackIcon = applicationURL(RecentPlaces.slackBundleID).map { workspace.icon(forFile: $0.path) }
+        return (Self.recentPlaceEntries(places, running: running, sourcePID: sourcePID, chromeIcon: icon, slackIcon: slackIcon,
+            count: count, page: page), places.count)
     }
 
     static func recentRunningApps() -> [NSRunningApplication] {
@@ -1028,28 +1033,33 @@ extension AppExplorerPresenting {
     }
 
     /// Shared by the live HUD and its settings previews. Chrome appears only as its tabs.
-    static func recentPlaces(running: [NSRunningApplication], order: [String], tabs: [ChromeRecentTab],
+    static func recentPlaces(running: [NSRunningApplication], order: [String], tabs: [ChromeRecentTab], slack: [String] = [],
                              sourcePID: pid_t?) -> [RecentPlace<ChromeRecentTab>] {
         let recency = ChromeTabRecency.shared
-        return RecentPlaces.merged(apps: order, tabs: tabs,
+        return RecentPlaces.merged(apps: order, tabs: tabs, slack: slack,
             active: running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier,
-            appStamp: { recency.stamp(app: $0) }, tabStamp: { recency.stamp(tab: $0) })
+            appStamp: { recency.stamp(app: $0) }, tabStamp: { recency.stamp(tab: $0) }, slackStamp: { recency.stamp(slack: $0) })
     }
 
-    /// Settings preview: live running apps and the supplied Chrome tabs, without a source app.
-    static func previewRecentPlaceEntries(tabs: [ChromeRecentTab], count: Int) -> [ExplorerEntry] {
+    /// Settings preview: live running apps, the supplied Chrome tabs and learned
+    /// Slack channels, without a source app.
+    static func previewRecentPlaceEntries(tabs: [ChromeRecentTab], count: Int,
+                                          sources: RecentPlaceSources = RecentPlaceSources()) -> [ExplorerEntry] {
         let running = recentRunningApps()
-        let order = AppExplorerRecents(UserDefaults.standard.stringArray(forKey: "appExplorer.recentBundleIDs") ?? [])
-            .mostRecentFirst(available: running.compactMap(\.bundleIdentifier))
+        let order = sources.apps ? AppExplorerRecents(UserDefaults.standard.stringArray(forKey: "appExplorer.recentBundleIDs") ?? [])
+            .mostRecentFirst(available: running.compactMap(\.bundleIdentifier)) : []
+        let slack = sources.slackChannels ? SlackChannelRecents.shared.ranked().map(\.name) : []
         let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: RecentPlaces.chromeBundleID)
             .map { NSWorkspace.shared.icon(forFile: $0.path) }
-        return recentPlaceEntries(recentPlaces(running: running, order: order, tabs: tabs, sourcePID: nil),
-            running: running, sourcePID: nil, chromeIcon: icon, count: count, page: 0)
+        let slackIcon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: RecentPlaces.slackBundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return recentPlaceEntries(recentPlaces(running: running, order: order, tabs: sources.chromeTabs ? tabs : [], slack: slack, sourcePID: nil),
+            running: running, sourcePID: nil, chromeIcon: icon, slackIcon: slackIcon, count: count, page: 0)
     }
 
     /// The current place is outlined on the left; the rest continue clockwise from top-left.
     static func recentPlaceEntries(_ places: [RecentPlace<ChromeRecentTab>], running: [NSRunningApplication], sourcePID: pid_t?,
-                                   chromeIcon: NSImage?, count: Int, page: Int) -> [ExplorerEntry] {
+                                   chromeIcon: NSImage?, slackIcon: NSImage? = nil, count: Int, page: Int) -> [ExplorerEntry] {
         let slots = ExplorerSlot.slots(count).sorted {
             ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
         }
@@ -1063,6 +1073,10 @@ extension AppExplorerPresenting {
             case .app(let id):
                 return (running.first { $0.bundleIdentifier == id && $0.processIdentifier == sourcePID }
                     ?? running.first { $0.bundleIdentifier == id }).map { ExplorerEntry(direction: .up, app: $0) }
+            case .slack(let channel):
+                var entry = ExplorerEntry(direction: .up, bundleID: RecentPlaces.slackBundleID, name: "#" + channel, icon: slackIcon, url: nil)
+                entry.slackChannel = channel
+                return entry
             }
         }.enumerated().map { offset, entry in
             var entry = entry

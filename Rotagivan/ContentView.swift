@@ -127,7 +127,7 @@ struct ContentView: View {
     @ObservedObject var intentionStore: TemporaryIntentionStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection = "HUD"
-    @State private var actionDevice: GestureDevice = .navigator
+    @State private var actionDevice: GestureDevice = .apple
     @State private var pointerDevice: GestureDevice = .navigator
     @State private var renamingProfile: ConfigurationProfile?
     @State private var deletingProfile: ConfigurationProfile?
@@ -144,7 +144,7 @@ struct ContentView: View {
     private var editingAppleActions: Bool { selection == "HUD" && actionDevice == .apple && !store.settings.resolvedDevices.shareTapActions }
 
     init(store: SettingsStore, hid: NavigatorHIDManager, sync: SettingsSync,
-         initialSection: String = "HUD", initialDevice: GestureDevice = .navigator,
+         initialSection: String = "HUD", initialDevice: GestureDevice = .apple,
          intentionStore: TemporaryIntentionStore = .shared) {
         self.store = store; self.hid = hid; self.sync = sync
         self.intentionStore = intentionStore
@@ -160,7 +160,7 @@ struct ContentView: View {
         initialHUDGroup = initialSection == "Window Manager" ? .windowManager : nil
         initialHUDFocus = initialSection == "Calibration" ? .calibration : nil
         _actionDevice = State(initialValue: initialDevice)
-        _pointerDevice = State(initialValue: initialDevice)
+        _pointerDevice = State(initialValue: .navigator)   // Pointer motion controls are Navigator-specific.
     }
 
     private func sectionTitle(_ section: String) -> String {

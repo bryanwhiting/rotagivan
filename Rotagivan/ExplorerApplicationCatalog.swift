@@ -155,13 +155,15 @@ enum ExplorerApplicationCatalog {
     /// Folded name and bundle id per application, kept between keystrokes:
     /// folding ~1,000 strings twice per keystroke was most of a search.
     private static let foldedLock = NSLock()
-    nonisolated(unsafe) private static var folded: [String: (name: String, id: String)] = [:]
-    private static func foldedTexts(_ app: ExplorerApplication) -> (name: String, id: String) {
+    struct FoldedTexts { let name: String; let id: String; let nameCharacters: [Character]; let idCharacters: [Character] }
+    nonisolated(unsafe) private static var folded: [String: FoldedTexts] = [:]
+    private static func foldedTexts(_ app: ExplorerApplication) -> FoldedTexts {
         let key = app.bundleID + "\u{1f}" + app.name
         foldedLock.lock()
         if let hit = folded[key] { foldedLock.unlock(); return hit }
         foldedLock.unlock()
-        let texts = (normalized(app.name), normalized(app.bundleID))
+        let name = normalized(app.name), id = normalized(app.bundleID)
+        let texts = FoldedTexts(name: name, id: id, nameCharacters: Array(name), idCharacters: Array(id))
         foldedLock.lock()
         if folded.count > 4_096 { folded.removeAll(keepingCapacity: true) }
         folded[key] = texts
@@ -177,10 +179,14 @@ enum ExplorerApplicationCatalog {
             var score = 0
             let texts = foldedTexts(app)
             for token in tokens {
-                let nameScore = fuzzyScore(token, in: texts.name)
-                let idScore = fuzzyScore(token, in: texts.id).map { $0 - 250 }
-                guard let best = [nameScore, idScore].compactMap({ $0 }).max() else { return nil }
-                score += best
+                let nameScore = fuzzyScore(token, in: texts.name, characters: texts.nameCharacters)
+                let idScore = fuzzyScore(token, in: texts.id, characters: texts.idCharacters).map { $0 - 250 }
+                switch (nameScore, idScore) {
+                case (nil, nil): return nil
+                case (let a?, nil): score += a
+                case (nil, let b?): score += b
+                case (let a?, let b?): score += max(a, b)
+                }
             }
             return (app, score)
         }
@@ -205,11 +211,11 @@ enum ExplorerApplicationCatalog {
         value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    private static func fuzzyScore(_ needle: String, in haystack: String) -> Int? {
+    private static func fuzzyScore(_ needle: String, in haystack: String, characters cached: [Character]? = nil) -> Int? {
         if needle == haystack { return 10_000 }
         if haystack.hasPrefix(needle) { return 8_000 - haystack.count }
         if haystack.contains(needle) { return 6_000 - haystack.count }
-        let characters = Array(haystack)
+        let characters = cached ?? Array(haystack)
         var index = 0, previous = -2, score = 1_000
         for character in needle {
             guard let found = characters[index...].firstIndex(of: character) else { return nil }

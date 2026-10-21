@@ -140,6 +140,8 @@ struct TemporaryIntentionControl: View {
         .popover(isPresented: $showingEditor, arrowEdge: .bottom) {
             TemporaryIntentionEditor(store: store, speech: speech, admission: admission)
                 .padding(16).frame(width: 320)
+                // Escape closes the note, whichever control inside has focus.
+                .onExitCommand { showingEditor = false }
                 .onDisappear { speech.cancel(); admission.endPrivateEntry(entryID); onDismiss() }
         }
         .onDisappear { speech.cancel(); admission.endPrivateEntry(entryID) }

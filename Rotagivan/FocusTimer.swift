@@ -88,9 +88,21 @@ struct FocusTimerPreset: Equatable {
             window.ignoresMouseEvents = true
             window.level = .screenSaver
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            window.contentView = NSHostingView(rootView: FocusTimerGlow())
+            let glow = NSHostingView(rootView: FocusTimerGlow())
+            glow.wantsLayer = true
+            window.contentView = glow
             window.setFrame(screen.frame, display: true)
             window.orderFrontRegardless()
+            // Breathing runs on the render server as a layer opacity animation
+            // after the three flashes, so the app does no per-frame work.
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                let breathe = CABasicAnimation(keyPath: "opacity")
+                breathe.fromValue = 1; breathe.toValue = 0.65
+                breathe.duration = 1.4; breathe.autoreverses = true; breathe.repeatCount = .infinity
+                breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                breathe.beginTime = CACurrentMediaTime() + 2.0
+                glow.layer?.add(breathe, forKey: "breathe")
+            }
             windows.append(window)
         }
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
@@ -117,7 +129,6 @@ struct FocusTimerGlow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flashes = 0
     @State private var white = false
-    @State private var breathing = false
     private let colors: [Color] = [RotaTokens.glassBlue, Color(red: 0.80, green: 0.91, blue: 1), RotaTokens.glassBlue.opacity(0.7), Color(red: 0.80, green: 0.91, blue: 1), RotaTokens.glassBlue]
 
     var body: some View {
@@ -128,9 +139,8 @@ struct FocusTimerGlow: View {
                 shape.strokeBorder(AngularGradient(colors: colors, center: .center), lineWidth: 10).blur(radius: 6)
                 shape.strokeBorder(Color.white, lineWidth: 14).blur(radius: 10).opacity(white ? 1 : 0)
             }
-            // One GPU raster for the blurred ring; only its opacity animates.
+            // One GPU raster for the blurred ring; the layer's opacity breathes.
             .drawingGroup()
-            .opacity(breathing ? 0.65 : 1)
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .ignoresSafeArea()
@@ -138,15 +148,12 @@ struct FocusTimerGlow: View {
         .accessibilityHidden(true)
     }
 
-    /// Three white flashes, then a slow glow until dismissed. Reduce Motion
-    /// keeps a steady glow with no flashing.
+    /// Three white flashes; the slow breathing afterwards is a layer animation
+    /// owned by the alert window. Reduce Motion keeps a steady glow.
     private func animate() {
         guard !reduceMotion else { return }
         func flash() {
-            guard flashes < 6 else {
-                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { breathing = true }
-                return
-            }
+            guard flashes < 6 else { return }
             withAnimation(.easeInOut(duration: 0.18)) { white.toggle() }
             flashes += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: flash)

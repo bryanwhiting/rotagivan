@@ -780,8 +780,10 @@ struct ContentView: View {
         actionDevice = .apple
         // Same devices on both profiles: keep the trackpad open and only reset
         // gesture state. Otherwise reopen the devices for the new settings.
-        let sameDevices = before.enabled == store.settings.enabled && before.devices == store.settings.devices
-            && before.resolvedDevices == store.settings.resolvedDevices
+        // The light reload re-reads Apple input settings itself, so the Navigator
+        // only needs reopening when its own enablement changes.
+        let sameDevices = before.enabled == store.settings.enabled
+            && before.resolvedDevices.navigatorEnabled == store.settings.resolvedDevices.navigatorEnabled
         if sameDevices && store.settings.enabled {
             hid.reloadProfile()
             DispatchQueue.main.async { NotificationCenter.default.post(name: .shortcutRecordingStopped, object: nil) }

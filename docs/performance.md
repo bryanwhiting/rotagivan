@@ -17,8 +17,8 @@ and after any change that touches these paths.
 | Chrome tabs HUD open | blank until AppleScript | previous snapshot at once | Fresh snapshot replaces it; the script asks Chrome per window, not per tab. |
 | Chrome recency sampler (every 2 s while Chrome is frontmost) | AppleScript each tick | AX title read; AppleScript only when the title changed | |
 | Settings slider tick (one `settings` change) | 2.4 ms | 0.6 ms | Profile library written once per run-loop turn; explicit renames still write at once. |
-| Launcher search per keystroke, Swift fallback engine (966 rows) | 2.2–2.8 ms | 1.1–2.3 ms | Folded names and bundle ids cached per app, and only the shown top matches are ordered (bounded insertion) instead of sorting every match; what remains is fuzzy scoring. The bundled Rust engine keeps its own index. |
-| Profile switch | 2.4 ms + full HID stop/start (~10 ms without a device, plus the Navigator leaving and re-entering precision mode) | 2.4 ms + gesture reset only | When both profiles use the same device settings the trackpad stays open; only gesture state resets and Apple input re-reads its settings. Different device settings still reopen the devices. |
+| Launcher search per keystroke, Swift fallback engine (966 rows) | 2.2–2.8 ms | 0.9–1.3 ms | Folded names, bundle ids and their character arrays cached per app; only the shown top matches are ordered (bounded insertion); no per-token array allocations. The bundled Rust engine keeps its own index. |
+| Profile switch | 2.4 ms + full HID stop/start (~10 ms without a device, plus the Navigator leaving and re-entering precision mode) | 2.4 ms + gesture reset only | The trackpad stays open unless the new profile enables or disables the Navigator itself; gesture state resets and Apple input re-reads its settings in place. |
 | Settings window: Actions / General first render | 33 / 37 ms | 24 / 21 ms | Buttons, switch knobs and segmented knobs drew half-point blurred shadows, one offscreen pass each; they now draw an equivalent hairline. Remaining cost is card rasterization. |
 | Settings window: HUD page, no layers | 108 ms | 81 ms | Preview faces drop the material, drop shadow and per-label shadows; the navigator and side panes use a flat tint instead of a material over the opaque window. |
 | Settings window: HUD page, 12 layers | 360 ms | 173 ms | Each satellite face is one GPU raster (`drawingGroup`). Remaining cost is one full HUD layout per layer. |
@@ -27,7 +27,7 @@ and after any change that touches these paths.
 | MCP tool call round trip (`get_settings_summary`) | 62 ms | 0.7 ms | Same cache; the socket itself costs under 0.1 ms. `list_actions` 82 → 4 ms. |
 | Launcher catalog per keystroke | rebuilt 966 rows + compared | reused | Catalog array rebuilt only when a snapshot arrives. |
 | Sync after an edit | 5.4 ms on main | ~0 on main | Field encoding runs on a background task; only the snapshot copy stays on the main actor. |
-| Timer alert glow (breathing, every screen) | 5.4% of a core | 3.5% | Blurred ring rasterized once on the GPU; only its opacity animates. |
+| Timer alert glow (breathing, every screen) | 5.4% of a core | 0.2% | Blurred ring rasterized once on the GPU; the breathing is a Core Animation layer animation run by the render server, so the app does no per-frame work. |
 | Idle CPU (app in background) | 0.0% | 0.0% | Timers: Slack/Chrome title sampling 2 s (cheap AX reads), usage tracker 5 s, update check hourly, sync poll hourly. |
 | Timer, media controls, built-in HUD switches | model updates only | — | Same render path as the HUD above. |
 

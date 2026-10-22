@@ -1,0 +1,50 @@
+#!/bin/zsh
+# Pre-push gate (installed by scripts/install-hooks.sh): whatever reaches origin
+# must build and the fast checks must pass. For each pushed ref, only the parts
+# of the tree that changed are checked:
+#
+#   Rota/ or YAML/   -> zsh Rota/build.sh (compiles and signs; no tests, those
+#                       gate the release in scripts/tag-release.sh)
+#   website/         -> npm test + astro check
+#   SyncBackend/     -> npm run check + vitest
+#
+# Skip once with ROTA_SKIP_HOOKS=1 git push.
+set -euo pipefail
+[[ ${ROTA_SKIP_HOOKS:-0} == 1 ]] && exit 0
+
+repo=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+changed=()
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ $local_sha == "$zero" ]] && continue            # deleting a remote ref
+  if [[ $remote_sha == "$zero" ]] || ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    range=$(git merge-base origin/main "$local_sha" 2>/dev/null || echo "$local_sha~1")
+    range="$range..$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  changed+=(${(f)"$(git diff --name-only "$range" 2>/dev/null || git diff-tree --no-commit-id --name-only -r "$local_sha")"})
+done
+(( ${#changed} )) || exit 0
+
+has() { local p; for p in "${changed[@]}"; do [[ $p == $~1 ]] && return 0; done; return 1; }
+step() { print -P -- "%B==> pre-push: $*%b"; }
+
+cd "$repo"
+if has 'Rota/*' || has 'YAML/*'; then
+  step "building the app from the committed sources"
+  zsh Rota/build.sh >/dev/null
+fi
+if has 'website/*'; then
+  step "website tests and astro check"
+  [[ -d website/node_modules ]] || npm ci --prefix website >/dev/null
+  npm test --prefix website >/dev/null
+  npm run check --prefix website >/dev/null
+fi
+if has 'SyncBackend/*'; then
+  step "SyncBackend typecheck and tests"
+  [[ -d SyncBackend/node_modules ]] || npm ci --prefix SyncBackend >/dev/null
+  npm run check --prefix SyncBackend >/dev/null
+  (cd SyncBackend && npx vitest run >/dev/null)
+fi
+step "ok"

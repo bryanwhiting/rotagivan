@@ -254,22 +254,29 @@ Hardware enumeration was checked on a Mac mini with a Magic Mouse; physical
 Apple-trackpad recognition and distance calibration still need verification on
 a built-in or Magic Trackpad.
 
-## Quick local build and install
+## Install, update, develop
+
+Install from https://rota.silvermine.dev/download/ and let the app update
+itself (*Check for Updates…* offers **Install and Relaunch**). Releases are
+built by GitHub Actions from a tag; `scripts/tag-release.sh` cuts one. Local
+development runs from the build folder without touching the installed copy:
 
 ```sh
 cd ~/gh/bryanwhiting/rotagivan
+zsh Rota/setup-signing.sh       # once, unless the signing identity is missing
+scripts/install-hooks.sh        # once per clone
+zsh Rota/build.sh               # compile + sign into Rota/build/Rota.app
+zsh Rota/test.sh                # regression suite
+scripts/dev.sh                  # run the build; Ctrl-C reopens /Applications/Rota.app
+```
 
-# One-time only, unless the signing identity is missing:
-zsh Rota/setup-signing.sh
+The full flow, the CI secrets and the in-app updater are described in
+[docs/release.md](docs/release.md).
 
-# Build the app:
-zsh Rota/build.sh
+## Installing a local build by hand
 
-# Optional regression checks:
-zsh Rota/test.sh
-
-# Install and launch:
-./launch.sh
+```sh
+./launch.sh --keep-accessibility
 ```
 
 `launch.sh` quits Rota gracefully, waits for it to exit, copies the signed

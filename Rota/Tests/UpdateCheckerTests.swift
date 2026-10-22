@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 @main struct UpdateCheckerTests {
@@ -52,6 +53,78 @@ import Foundation
             let m = ReleaseManifest(version: "9", build: "1", url: unsafe, sha256: nil, minimumOS: nil)
             precondition(UpdatePolicy.downloadURL(for: m, manifestURL: base) == nil)
         }
-        print("UpdateChecker tests passed: version/build ordering, OS minimum, daily schedule, skip, manifest decoding, HTTPS same-host downloads.")
+        // In-app install: only with a complete zip entry on the manifest's own host.
+        precondition(manifest.zip?.url == "x" && manifest.zip?.sha256 == nil)
+        precondition(UpdateInstall.plan(for: manifest, manifestURL: base) == nil, "no checksum, no in-app install")
+        let sha = String(repeating: "ab", count: 32)
+        let full = #"{"version":"1.1.250","build":"252","url":"https://rota.silvermine.dev/releases/Rota-1.1.250-252.dmg","minimumOS":"13.0","zip":{"url":"/releases/Rota-1.1.250-252.zip","sha256":"\#(sha.uppercased())","size":7}}"#
+        let installable = try JSONDecoder().decode(ReleaseManifest.self, from: Data(full.utf8))
+        let plan = UpdateInstall.plan(for: installable, manifestURL: base)
+        precondition(plan == UpdateInstall.Plan(archive: URL(string: "https://rota.silvermine.dev/releases/Rota-1.1.250-252.zip")!, sha256: sha))
+        for bad in [#"{"url":"https://evil.example/a.zip","sha256":"\#(sha)"}"#, #"{"url":"/a.zip","sha256":"abc"}"#, #"{"url":"/a.zip","sha256":"\#(String(repeating: "zz", count: 32))"}"#] {
+            let json = #"{"version":"9","build":"1","url":"/a.dmg","zip":\#(bad)}"#
+            let m = try JSONDecoder().decode(ReleaseManifest.self, from: Data(json.utf8))
+            precondition(UpdateInstall.plan(for: m, manifestURL: base) == nil, "rejected: \(bad)")
+        }
+
+        // Replacing in place needs a writable .app bundle outside mounted volumes.
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("UpdateCheckerTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let app = scratch.appendingPathComponent("Rota.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        precondition(UpdateInstall.canReplace(bundleURL: app))
+        precondition(!UpdateInstall.canReplace(bundleURL: scratch.appendingPathComponent("missing.app")))
+        precondition(!UpdateInstall.canReplace(bundleURL: scratch), "not an .app")
+        precondition(!UpdateInstall.canReplace(bundleURL: URL(fileURLWithPath: "/Volumes/Rota 1.1.250/Rota.app")), "disk image")
+        precondition(!UpdateInstall.canReplace(bundleURL: URL(fileURLWithPath: "/System/Applications/Calculator.app")), "read-only parent")
+
+        // The swap script waits for this process, keeps the old bundle until the copy succeeded, and quotes paths.
+        precondition(UpdateInstall.shellQuote("it's /Applications/Rota.app") == #"'it'\''s /Applications/Rota.app'"#)
+        let script = UpdateInstall.swapScript(pid: 4242, staged: scratch.appendingPathComponent("unpacked/Rota.app"),
+                                              target: URL(fileURLWithPath: "/Applications/Rota.app"), stagingDirectory: scratch)
+        precondition(script.hasPrefix("#!/bin/sh\n"))
+        precondition(script.contains("/bin/kill -0 4242"))
+        precondition(script.contains("/bin/mv '/Applications/Rota.app' \"$old\""))
+        precondition(script.contains("/usr/bin/ditto '\(scratch.path)/unpacked/Rota.app' '/Applications/Rota.app'"))
+        precondition(script.contains("/bin/mv \"$old\" '/Applications/Rota.app'; exit 1"), "restores the old bundle when ditto fails")
+        precondition(script.contains("/usr/bin/open '/Applications/Rota.app'"))
+        precondition(script.contains("/bin/rm -rf '\(scratch.path)'"))
+        // Running the script against a scratch target performs the swap for real.
+        let target = scratch.appendingPathComponent("target/Rota.app")
+        let staged = scratch.appendingPathComponent("unpacked/Rota.app")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        try "old".write(to: target.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        try "new".write(to: staged.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        let swap = UpdateInstall.swapScript(pid: 1, staged: staged, target: target, stagingDirectory: scratch.appendingPathComponent("unpacked"))
+            .replacingOccurrences(of: "/usr/bin/open ", with: "/usr/bin/true ")
+            .replacingOccurrences(of: "/bin/kill -0 1 ", with: "/usr/bin/false ")
+        let scriptURL = scratch.appendingPathComponent("install.sh")
+        try swap.write(to: scriptURL, atomically: true, encoding: .utf8)
+        let swapStatus = try UpdateInstall.run("/bin/sh", [scriptURL.path])
+        precondition(swapStatus == 0, "swap script exited \(swapStatus)")
+        let marker = try String(contentsOf: target.appendingPathComponent("marker"), encoding: .utf8)
+        precondition(marker == "new")
+        precondition(!FileManager.default.fileExists(atPath: staged.path), "staging directory removed")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: scratch.appendingPathComponent("target").path)
+        precondition(leftovers == ["Rota.app"], "no leftover previous bundle: \(leftovers)")
+
+        // SHA-256 of a file matches CryptoKit over the same bytes.
+        let blob = scratch.appendingPathComponent("blob")
+        try Data(repeating: 7, count: 3_000_000).write(to: blob)
+        let expected = SHA256.hash(data: Data(repeating: 7, count: 3_000_000)).map { String(format: "%02x", $0) }.joined()
+        let digest = try UpdateInstall.sha256(ofFileAt: blob)
+        precondition(digest == expected)
+
+        // The running test binary satisfies its own designated requirement; a different bundle does not.
+        let requirement = try UpdateInstall.requirementOfRunningCode()
+        try UpdateInstall.verify(bundle: URL(fileURLWithPath: CommandLine.arguments[0]), satisfies: requirement)
+        do {
+            try UpdateInstall.verify(bundle: URL(fileURLWithPath: "/System/Applications/Calculator.app"), satisfies: requirement)
+            preconditionFailure("Calculator must not satisfy this binary's requirement")
+        } catch UpdateInstall.Failure.signature {}
+
+        print("UpdateChecker tests passed: version/build ordering, OS minimum, daily schedule, skip, manifest decoding, HTTPS same-host downloads, in-app install plan, swap script, checksum, signature check.")
     }
 }

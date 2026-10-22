@@ -1,0 +1,130 @@
+name: Release
+
+# Builds, signs and publishes Rota when a release tag is pushed
+# (scripts/tag-release.sh). A manual run packages the current commit and only
+# publishes when asked. Secrets are set once with scripts/ci-secrets.sh.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload to rota.silvermine.dev
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      KEYCHAIN: ${{ runner.temp }}/rota-release.keychain-db
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          rustc --version
+          node --version
+
+      - name: Import the signing identity
+        env:
+          SIGNING_P12: ${{ secrets.SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+          SIGNING_CERTIFICATE_PEM: ${{ secrets.SIGNING_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$SIGNING_P12" && -n "$SIGNING_CERTIFICATE_PEM" ]] || { echo "Missing signing secrets; run scripts/ci-secrets.sh" >&2; exit 1; }
+          p12="$RUNNER_TEMP/identity.p12"
+          printf '%s' "$SIGNING_P12" | base64 --decode > "$p12"
+          keychain_password=$(openssl rand -hex 24)
+          security create-keychain -p "$keychain_password" "$KEYCHAIN"
+          security set-keychain-settings -lut 7200 "$KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$KEYCHAIN"
+          security import "$p12" -k "$KEYCHAIN" -f pkcs12 -P "$SIGNING_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$p12"
+          mkdir -p Rota/.signing
+          printf '%s\n' "$SIGNING_CERTIFICATE_PEM" > Rota/.signing/certificate.pem
+          # build.sh requires a *valid* identity; a self-signed certificate is valid only once trusted.
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain Rota/.signing/certificate.pem
+          security find-identity -v -p codesigning "$KEYCHAIN" | sed 's/[0-9A-F]\{40\}/<fingerprint>/'
+
+      - name: Build
+        run: zsh Rota/build.sh
+
+      - name: Check the tag against the app version
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Rota/build/Rota.app/Contents/Info.plist)
+          build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' Rota/build/Rota.app/Contents/Info.plist)
+          dirty=$(/usr/libexec/PlistBuddy -c 'Print RotaGitDirty' Rota/build/Rota.app/Contents/Info.plist)
+          echo "Built Rota $version ($build), dirty=$dirty"
+          [[ $dirty == false ]] || { echo "The checkout was not clean" >&2; exit 1; }
+          if [[ $GITHUB_REF_TYPE == tag ]]; then
+            [[ $GITHUB_REF_NAME == "v$version" ]] || { echo "Tag $GITHUB_REF_NAME does not match Info.plist version $version" >&2; exit 1; }
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+        id: app
+
+      - name: Install website tooling (wrangler)
+        run: npm ci --prefix website
+
+      - name: Package and publish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ $PUBLISH == true ]]; then
+            [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]] || { echo "Missing Cloudflare secrets; run scripts/ci-secrets.sh" >&2; exit 1; }
+            zsh scripts/release.sh --skip-build
+          else
+            zsh scripts/release.sh --skip-build --no-publish
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rota-${{ steps.app.outputs.version }}-${{ steps.app.outputs.build }}
+          path: |
+            release/*/Rota-*.dmg
+            release/*/Rota-*.zip
+            release/*/latest.json
+          if-no-files-found: error
+
+      - name: GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out=$(ls -d release/*/ | head -1)
+          notes="Rota ${{ steps.app.outputs.version }} (build ${{ steps.app.outputs.build }}). Download: https://rota.silvermine.dev/download/latest"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Rota ${{ steps.app.outputs.version }}" --notes "$notes" \
+            "$out"Rota-*.dmg "$out"Rota-*.zip "$out"latest.json
+
+      - name: Remove the signing identity
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          rm -rf Rota/.signing

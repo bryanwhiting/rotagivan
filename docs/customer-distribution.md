@@ -28,7 +28,9 @@ A future distribution workflow should:
 
 ## Current release pipeline
 
-`scripts/release.sh` builds with `Rota/build.sh`, then packages
+Releases are cut with `scripts/tag-release.sh` and built by GitHub Actions
+(`.github/workflows/release.yml`, see [release.md](release.md)), which runs
+`scripts/release.sh`: it builds with `Rota/build.sh`, then packages
 `Rota-<version>-<build>.dmg` (drag-to-Applications) and `.zip`. It uploads
 them to the private `rotagivan-releases` R2 bucket and publishes
 `latest.json`. The `rotagivan-website` Worker serves:
@@ -37,8 +39,10 @@ them to the private `rotagivan-releases` R2 bucket and publishes
 - `https://rota.silvermine.dev/latest.json`: `{version, build, url, sha256, size, minimumOS, architectures, zip, commit, signing, notarized, publishedAt}`
 - `https://rota.silvermine.dev/releases/<file>`: immutable versioned files
 
-The app's `UpdateChecker` reads `latest.json` about once a day and offers the
-download when a newer version/build exists.
+The app's `UpdateChecker` reads `latest.json` about once a day and, when a
+newer version/build exists, installs it in place (zip download, SHA-256,
+bundle identity and the running copy's own code-signing requirement) or, if
+the bundle cannot be replaced, offers the download.
 
 **Gatekeeper status:** this Mac has no Developer ID Application identity, so
 releases keep the local "Rotagivan Development" signature and are not

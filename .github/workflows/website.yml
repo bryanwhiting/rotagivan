@@ -1,0 +1,45 @@
+name: Website
+
+# Deploys the Astro site + Worker to rota.silvermine.dev whenever main changes
+# under website/. Releases (DMG, latest.json) are separate: see release.yml.
+on:
+  push:
+    branches: [main]
+    paths: ["website/**", ".github/workflows/website.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]] || { echo "Missing Cloudflare secrets; run scripts/ci-secrets.sh" >&2; exit 1; }
+          npm run deploy
+      - name: Verify
+        run: |
+          curl -sSf -o /dev/null -w "rota.silvermine.dev -> %{http_code}\n" https://rota.silvermine.dev/
+          curl -sSf https://rota.silvermine.dev/latest.json | head -c 200; echo

@@ -1,14 +1,24 @@
 import AppKit
+import CryptoKit
 import Foundation
+import Security
 
 /// The release manifest published by scripts/release.sh at
 /// https://rota.silvermine.dev/latest.json.
 struct ReleaseManifest: Decodable, Equatable {
+    struct Archive: Decodable, Equatable {
+        let url: String
+        var sha256: String? = nil
+        var size: Int? = nil
+    }
+
     let version: String
     let build: String
     let url: String
     let sha256: String?
     let minimumOS: String?
+    /// The zip of the signed bundle; what the in-app installer uses.
+    var zip: Archive? = nil
 
     /// Stable identity used for "Skip This Version".
     var identity: String { "\(version) (\(build))" }
@@ -74,9 +84,195 @@ enum UpdatePolicy {
 
     /// Only HTTPS downloads from the manifest's own host are opened.
     static func downloadURL(for manifest: ReleaseManifest, manifestURL: URL) -> URL? {
-        guard let url = URL(string: manifest.url, relativeTo: manifestURL)?.absoluteURL,
+        downloadURL(for: manifest.url, manifestURL: manifestURL)
+    }
+
+    static func downloadURL(for reference: String, manifestURL: URL) -> URL? {
+        guard let url = URL(string: reference, relativeTo: manifestURL)?.absoluteURL,
               url.scheme == "https", url.host == manifestURL.host else { return nil }
         return url
+    }
+}
+
+/// Replaces the running bundle with the release's zip: download, SHA-256,
+/// bundle identity and version, then the same code-signing requirement as the
+/// running copy (so a tampered or foreign build is refused and the existing
+/// Accessibility / Input Monitoring grants carry over). The swap itself runs
+/// in a detached shell after the app quits. Downloads made this way carry no
+/// quarantine flag, so Gatekeeper is not involved.
+enum UpdateInstall {
+    struct Plan: Equatable {
+        let archive: URL
+        let sha256: String
+    }
+
+    enum Failure: LocalizedError {
+        case downloadFailed(String)
+        case checksumMismatch
+        case archiveLayout
+        case wrongBundle(String)
+        case signature(String)
+        case swapFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .downloadFailed(let why): return "The download failed: \(why)"
+            case .checksumMismatch: return "The downloaded file does not match the published checksum."
+            case .archiveLayout: return "The download did not contain exactly one app."
+            case .wrongBundle(let why): return "The download is not the expected release: \(why)"
+            case .signature(let why): return "The download is not signed like this copy of Rota: \(why)"
+            case .swapFailed(let why): return "Rota could not be replaced: \(why)"
+            }
+        }
+    }
+
+    /// The zip is installable only with a full SHA-256 and an HTTPS URL on the manifest's host.
+    static func plan(for manifest: ReleaseManifest, manifestURL: URL) -> Plan? {
+        guard let zip = manifest.zip, let sha = zip.sha256?.lowercased(), sha.count == 64,
+              sha.allSatisfy({ $0.isHexDigit }),
+              let url = UpdatePolicy.downloadURL(for: zip.url, manifestURL: manifestURL) else { return nil }
+        return Plan(archive: url, sha256: sha)
+    }
+
+    /// In-place replacement needs a `.app` bundle on a writable volume whose
+    /// parent folder we can write to (e.g. /Applications), not a copy still
+    /// running from a disk image or a build folder we should not touch.
+    static func canReplace(bundleURL: URL, fileManager: FileManager = .default) -> Bool {
+        let path = bundleURL.standardizedFileURL.path
+        guard path.hasSuffix(".app"), !path.contains("/Volumes/"), !path.contains("/.Trash/") else { return false }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { return false }
+        if let readOnly = try? bundleURL.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly, readOnly { return false }
+        return fileManager.isWritableFile(atPath: bundleURL.deletingLastPathComponent().path)
+    }
+
+    static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// The script that waits for this process to exit, swaps the bundles
+    /// (keeping the old one until the copy succeeded) and reopens the app.
+    static func swapScript(pid: Int32, staged: URL, target: URL, stagingDirectory: URL) -> String {
+        let s = shellQuote(staged.path), t = shellQuote(target.path), d = shellQuote(stagingDirectory.path)
+        return """
+        #!/bin/sh
+        n=0
+        while /bin/kill -0 \(pid) 2>/dev/null; do
+          n=$((n + 1)); [ $n -gt 150 ] && /bin/kill -TERM \(pid) 2>/dev/null
+          [ $n -gt 200 ] && break
+          /bin/sleep 0.2
+        done
+        old=\(t).previous.$$
+        /bin/mv \(t) "$old" || exit 1
+        if /usr/bin/ditto \(s) \(t); then
+          /bin/rm -rf "$old"
+        else
+          /bin/rm -rf \(t); /bin/mv "$old" \(t); exit 1
+        fi
+        /usr/bin/open \(t)
+        /bin/rm -rf \(d)
+
+        """
+    }
+
+    static func sha256(ofFileAt url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The running code's designated requirement: identifier + the pinned signing certificate.
+    static func requirementOfRunningCode() throws -> SecRequirement {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { throw Failure.signature("cannot identify the running code") }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { throw Failure.signature("cannot read the running code") }
+        var requirement: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess, let requirement else {
+            throw Failure.signature("the running copy has no designated requirement")
+        }
+        return requirement
+    }
+
+    static func verify(bundle: URL, satisfies requirement: SecRequirement) throws {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &staticCode) == errSecSuccess, let staticCode else {
+            throw Failure.signature("unreadable bundle")
+        }
+        let flags = SecCSFlags(rawValue: UInt32(kSecCSCheckAllArchitectures) | UInt32(kSecCSCheckNestedCode) | UInt32(kSecCSStrictValidate))
+        var error: Unmanaged<CFError>?
+        let status = SecStaticCodeCheckValidityWithErrors(staticCode, flags, requirement, &error)
+        guard status == errSecSuccess else {
+            _ = error?.takeRetainedValue()
+            let detail = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
+            throw Failure.signature(detail)
+        }
+    }
+
+    static func run(_ executable: String, _ arguments: [String]) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    /// Downloads and stages the release; returns the staged bundle and its
+    /// staging directory. Everything is verified before anything is replaced.
+    static func stage(_ plan: Plan, manifest: ReleaseManifest, session: URLSession) async throws -> (app: URL, directory: URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rota-update-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        var request = URLRequest(url: plan.archive)
+        request.setValue("Rota/\(AppVersion.version) (\(AppVersion.build))", forHTTPHeaderField: "User-Agent")
+        let (downloaded, response): (URL, URLResponse)
+        do {
+            (downloaded, response) = try await session.download(for: request)
+        } catch {
+            throw Failure.downloadFailed(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw Failure.downloadFailed("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        let archive = directory.appendingPathComponent("Rota.zip")
+        try FileManager.default.moveItem(at: downloaded, to: archive)
+        guard try sha256(ofFileAt: archive) == plan.sha256 else { throw Failure.checksumMismatch }
+
+        let unpacked = directory.appendingPathComponent("unpacked")
+        guard try run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]) == 0 else { throw Failure.archiveLayout }
+        let apps = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "app" }
+        guard apps.count == 1, let app = apps.first else { throw Failure.archiveLayout }
+
+        guard let info = Bundle(url: app)?.infoDictionary else { throw Failure.wrongBundle("no Info.plist") }
+        guard info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier else {
+            throw Failure.wrongBundle("bundle identifier \(info["CFBundleIdentifier"] ?? "?")")
+        }
+        guard info["CFBundleShortVersionString"] as? String == manifest.version,
+              info["CFBundleVersion"] as? String == manifest.build else {
+            throw Failure.wrongBundle("it is \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?")), not \(manifest.identity)")
+        }
+        try verify(bundle: app, satisfies: try requirementOfRunningCode())
+        return (app, directory)
+    }
+
+    /// Hands the swap to a detached shell and returns; the caller terminates the app.
+    static func scheduleSwap(staged: URL, stagingDirectory: URL, target: URL) throws {
+        let script = stagingDirectory.appendingPathComponent("install.sh")
+        let text = swapScript(pid: ProcessInfo.processInfo.processIdentifier, staged: staged, target: target, stagingDirectory: stagingDirectory)
+        try text.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { throw Failure.swapFailed(error.localizedDescription) }
     }
 }
 
@@ -101,6 +297,15 @@ final class UpdateChecker {
         configuration.timeoutIntervalForResource = 20
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+
+    /// The manifest session's 20 s resource timeout is too short for the archive.
+    private lazy var downloadSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 10 * 60
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: configuration)
     }()
 
@@ -171,21 +376,47 @@ final class UpdateChecker {
     }
 
     private func prompt(_ manifest: ReleaseManifest) {
+        let plan = UpdateInstall.canReplace(bundleURL: Bundle.main.bundleURL)
+            ? UpdateInstall.plan(for: manifest, manifestURL: Self.manifestURL) : nil
         let alert = NSAlert()
         alert.messageText = "Rota \(manifest.version) is available"
-        alert.informativeText = "You have \(AppVersion.version) (\(AppVersion.build)). Download the new version, open it, and drag Rota to Applications to replace this one."
-        alert.addButton(withTitle: "Download")
+        alert.informativeText = plan != nil
+            ? "You have \(AppVersion.version) (\(AppVersion.build)). Rota downloads the new version, verifies it, replaces this copy and reopens. Your settings and permissions are kept."
+            : "You have \(AppVersion.version) (\(AppVersion.build)). Download the new version, open it, and drag Rota to Applications to replace this one."
+        alert.addButton(withTitle: plan != nil ? "Install and Relaunch" : "Download")
         alert.addButton(withTitle: "Later")
         alert.addButton(withTitle: "Skip This Version")
         NSApp.activate(ignoringOtherApps: true)
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             defaults.removeObject(forKey: skippedKey)
-            NSWorkspace.shared.open(UpdatePolicy.downloadURL(for: manifest, manifestURL: Self.manifestURL) ?? Self.downloadPageURL)
+            if let plan {
+                Task { await install(plan, manifest: manifest) }
+            } else {
+                NSWorkspace.shared.open(UpdatePolicy.downloadURL(for: manifest, manifestURL: Self.manifestURL) ?? Self.downloadPageURL)
+            }
         case .alertThirdButtonReturn:
             defaults.set(manifest.identity, forKey: skippedKey)
         default:
             break
+        }
+    }
+
+    private func install(_ plan: UpdateInstall.Plan, manifest: ReleaseManifest) async {
+        do {
+            let staged = try await UpdateInstall.stage(plan, manifest: manifest, session: downloadSession)
+            try UpdateInstall.scheduleSwap(staged: staged.app, stagingDirectory: staged.directory, target: Bundle.main.bundleURL)
+            NSApp.terminate(nil)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't install Rota \(manifest.version)"
+            alert.informativeText = "\(error.localizedDescription)\n\nYou can download it from rota.silvermine.dev instead."
+            alert.addButton(withTitle: "Open Download Page")
+            alert.addButton(withTitle: "Later")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(Self.downloadPageURL)
+            }
         }
     }
 

@@ -4,7 +4,7 @@ import Foundation
 import Security
 
 /// The release manifest published by scripts/release.sh at
-/// https://rota.silvermine.dev/latest.json.
+/// https://rotahud.com/latest.json.
 struct ReleaseManifest: Decodable, Equatable {
     struct Archive: Decodable, Equatable {
         let url: String
@@ -276,14 +276,14 @@ enum UpdateInstall {
     }
 }
 
-/// Checks rota.silvermine.dev for a newer release shortly after launch, then
+/// Checks rotahud.com for a newer release shortly after launch, then
 /// about once a day, and offers to download it. State is machine-local
 /// (UserDefaults.standard), never part of synced settings.
 @MainActor
 final class UpdateChecker {
     static let shared = UpdateChecker()
-    static let manifestURL = URL(string: "https://rota.silvermine.dev/latest.json")!
-    static let downloadPageURL = URL(string: "https://rota.silvermine.dev/download/")!
+    static let manifestURL = URL(string: "https://rotahud.com/latest.json")!
+    static let downloadPageURL = URL(string: "https://rotahud.com/download/")!
 
     private let defaults = UserDefaults.standard
     private let skippedKey = "update.skippedVersion"
@@ -345,7 +345,7 @@ final class UpdateChecker {
             manifest = try await fetchManifest()
         } catch {
             // Automatic checks fail silently and retry on the next hourly wake-up.
-            if userInitiated { report("Couldn't check for updates", "Rota couldn't reach rota.silvermine.dev. Check your connection and try again.") }
+            if userInitiated { report("Couldn't check for updates", "Rota couldn't reach rotahud.com. Check your connection and try again.") }
             return
         }
         defaults.set(Date(), forKey: lastCheckKey)
@@ -410,7 +410,7 @@ final class UpdateChecker {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Couldn't install Rota \(manifest.version)"
-            alert.informativeText = "\(error.localizedDescription)\n\nYou can download it from rota.silvermine.dev instead."
+            alert.informativeText = "\(error.localizedDescription)\n\nYou can download it from rotahud.com instead."
             alert.addButton(withTitle: "Open Download Page")
             alert.addButton(withTitle: "Later")
             NSApp.activate(ignoringOtherApps: true)

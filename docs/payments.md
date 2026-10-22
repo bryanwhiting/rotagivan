@@ -40,7 +40,7 @@ Wrangler with the Cloudflare credentials from `~/.env`.
    `sk_test_…`, or later `sk_live_…`; a restricted key with Checkout Sessions
    write access is enough).
 4. **Create the webhook endpoint.** Stripe → Developers → Webhooks → Add
-   endpoint `https://rota.silvermine.dev/api/stripe/webhook` with these events:
+   endpoint `https://rota.silvermine.dev/api/stripe/webhook` with these events: (`rota.silvermine.dev` still serves the API, so an endpoint registered there keeps working)
    - `checkout.session.completed`
    - `checkout.session.async_payment_succeeded`
    - `customer.subscription.created`, `customer.subscription.updated`,
@@ -55,7 +55,7 @@ Wrangler with the Cloudflare credentials from `~/.env`.
    ```
    The private key goes straight into the Worker secret. The public key is
    printed on stderr: save it for the app. You can read it again later from
-   `GET https://rota.silvermine.dev/api/license/public-key`. If you rotate
+   `GET https://rotahud.com/api/license/public-key`. If you rotate
    this key, every app build that embeds the old public key stops accepting
    new entitlements, so ship an app update first.
 6. **Deploy:** `npm run deploy`. Then run a test purchase with card
@@ -151,7 +151,7 @@ decide trust.
    it expires (`ENTITLEMENT_TTL_DAYS`, default 7, is the offline grace period).
    403/404 responses clear it.
 5. **Gate:** if there is no valid entitlement, show "Unlock Voice mode" with a
-   link to `https://rota.silvermine.dev/pricing/` and a field for the license
+   link to `https://rotahud.com/pricing/` and a field for the license
    key, instead of starting the microphone.
 
 Tests: `cd website && npm test` covers signature verification, checkout

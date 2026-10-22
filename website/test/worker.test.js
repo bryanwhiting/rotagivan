@@ -225,6 +225,43 @@ test("release routes redirect to and serve versioned files", async () => {
   assert.equal((await call(env, "/releases/missing.dmg")).status, 404);
 });
 
+test("alias hosts redirect pages to the site but keep serving releases and the API", async () => {
+  const manifest = {
+    version: "1.2.3",
+    build: "45",
+    url: "https://rota.example/releases/Rota-1.2.3-45.dmg",
+    zip: { url: "https://rota.example/releases/Rota-1.2.3-45.zip", sha256: "ab" },
+  };
+  const { env } = await makeEnv({
+    REDIRECT_HOSTS: "www.rota.example, old.example",
+    RELEASES: fakeR2({ "latest.json": JSON.stringify(manifest) }),
+  });
+  const at = (host, path, init) => worker.fetch(new Request(`https://${host}${path}`, init), env);
+
+  const www = await at("www.rota.example", "/pricing/?ref=x");
+  assert.equal(www.status, 301);
+  assert.equal(www.headers.get("location"), "https://rota.example/pricing/?ref=x");
+  assert.equal((await at("old.example", "/")).headers.get("location"), "https://rota.example/");
+  assert.equal((await at("old.example", "/download/")).status, 301, "the download page is a page");
+
+  // Service paths answer on the old host, with download URLs on that same host.
+  const old = await at("old.example", "/latest.json");
+  assert.equal(old.status, 200);
+  const rehosted = await old.json();
+  assert.equal(rehosted.url, "https://old.example/releases/Rota-1.2.3-45.dmg");
+  assert.equal(rehosted.zip.url, "https://old.example/releases/Rota-1.2.3-45.zip");
+  assert.equal(rehosted.zip.sha256, "ab");
+  assert.equal((await at("old.example", "/download/latest")).status, 302);
+  assert.equal((await at("old.example", "/api/license/public-key")).status, 200);
+  assert.equal((await at("old.example", "/latest.json", { method: "HEAD" })).status, 200);
+
+  // The canonical host is never redirected, and an unknown host (preview, local dev) is left alone.
+  assert.equal((await at("rota.example", "/pricing/")).status, 404, "falls through to assets (none in tests)");
+  assert.equal((await at("localhost:8787", "/pricing/")).status, 404);
+  const canonical = await at("rota.example", "/latest.json");
+  assert.deepEqual(await canonical.json(), manifest);
+});
+
 test("no release yet is a clean 404", async () => {
   const { env } = await makeEnv();
   assert.equal((await call(env, "/download/latest")).status, 404);

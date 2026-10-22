@@ -52,7 +52,7 @@ struct SyncSettingsView: View {
                             Text("Last checked " + date.formatted(.dateTime.hour().minute().second())).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Download latest") { NSWorkspace.shared.open(URL(string: "https://rota.silvermine.dev/download/latest")!) }
+                        Button("Download latest") { NSWorkspace.shared.open(URL(string: "https://rotahud.com/download/latest")!) }
                             .accessibilityIdentifier("sync-download-latest")
                         syncNowButton
                     }

@@ -32,7 +32,7 @@ import Foundation
         precondition(UpdatePolicy.isDue(lastCheck: now.addingTimeInterval(-86_400), now: now))
         precondition(UpdatePolicy.isDue(lastCheck: now.addingTimeInterval(3600), now: now))
 
-        let json = #"{"version":"1.1.218","build":"220","url":"https://rota.silvermine.dev/releases/Rota-1.1.218-220.dmg","sha256":"ab","minimumOS":"13.0","size":1,"zip":{"url":"x"}}"#
+        let json = #"{"version":"1.1.218","build":"220","url":"https://rotahud.com/releases/Rota-1.1.218-220.dmg","sha256":"ab","minimumOS":"13.0","size":1,"zip":{"url":"x"}}"#
         let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: Data(json.utf8))
         precondition(manifest.identity == "1.1.218 (220)")
         let decide = { (skipped: String?, user: Bool, local: String) in
@@ -46,10 +46,10 @@ import Foundation
         let future = ReleaseManifest(version: "9.0.0", build: "1", url: "/releases/a.dmg", sha256: nil, minimumOS: "99.0")
         precondition(UpdatePolicy.decide(future, localVersion: "1.0.0", localBuild: "1", skippedIdentity: nil, userInitiated: true, os: sonoma) == .unsupportedOS)
 
-        let base = URL(string: "https://rota.silvermine.dev/latest.json")!
+        let base = URL(string: "https://rotahud.com/latest.json")!
         precondition(UpdatePolicy.downloadURL(for: manifest, manifestURL: base)?.absoluteString == manifest.url)
-        precondition(UpdatePolicy.downloadURL(for: future, manifestURL: base)?.absoluteString == "https://rota.silvermine.dev/releases/a.dmg")
-        for unsafe in ["http://rota.silvermine.dev/a.dmg", "https://evil.example/a.dmg", "file:///tmp/a.dmg"] {
+        precondition(UpdatePolicy.downloadURL(for: future, manifestURL: base)?.absoluteString == "https://rotahud.com/releases/a.dmg")
+        for unsafe in ["http://rotahud.com/a.dmg", "https://evil.example/a.dmg", "file:///tmp/a.dmg"] {
             let m = ReleaseManifest(version: "9", build: "1", url: unsafe, sha256: nil, minimumOS: nil)
             precondition(UpdatePolicy.downloadURL(for: m, manifestURL: base) == nil)
         }
@@ -57,10 +57,10 @@ import Foundation
         precondition(manifest.zip?.url == "x" && manifest.zip?.sha256 == nil)
         precondition(UpdateInstall.plan(for: manifest, manifestURL: base) == nil, "no checksum, no in-app install")
         let sha = String(repeating: "ab", count: 32)
-        let full = #"{"version":"1.1.250","build":"252","url":"https://rota.silvermine.dev/releases/Rota-1.1.250-252.dmg","minimumOS":"13.0","zip":{"url":"/releases/Rota-1.1.250-252.zip","sha256":"\#(sha.uppercased())","size":7}}"#
+        let full = #"{"version":"1.1.250","build":"252","url":"https://rotahud.com/releases/Rota-1.1.250-252.dmg","minimumOS":"13.0","zip":{"url":"/releases/Rota-1.1.250-252.zip","sha256":"\#(sha.uppercased())","size":7}}"#
         let installable = try JSONDecoder().decode(ReleaseManifest.self, from: Data(full.utf8))
         let plan = UpdateInstall.plan(for: installable, manifestURL: base)
-        precondition(plan == UpdateInstall.Plan(archive: URL(string: "https://rota.silvermine.dev/releases/Rota-1.1.250-252.zip")!, sha256: sha))
+        precondition(plan == UpdateInstall.Plan(archive: URL(string: "https://rotahud.com/releases/Rota-1.1.250-252.zip")!, sha256: sha))
         for bad in [#"{"url":"https://evil.example/a.zip","sha256":"\#(sha)"}"#, #"{"url":"/a.zip","sha256":"abc"}"#, #"{"url":"/a.zip","sha256":"\#(String(repeating: "zz", count: 32))"}"#] {
             let json = #"{"version":"9","build":"1","url":"/a.dmg","zip":\#(bad)}"#
             let m = try JSONDecoder().decode(ReleaseManifest.self, from: Data(json.utf8))

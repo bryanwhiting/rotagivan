@@ -1,6 +1,12 @@
 // rotagivan-website Worker: static Astro assets plus release downloads and
-// the Voice mode payment/licensing API. Only the paths listed in
-// wrangler.jsonc `assets.run_worker_first` reach this code.
+// the Voice mode payment/licensing API. Every request reaches this code
+// (wrangler.jsonc `assets.run_worker_first`); anything not handled here is
+// served from the Astro build.
+//
+// Hosts: SITE_URL (rotahud.com) is canonical. The hosts in REDIRECT_HOSTS
+// (www, and rota.silvermine.dev which shipped in the app before the domain
+// existed) keep serving the release and API paths that installed apps and
+// Stripe call, and send every page to the canonical host.
 import { HttpError, error } from "./http.js";
 import { handleLatestDownload, handleLatestJSON, handleReleaseFile } from "./releases.js";
 import {
@@ -11,10 +17,37 @@ import {
   handleWebhook,
 } from "./payments.js";
 
+/** Paths that must work on every host: the app and Stripe use them by absolute URL. */
+export function isServicePath(pathname) {
+  return (
+    pathname === "/latest.json" ||
+    pathname === "/download/latest" ||
+    pathname === "/download/latest.zip" ||
+    pathname.startsWith("/releases/") ||
+    pathname.startsWith("/api/")
+  );
+}
+
+/** A 301 to the canonical site for page requests on an alias host, else null. */
+export function hostRedirect(request, env) {
+  const url = new URL(request.url);
+  const aliases = (env.REDIRECT_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  if (!env.SITE_URL || !aliases.includes(url.host.toLowerCase()) || isServicePath(url.pathname)) return null;
+  const target = new URL(url.pathname + url.search, env.SITE_URL);
+  if (target.host === url.host) return null;
+  return new Response(null, {
+    status: 301,
+    headers: { location: target.toString(), "cache-control": "public, max-age=3600" },
+  });
+}
+
 export async function route(request, env) {
   const { pathname } = new URL(request.url);
   const method = request.method;
   const read = method === "GET" || method === "HEAD";
+
+  const redirect = hostRedirect(request, env);
+  if (redirect) return redirect;
 
   if (pathname === "/latest.json" && read) return handleLatestJSON(request, env);
   if (pathname === "/download/latest" && read) return handleLatestDownload(request, env, "dmg");

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Upload to rota.silvermine.dev
+        description: Upload to rotahud.com
         type: boolean
         default: false
 
@@ -121,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           out=$(ls -d release/*/ | head -1)
-          notes="Rota ${{ steps.app.outputs.version }} (build ${{ steps.app.outputs.build }}). Download: https://rota.silvermine.dev/download/latest"
+          notes="Rota ${{ steps.app.outputs.version }} (build ${{ steps.app.outputs.build }}). Download: https://rotahud.com/download/latest"
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Rota ${{ steps.app.outputs.version }}" --notes "$notes" \
             "$out"Rota-*.dmg "$out"Rota-*.zip "$out"latest.json
 

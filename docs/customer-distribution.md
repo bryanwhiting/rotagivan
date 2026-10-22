@@ -35,9 +35,9 @@ Releases are cut with `scripts/tag-release.sh` and built by GitHub Actions
 them to the private `rotagivan-releases` R2 bucket and publishes
 `latest.json`. The `rotagivan-website` Worker serves:
 
-- `https://rota.silvermine.dev/download/latest`: 302 to the newest DMG (`/download/latest.zip` for the zip)
-- `https://rota.silvermine.dev/latest.json`: `{version, build, url, sha256, size, minimumOS, architectures, zip, commit, signing, notarized, publishedAt}`
-- `https://rota.silvermine.dev/releases/<file>`: immutable versioned files
+- `https://rotahud.com/download/latest`: 302 to the newest DMG (`/download/latest.zip` for the zip)
+- `https://rotahud.com/latest.json`: `{version, build, url, sha256, size, minimumOS, architectures, zip, commit, signing, notarized, publishedAt}`
+- `https://rotahud.com/releases/<file>`: immutable versioned files
 
 The app's `UpdateChecker` reads `latest.json` about once a day and, when a
 newer version/build exists, installs it in place (zip download, SHA-256,

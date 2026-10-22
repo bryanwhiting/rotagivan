@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Cut a release. Runs the test suite, bumps the version in Rota/Info.plist,
 # commits, tags vX.Y.Z and pushes. GitHub Actions (.github/workflows/release.yml)
-# then builds, signs and publishes it to rota.silvermine.dev.
+# then builds, signs and publishes it to rotahud.com.
 #
 #   scripts/tag-release.sh              next patch version (1.1.249 -> 1.1.250), build + 1
 #   scripts/tag-release.sh 1.2.0        explicit version, build + 1

@@ -256,7 +256,7 @@ a built-in or Magic Trackpad.
 
 ## Install, update, develop
 
-Install from https://rota.silvermine.dev/download/ and let the app update
+Install from https://rotahud.com/download/ and let the app update
 itself (*Check for Updates…* offers **Install and Relaunch**). Releases are
 built by GitHub Actions from a tag; `scripts/tag-release.sh` cuts one. Local
 development runs from the build folder without touching the installed copy:

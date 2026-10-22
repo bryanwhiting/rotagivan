@@ -1,6 +1,6 @@
 name: Website
 
-# Deploys the Astro site + Worker to rota.silvermine.dev whenever main changes
+# Deploys the Astro site + Worker to rotahud.com (rota.silvermine.dev stays an alias) whenever main changes
 # under website/. Releases (DMG, latest.json) are separate: see release.yml.
 on:
   push:
@@ -41,5 +41,6 @@ jobs:
           npm run deploy
       - name: Verify
         run: |
-          curl -sSf -o /dev/null -w "rota.silvermine.dev -> %{http_code}\n" https://rota.silvermine.dev/
-          curl -sSf https://rota.silvermine.dev/latest.json | head -c 200; echo
+          curl -sSf -o /dev/null -w "rotahud.com -> %{http_code}\n" https://rotahud.com/
+          curl -sS -o /dev/null -w "rota.silvermine.dev/latest.json -> %{http_code}\n" https://rota.silvermine.dev/latest.json
+          curl -sSf https://rotahud.com/latest.json | head -c 200; echo

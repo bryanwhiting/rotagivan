@@ -21,10 +21,38 @@ export async function readManifest(env) {
   }
 }
 
+/**
+ * The manifest's download URLs are rewritten to the host that was asked, so
+ * an app that fetched latest.json from rota.silvermine.dev (the hostname in
+ * builds before rotahud.com) is offered files on that same host; the app only
+ * accepts downloads from the manifest's own host.
+ */
+export function manifestForHost(manifest, requestURL) {
+  const origin = new URL(requestURL);
+  const rehost = (value) => {
+    if (typeof value !== "string") return value;
+    const url = new URL(value, origin);
+    url.protocol = origin.protocol;
+    url.host = origin.host;
+    return url.toString();
+  };
+  const out = { ...manifest, url: rehost(manifest.url) };
+  if (manifest.zip && typeof manifest.zip === "object") out.zip = { ...manifest.zip, url: rehost(manifest.zip.url) };
+  return out;
+}
+
 export async function handleLatestJSON(request, env) {
   const object = await env.RELEASES.get("latest.json");
   if (!object) return error(404, "no_release", "No release has been published yet.");
-  return new Response(request.method === "HEAD" ? null : object.body, {
+  let body = null;
+  if (request.method !== "HEAD") {
+    try {
+      body = JSON.stringify(manifestForHost(JSON.parse(await object.text()), request.url), null, 2) + "\n";
+    } catch {
+      return error(500, "bad_manifest", "Release manifest is invalid.");
+    }
+  }
+  return new Response(body, {
     headers: {
       "content-type": TYPES.json,
       "cache-control": "public, max-age=60, must-revalidate",

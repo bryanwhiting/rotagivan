@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build, package and publish a Rota release to rota.silvermine.dev.
+# Build, package and publish a Rota release to rotahud.com.
 #
 #   scripts/release.sh               build, package, upload, verify
 #   scripts/release.sh --skip-build  package the existing Rota/build/Rota.app
@@ -35,7 +35,7 @@ for arg in "$@"; do
   esac
 done
 
-base_url=${RELEASE_BASE_URL:-https://rota.silvermine.dev}
+base_url=${RELEASE_BASE_URL:-https://rotahud.com}
 bucket=${RELEASE_BUCKET:-rotagivan-releases}
 app="$repo/Rota/build/Rota.app"
 step() { print -P "%B==> $*%b"; }

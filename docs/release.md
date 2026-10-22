@@ -52,7 +52,7 @@ Nothing is built locally.
    clean) and checks the tag equals `v` + the plist version;
 3. `scripts/release.sh --skip-build`: packages the DMG and zip, writes
    `latest.json`, uploads to the `rotagivan-releases` R2 bucket, and verifies
-   that `https://rota.silvermine.dev/download/latest` serves the new DMG with
+   that `https://rotahud.com/download/latest` serves the new DMG with
    the right checksum;
 4. attaches the files to a GitHub release for the tag.
 
@@ -80,9 +80,22 @@ rotate.
 The repository is public; secrets are never exposed to pull requests from
 forks, and the Release workflow only runs for tags and manual dispatch.
 
+## Hostnames
+
+`rotahud.com` is the site, the download host and the API (`SITE_URL` in
+website/wrangler.jsonc). `www.rotahud.com` and `rota.silvermine.dev` (the
+hostname built into apps before the domain existed) are custom domains on the
+same Worker: pages there answer with a 301 to rotahud.com, while
+`/latest.json`, `/download/latest*`, `/releases/*` and `/api/*` keep working
+so installed apps and the Stripe webhook never break. `/latest.json` rewrites
+its download URLs to whichever host was asked, because the app only accepts
+downloads from the manifest's own host. Deploying the Worker (`npm run
+deploy` in website/, or the Website workflow) attaches the domains and
+creates their DNS records.
+
 ## Installing and updating
 
-- **New Mac**: https://rota.silvermine.dev/download/ (`/download/latest` always
+- **New Mac**: https://rotahud.com/download/ (`/download/latest` always
   redirects to the newest DMG). The app is signed with a self-signed
   certificate, so the first launch of a downloaded copy needs *Open Anyway* in
   System Settings → Privacy & Security. Grant Accessibility and Input

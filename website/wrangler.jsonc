@@ -4,19 +4,20 @@
   "main": "worker/index.js",
   "compatibility_date": "2026-10-02",
   "workers_dev": true,
-  "routes": [{ "pattern": "rota.silvermine.dev", "custom_domain": true }],
+  // rotahud.com is the site. www and the former hostname redirect pages to it
+  // (REDIRECT_HOSTS below) while still serving releases and the API for apps
+  // and Stripe that call them by absolute URL.
+  "routes": [
+    { "pattern": "rotahud.com", "custom_domain": true },
+    { "pattern": "www.rotahud.com", "custom_domain": true },
+    { "pattern": "rota.silvermine.dev", "custom_domain": true },
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    // Only these paths run the Worker; everything else is served as static assets.
-    "run_worker_first": [
-      "/api/*",
-      "/latest.json",
-      "/download/latest",
-      "/download/latest.zip",
-      "/releases/*",
-    ],
+    // Every request runs the Worker (host redirects); unhandled paths fall through to the static build.
+    "run_worker_first": true,
   },
   // Private bucket: files are served only through the Worker routes above.
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "rotagivan-releases" }],
@@ -29,7 +30,8 @@
     },
   ],
   "vars": {
-    "SITE_URL": "https://rota.silvermine.dev",
+    "SITE_URL": "https://rotahud.com",
+    "REDIRECT_HOSTS": "www.rotahud.com,rota.silvermine.dev",
     // Set to your Stripe Price id (price_...) for Voice mode. Empty = checkout disabled.
     "STRIPE_PRICE_ID_VOICE": "",
     // "subscription" for a recurring price, "payment" for a one-time price.

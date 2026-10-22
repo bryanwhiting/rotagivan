@@ -25,10 +25,12 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     env:
-      KEYCHAIN: ${{ runner.temp }}/rota-release.keychain-db
-      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish == true }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Keychain path
+        run: echo "KEYCHAIN=$RUNNER_TEMP/rota-release.keychain-db" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:

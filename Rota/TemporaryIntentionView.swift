@@ -142,8 +142,42 @@ struct TemporaryIntentionControl: View {
                 .padding(16).frame(width: 320)
                 // Escape closes the note, whichever control inside has focus.
                 .onExitCommand { showingEditor = false }
+                .background(PopoverEscapeCloser { showingEditor = false })
                 .onDisappear { speech.cancel(); admission.endPrivateEntry(entryID); onDismiss() }
         }
         .onDisappear { speech.cancel(); admission.endPrivateEntry(entryID) }
+    }
+}
+
+/// Closes the note popover on Escape no matter which control inside has focus.
+/// A focused SwiftUI text field keeps `cancelOperation:` from reaching
+/// `onExitCommand`, so the key is taken at the popover's window before dispatch.
+private struct PopoverEscapeCloser: NSViewRepresentable {
+    var close: () -> Void
+
+    final class Coordinator {
+        var close: () -> Void
+        var monitor: Any?
+        init(close: @escaping () -> Void) { self.close = close }
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(close: close) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        let coordinator = context.coordinator
+        coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak view, weak coordinator] event in
+            guard event.keyCode == 53, let window = view?.window, event.window === window else { return event }
+            coordinator?.close()
+            return nil
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) { context.coordinator.close = close }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor); coordinator.monitor = nil }
     }
 }

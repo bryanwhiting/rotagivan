@@ -68,11 +68,11 @@ Ordered by how likely each is to produce "glitchy on one Mac, fine on the other"
 
 ### 1. The main thread delivers reports late, in bursts
 
-Evidence in the code: `Rota/HIDManager.swift` schedules the `IOHIDManager` on the main run loop (`IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), …)`) and the report callback hops to the main queue again (`DispatchQueue.main.async`). The `receivedAt` timestamp is taken when the main loop finally services IOKit, so any UI work, HUD warm-up, favicon fetch, application-index scan or settings redraw delays every report behind it. The kernel input queue is finite; a long enough stall drops reports outright. The cursor then moves in steps instead of continuously, which is exactly what "glitchy" looks like. A slower Mac, more displays, or a heavier set of running apps makes this worse on one machine only.
+Evidence in the code before 1.1.249: `Rota/HIDManager.swift` scheduled the `IOHIDManager` on the main run loop (`IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), …)`) and the report callback hopped to the main queue again (`DispatchQueue.main.async`). The `receivedAt` timestamp was taken when the main loop finally serviced IOKit, so any UI work, HUD warm-up, favicon fetch, application-index scan or settings redraw delayed every report behind it. The kernel input queue is finite; a long enough stall drops reports outright. The cursor then moves in steps instead of continuously, which is exactly what "glitchy" looks like. A slower Mac, more displays, or a heavier set of running apps makes this worse on one machine only.
 
 Signature: probe statistics clean, app-path statistics show `late deliveries` or `coalesced` above zero, or app-path `dropped` higher than the probe's.
 
-Fix: schedule the HID manager on a dedicated thread's run loop. All three IOKit callbacks already forward to the main actor, so the change is confined to `start()`/`stop()`. The gesture engine stays on the main actor; only the timestamping and parsing move off it.
+Fixed in 1.1.249: the manager is scheduled on a dedicated `local.rota.navigator-hid` thread (`NavigatorHIDManager.hidRunLoop`), so IOKit delivers and stamps every report regardless of what the main thread is doing. Parsing and the gesture engine still run on the main actor; only delivery and timestamping moved. If the other Mac still shows late or dropped app-path frames after updating, the stall is downstream of delivery and the report's app-path section will say where.
 
 ### 2. Precision-touchpad mode was lost and never re-asserted
 

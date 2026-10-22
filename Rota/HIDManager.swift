@@ -643,6 +643,31 @@ final class NavigatorHIDManager: ObservableObject {
         store.gestures(for: id, device: calibrationDevice)
     }
 
+    /// IOKit delivers matching and input-report callbacks on the run loop the
+    /// manager is scheduled on. A dedicated thread keeps that delivery, and the
+    /// `receivedAt` stamp taken in the callback, independent of main-thread work
+    /// (HUD warm-up, settings redraws, application-index scans), which on a
+    /// slower or busier Mac otherwise batches frames or lets the kernel queue
+    /// drop them. Every handler still hops to the main actor, so nothing else
+    /// changes thread.
+    nonisolated(unsafe) private static let hidRunLoop: CFRunLoop = {
+        final class Box: @unchecked Sendable { var loop: CFRunLoop? }
+        let box = Box()
+        let ready = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            box.loop = CFRunLoopGetCurrent()
+            // A far-future timer keeps the loop alive until a device is scheduled.
+            RunLoop.current.add(Timer(fire: .distantFuture, interval: 0, repeats: false) { _ in }, forMode: .common)
+            ready.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "local.rota.navigator-hid"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        ready.wait()
+        return box.loop!
+    }()
+
     func start() {
         started = true
         startAppleInput()
@@ -669,7 +694,7 @@ final class NavigatorHIDManager: ObservableObject {
         let context = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, Self.deviceMatched, context)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, Self.deviceRemoved, context)
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDManagerScheduleWithRunLoop(manager, Self.hidRunLoop, CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         state = result == kIOReturnSuccess ? .looking : .error("Could not open HID manager (\(result))")
         logger.info("HID manager open result: \(result)")
@@ -708,7 +733,7 @@ final class NavigatorHIDManager: ObservableObject {
                 _ = IOHIDDeviceSetReport(device, kIOHIDReportTypeFeature, 4, &fallback, fallback.count)
                 IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
             }
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            IOHIDManagerUnscheduleFromRunLoop(manager, Self.hidRunLoop, CFRunLoopMode.commonModes.rawValue)
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
         manager = nil

@@ -32,7 +32,9 @@ import SwiftUI
         }
         func snapshot(_ name: String) throws {
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-            let view = NSApp.windows.first { $0.title == "App Explorer" && $0.isVisible }!.contentView!
+            guard let view = NSApp.windows.first(where: { $0.title == "App Explorer" && $0.isVisible })?.contentView else {
+                preconditionFailure("No visible App Explorer window for \(name); windows: \(NSApp.windows.map { ($0.title, $0.isVisible) })")
+            }
             view.layoutSubtreeIfNeeded()
             let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
             view.cacheDisplay(in: view.bounds, to: bitmap)
@@ -148,6 +150,10 @@ import SwiftUI
         controller.editingStore = store
         controller.showWindowManager(waitingForLift: false); swipe(.down)
         controller.beginEditing(); precondition(controller.isEditing)
+        // Presenting the editor activates this process. Let that notification land
+        // while editing, as it does for a user, not during a later snapshot.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(controller.isEditing, "Activating Rota for its own editor keeps the editor open")
         controller.finishEditing()
         precondition(controller.isVisible && !controller.isEditing && controller.displayedEntries.first?.tilingDirection == .topLeft)
         swipe(.left); precondition(placements.last == topQuarter && !controller.isVisible)

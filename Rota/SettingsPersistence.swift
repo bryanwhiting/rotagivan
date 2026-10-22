@@ -1,3 +1,4 @@
+import os
 import AppKit
 import CryptoKit
 import Security
@@ -52,6 +53,8 @@ enum SettingsPersistence {
                 SyncSecrets.defaults = { adapter }
                 return
             } catch {
+                Logger(subsystem: "local.rota", category: "settings")
+                    .error("Settings bootstrap failed (interactive: \(interactive)): \(String(describing: error), privacy: .public)")
                 let alert = NSAlert()
                 alert.messageText = "Unlock your saved settings"
                 alert.informativeText = "Rota could not open its encrypted settings. Unlock your login Keychain, allow access if macOS asks, and retry. Your saved data will not be replaced."

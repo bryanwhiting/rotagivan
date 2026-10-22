@@ -113,6 +113,7 @@ import SwiftUI
         panel.setContentSize(NSSize(width: 1000, height: 790))
         defaults.set(true, forKey: "actions.showIDs")
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        table = renderedTable()
         precondition(table.tableColumns.count == 7, "Show IDs must reveal the seventh column")
         try capture("actions-table-ids")
         // Press the real inline control; opening and canceling must be draft-only.

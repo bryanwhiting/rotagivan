@@ -39,18 +39,23 @@ xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests
 "$test_dir/HotkeyOrganizerTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKeyManager.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
-  Rotagivan/VaultCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift \
+  Rotagivan/SyncCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift \
   Rotagivan/Tests/ActionCatalogSnapshotTests.swift -framework AppKit -framework Carbon -framework Security \
   -o "$test_dir/ActionCatalogSnapshotTests"
 "$test_dir/ActionCatalogSnapshotTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/HotKeyManager.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
-  Rotagivan/VaultCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift \
+  Rotagivan/SyncCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/ActionTableRow.swift \
   Rotagivan/MCPProtocol.swift Rotagivan/MCPSettingsTools.swift Rotagivan/MCPBridge.swift \
   Rotagivan/Tests/MCPTests.swift -framework AppKit -framework Carbon -framework Security -o "$test_dir/MCPTests"
 "$test_dir/MCPTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/HotkeyOrganizer.swift Rotagivan/Tests/MacroAuditTests.swift -o "$test_dir/MacroAuditTests"
 "$test_dir/MacroAuditTests"
+xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
+  -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
+  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/MacroPack.swift Rotagivan/Tests/MacroPackTests.swift \
+  -framework AppKit -framework Carbon -framework Security -o "$test_dir/MacroPackTests"
+"$test_dir/MacroPackTests"
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/MotionCurveEditor.swift Rotagivan/UIComponents.swift Rotagivan/Tests/LiveCursorPreviewTests.swift \
   -framework AppKit -framework SwiftUI -o "$test_dir/LiveCursorPreviewTests"
 "$test_dir/LiveCursorPreviewTests" "$test_dir"
@@ -152,7 +157,7 @@ ui_sources=("${common[@]}" Rotagivan/UIComponents.swift Rotagivan/TrackpadReport
   Rotagivan/TemporaryIntention.swift Rotagivan/TemporaryIntentionView.swift \
   Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/NoteDictationSession.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
-  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/OpenAIRealtime.swift Rotagivan/LauncherActions.swift Rotagivan/AppExplorer.swift \
+  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/SyncCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/OpenAIRealtime.swift Rotagivan/LauncherActions.swift Rotagivan/AppExplorer.swift \
   Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \
@@ -170,13 +175,13 @@ ui_sources=("${common[@]}" Rotagivan/UIComponents.swift Rotagivan/TrackpadReport
 for test in ActionTableTests HotkeyGestureAssignmentTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift "Rotagivan/Tests/$test.swift" \
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/MacroPack.swift Rotagivan/MacroPackImport.swift Rotagivan/ApplicationCommandEditor.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
 done
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${ui_sources[@]}" Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift \
-  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
+  Rotagivan/ActionTableRow.swift Rotagivan/ActionCatalogSnapshot.swift Rotagivan/HotkeyOrganizerView.swift Rotagivan/MacroPack.swift Rotagivan/MacroPackImport.swift Rotagivan/ApplicationCommandEditor.swift Rotagivan/Tests/ApplicationCommandUISmoke.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/ApplicationCommandUISmoke"
 "$test_dir/ApplicationCommandUISmoke" "$test_dir"
 for test in ApplicationCommandTests BrowserURLDispatcherTests SlackChannelTests FocusTimerTests; do
@@ -192,11 +197,12 @@ done
 xcrun swiftc -j 4 "${ui_sources[@]}" Rotagivan/Tests/HUDTemplateTests.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreGraphics -framework IOKit -framework Carbon -o "$test_dir/HUDTemplateTests"
 "$test_dir/HUDTemplateTests"
-xcrun swiftc -j 4 Rotagivan/CredentialWorker.swift Rotagivan/VaultCrypto.swift Rotagivan/Tests/VaultCryptoTests.swift -framework Security -o "$test_dir/VaultCryptoTests"
-"$test_dir/VaultCryptoTests"
-for test in CredentialVaultTests VaultRestoreUISmoke VoiceTransportTests; do
+xcrun swiftc -j 4 Rotagivan/SyncCrypto.swift Rotagivan/VoiceActions.swift "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift \
+  Rotagivan/Tests/SyncCryptoTests.swift -framework AppKit -framework Security -o "$test_dir/SyncCryptoTests"
+"$test_dir/SyncCryptoTests"
+for test in VoiceTransportTests; do
 xcrun swiftc -j 4 "${common[@]}" Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/VoiceActions.swift Rotagivan/TemporaryIntention.swift \
-  Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/UIComponents.swift "Rotagivan/Tests/$test.swift" \
+  Rotagivan/SyncCrypto.swift Rotagivan/UIComponents.swift "Rotagivan/Tests/$test.swift" \
   -framework AppKit -framework SwiftUI -framework Security -o "$test_dir/$test"
 "$test_dir/$test" "$test_dir"
 done
@@ -234,22 +240,22 @@ xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources
   Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/Tests/SyncStorageTests.swift \
   -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncStorageTests"
 "$test_dir/SyncStorageTests"
+for test in CloudSyncEngineTests LocalSyncTests; do
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML "${common[@]}" Rotagivan/HotKeyManager.swift \
-  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/EncryptedSettingsCore.swift \
-  Rotagivan/SyncConfigurationCodec.swift Rotagivan/Tests/SyncCodecTests.swift \
-  -framework AppKit -framework Carbon -framework Security -o "$test_dir/SyncCodecTests"
-"$test_dir/SyncCodecTests"
-for test in ManualSyncTests CredentialLifecycleTests SettingsSyncActionTests; do
+  Rotagivan/AppConfiguration.swift Rotagivan/SyncStorage.swift Rotagivan/SyncCrypto.swift \
+  Rotagivan/CloudSync.swift Rotagivan/LocalSync.swift Rotagivan/VoiceActions.swift Rotagivan/ExplorerApplicationCatalog.swift \
+  "Rotagivan/Tests/$test.swift" -framework AppKit -framework Carbon -framework Security -o "$test_dir/$test"
+"$test_dir/$test"
+done
 xcrun swiftc -j 4 -I "$yaml_build/Modules" -I YAML/.build/checkouts/Yams/Sources/CYaml/include \
   -L "$yaml_build" -lConfigurationYAML $ui_sources Rotagivan/AppConfiguration.swift \
   Rotagivan/SyncStorage.swift Rotagivan/SettingsSync.swift Rotagivan/SyncSettingsView.swift \
-  Rotagivan/EncryptedSettingsCore.swift Rotagivan/EncryptedPreferences.swift Rotagivan/EncryptedAutoSync.swift \
-  Rotagivan/SyncConfigurationCodec.swift Rotagivan/SyncPreferenceWriter.swift "Rotagivan/Tests/$test.swift" \
+  Rotagivan/EncryptedSettingsCore.swift Rotagivan/EncryptedPreferences.swift Rotagivan/CloudSync.swift Rotagivan/LocalSync.swift \
+  Rotagivan/Tests/SettingsSyncTests.swift \
   -framework AppKit -framework SwiftUI -framework CoreGraphics -framework IOKit -framework Carbon -framework Security \
-  -o "$test_dir/$test"
-"$test_dir/$test" "$test_dir"
-done
+  -o "$test_dir/SettingsSyncTests"
+"$test_dir/SettingsSyncTests" "$test_dir"
 # Compile settings tests from the same source list as the app, excluding its entry point.
 settings_sources=()
 while IFS= read -r source; do

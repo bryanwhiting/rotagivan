@@ -52,13 +52,6 @@ import Foundation
         try fm.removeItem(at: backupDirectory)
         try fm.moveItem(at: heldBackups, to: backupDirectory)
         check(forced == first)
-        try await files.setBaseline(SyncBaseline(revision: 7, fingerprint: "A"), for: "server/alice")
-        try await files.setBaseline(SyncBaseline(revision: 2, fingerprint: "B"), for: "server/bob")
-        let alice = try await files.baseline(for: "server/alice")
-        let bob = try await files.baseline(for: "server/bob")
-        check(alice?.revision == 7 && bob?.revision == 2)
-        let other = try await files.baseline(for: "other-server/alice")
-        check(other == nil)
         try Data("invalid: [".utf8).write(to: file)
         do { _ = try await files.read(); fatalError("Invalid YAML accepted") } catch {}
         try fm.removeItem(at: file)
@@ -86,20 +79,6 @@ import Foundation
         reordered.settings.profileNames = [100:"Three",2:"Two",1:"One"]
         reordered.settings.customTapProfiles = [2,1]
         check(try order.syncFingerprint() == reordered.syncFingerprint())
-        check(SyncDecision.decide(local:"a",remote:nil,baseline:nil) == .upload)
-        check(SyncDecision.decide(local:"a",remote:"a",baseline:nil) == .equal)
-        check(SyncDecision.decide(local:"a",remote:"b",baseline:nil) == .conflict)
-        check(SyncDecision.decide(local:"a",remote:"b",baseline:"a") == .download)
-        check(SyncDecision.decide(local:"a",remote:"b",baseline:"b") == .upload)
-        check(SyncDecision.decide(local:"a",remote:"b",baseline:"c") == .conflict)
-        check(SyncDecision.forAccount(local:"alice",remote:"bob",baseline:"bob",ownerMatches:false,
-            hasPreviousOwner:true,firstLogin:true,allowInitialUpload:false) == .download)
-        check(SyncDecision.forAccount(local:"alice",remote:nil,baseline:nil,ownerMatches:false,
-            hasPreviousOwner:true,firstLogin:true,allowInitialUpload:false) == .conflict)
-        check(SyncDecision.forAccount(local:"local",remote:nil,baseline:nil,ownerMatches:false,
-            hasPreviousOwner:false,firstLogin:true,allowInitialUpload:true) == .upload)
-        check(SyncDecision.forAccount(local:"edited",remote:"remote",baseline:"base",ownerMatches:true,
-            hasPreviousOwner:true,firstLogin:true,allowInitialUpload:false) == .conflict)
-        print("Sync storage passed: private atomic YAML, roundtrip, stale-write rejection, backups, per-user baselines, invalid input, symlink protection, stable fingerprints, and conflict decisions.")
+        print("Sync storage passed: private atomic YAML, roundtrip, stale-write rejection, backups, invalid input, symlink protection, and stable fingerprints.")
     }
 }

@@ -2,168 +2,69 @@
 import Layout from "../layouts/Layout.astro";
 import Demo from "../components/Demo.astro";
 import DownloadButton from "../components/DownloadButton.astro";
-import PricingCards from "../components/PricingCards.astro";
 
 const features = [
   {
-    icon: "ϟ",
-    title: "A radial HUD launcher",
-    body: "Swipe, tap or press a hotkey and a wheel of your apps, websites and actions appears under your fingers. Nest groups four levels deep and pick a theme, from native Classic to Starburst Air glass.",
+    icon: "◎",
+    title: "HUD on a tap",
+    body: "Tap or swipe on your trackpad and a wheel of your apps, websites and actions appears under the pointer. Nest groups, pick a theme.",
   },
   {
     icon: "▥",
-    title: "Window Manager",
-    body: "Tile the front window into halves, thirds or quarters, fill the desktop, toggle full screen, minimize or close — from the HUD or from hotkeys you assign.",
-  },
-  {
-    icon: "◈",
-    title: "Chrome tabs at a glance",
-    body: "A built-in HUD of your open Google Chrome tabs, most recent first, with each site's favicon and Chrome profile name. Pick one to jump straight to it.",
-  },
-  {
-    icon: "⌕",
-    title: "Recent apps and type-to-find",
-    body: "Switch to recently used apps from the wheel, or start typing to search apps, macros and actions and run the match with a single Return.",
+    title: "Window tiling",
+    body: "Halves, thirds, quarters, fill the desktop or full screen, from a tile or a hotkey you assign.",
   },
   {
     icon: "⌘",
-    title: "Macros and keybindings",
-    body: "Chain up to 32 keystroke and Open app steps into a named macro. One searchable organizer shows every key, gesture and conflict across your setup.",
+    title: "Macros and hotkeys",
+    body: "Chain keystrokes and app launches into a named macro. One organizer shows every key, gesture and conflict.",
   },
   {
-    icon: "◎",
-    title: "Profiles, layers and app overrides",
-    body: "Keep separate setups for work and play, with layers you switch on the fly and gestures that change depending on the app in front of you.",
+    icon: "◈",
+    title: "Chrome tabs and bookmarks",
+    body: "A HUD of your open Chrome tabs, most recent first, with favicons and profile names. Bookmarks too.",
   },
   {
-    icon: "⌁",
-    title: "Gestures for ZSA Navigator",
-    body: "Drives the Navigator touchpad directly: taps, swipes, double-tap-then-swipe combinations, tunable pointer and scroll curves, and timing calibration. Apple trackpad gestures are available experimentally.",
+    icon: "#",
+    title: "Slack channels",
+    body: "Jump to a Slack channel or conversation from the wheel without leaving what you are doing.",
   },
   {
     icon: "≋",
     title: "Voice mode",
-    body: "Say “open Slack” or “pause music”. Rotagivan matches what you said against your own actions and shows the best three — nothing runs until you confirm.",
+    body: "Say “open Slack”. Rotagivan matches it against your own actions and shows the best three. Nothing runs until you confirm.",
     paid: true,
-  },
-  {
-    icon: "⇅",
-    title: "Sync between your Macs",
-    body: "Sign in to carry your profiles, HUDs and macros to another Mac. API keys travel end-to-end encrypted, unlocked only on Macs you approve.",
   },
 ];
 ---
 
 <Layout
-  title="Rotagivan — Life at lightning speed"
-  description="Put your Mac in motion. Explore Rotagivan’s radial HUD, custom gestures, app shortcuts, and multi-step macros in an interactive demo."
+  title="Rotagivan — a radial HUD for your Mac"
+  description="Tap your trackpad and a wheel of your apps, windows, Chrome tabs and macros appears under your fingers. Free for macOS."
 >
   <section class="hero wrap">
-    <div class="hero-copy">
-      <p class="eyebrow">
-        <span class="tiny-bolt" aria-hidden="true">
-          ϟ
-        </span>{" "}
-        A NEW RHYTHM FOR YOUR MAC
-      </p>
-      <h1>
-        Life at
-        <br />
-        <em>lightning</em>
-        <br />
-        speed<span class="lime">.</span>
-      </h1>
-      <p class="lede">
-        The thought. The gesture. Done.
-        <br />
-        Bring your apps, shortcuts, and everyday routines into one effortless
-        motion.
-      </p>
-      <div class="button-row">
-        <DownloadButton />
-        <a class="quiet-link" href="#playground">
-          Feel the flow first <span aria-hidden="true">↗</span>
-        </a>
-      </div>
+    <h1>Your Mac, one tap away.</h1>
+    <p class="lede">
+      Tap the trackpad and a wheel of your apps, windows, tabs and macros
+      appears under your fingers. Free for Mac, Voice mode optional.
+    </p>
+    <div class="button-row">
+      <DownloadButton />
     </div>
-    <div class="hero-demo" id="playground">
+    <div id="playground">
       <Demo />
-      <span class="demo-caption">
-        LESS REACHING. LESS SEARCHING. MORE DOING.
-      </span>
     </div>
   </section>
-  <div class="capability-strip">
-    <div class="wrap">
-      <span>
-        One wheel.
-        <br />
-        <strong>So many possibilities.</strong>
-      </span>
-      <span>App launching</span>
-      <span>Window control</span>
-      <span>Chrome tabs</span>
-      <span>Macros</span>
-      <span>Voice</span>
-    </div>
-  </div>
-  <section class="section wrap" id="how-it-works">
-    <div class="section-heading">
-      <p class="eyebrow">01 / CLOSE THE GAP</p>
-      <h2>
-        Your ideas move fast.
-        <br />
-        <span class="muted">Your Mac should keep up.</span>
-      </h2>
-      <p>
-        Every menu hunt breaks the rhythm. Rotagivan puts your next action where
-        you already are—on a wheel you make your own.
-      </p>
-    </div>
-    <div class="steps">
-      <article>
-        <span class="step-number">01</span>
-        <h3>Make it yours.</h3>
-        <p>
-          Place your favorite apps, websites, and actions on the HUD. Group them
-          the way you think.
-        </p>
-      </article>
-      <article>
-        <span class="step-number">02</span>
-        <h3>Find your gesture.</h3>
-        <p>
-          Assign a hotkey or trackpad gesture. Call up your controls without
-          retracing the same menus.
-        </p>
-      </article>
-      <article>
-        <span class="step-number">03</span>
-        <h3>Stay in the flow.</h3>
-        <p>
-          Choose your next move. Launch, arrange, or run a sequence—and get
-          right back to the work.
-        </p>
-      </article>
-    </div>
-  </section>
+
   <section class="section wrap" id="features">
     <div class="section-heading">
-      <p class="eyebrow">02 / WHAT'S INSIDE</p>
-      <h2>
-        One wheel.
-        <br />
-        <span class="muted">Everything within a flick.</span>
-      </h2>
-      <p>
-        Rotagivan is a native Mac app that lives in your menu bar. Everything
-        below is in the app you download today.
-      </p>
+      <h2>What it does</h2>
+      <p>A native menu bar app. Everything here is in the download.</p>
     </div>
     <div class="feature-grid">
       {
         features.map((f) => (
-          <article class:list={{ paid: f.paid }}>
+          <article class="card">
             <span class="feature-icon" aria-hidden="true">
               {f.icon}
             </span>
@@ -177,172 +78,24 @@ const features = [
       }
     </div>
   </section>
-  <section class="feature-section wrap">
-    <div class="feature-card wide">
-      <div>
-        <p class="eyebrow">03 / LESS BUSYWORK</p>
-        <h2>
-          One action.
-          <br />A whole head start.
-        </h2>
-        <p>
-          Opening an app is just the beginning. Chain app launches and
-          keystrokes into a named macro. Turn the setup you repeat into a
-          routine you can reach.
-        </p>
-        <a class="quiet-link" href="#playground">
-          Try Focus on the wheel <span aria-hidden="true">↗</span>
-        </a>
-      </div>
-      <div
-        class="macro-visual"
-        aria-label="Example macro: Open writing app, send focus shortcut, start writing"
-      >
-        <div class="macro-trigger">
-          <span>ϟ</span> Start writing <kbd>⌥ W</kbd>
-        </div>
-        <div class="macro-step">
-          <b>01</b>
-          <span>
-            Open your writing app
-            <small>The right place, already in focus.</small>
-          </span>
-          <span>✓</span>
-        </div>
-        <div class="macro-step">
-          <b>02</b>
-          <span>
-            Send your focus shortcut
-            <small>Your preferred setup, in sequence.</small>
-          </span>
-          <span>✓</span>
-        </div>
-        <div class="macro-result">
-          The blank page is waiting.
-          <span class="cursor-line" aria-hidden="true"></span>
-        </div>
-        <small class="fineprint">
-          Example configuration. You choose the apps and shortcuts.
-        </small>
-      </div>
-    </div>
-    <div class="feature-card">
-      <p class="eyebrow">YOUR MUSCLE MEMORY</p>
-      <h3>
-        A shortcut that
-        <br />
-        feels like second nature.
-      </h3>
-      <p>
-        Use keyboard hotkeys or Navigator gestures. Tune Navigator pointer
-        response and calibrate timing to the way you move.
-      </p>
-      <div class="key-combo" aria-hidden="true">
-        <kbd>⌥</kbd>
-        <kbd>⇧</kbd>
-        <kbd>Space</kbd>
-        <span>→</span>
-        <span class="key-wheel">ϟ</span>
-      </div>
-    </div>
-    <div class="feature-card">
-      <p class="eyebrow">YOUR CONTEXT</p>
-      <h3>
-        Same Mac.
-        <br />
-        Different headspace.
-      </h3>
-      <p>
-        Build profiles and layers for writing, creating, or daily work. Add
-        app-specific actions that belong to the task in front of you.
-      </p>
-      <div class="profile-pills" aria-label="Example profile names">
-        <span>⌘ Work</span>
-        <span>✳ Create</span>
-        <span>◎ Focus</span>
-      </div>
-    </div>
-  </section>
-  <section class="section wrap compatibility">
-    <div>
-      <p class="eyebrow">04 / FIND YOUR SETUP</p>
-      <h2>
-        Built around
-        <br />
-        <em>your next move.</em>
-      </h2>
-    </div>
-    <div class="compat-list">
-      <article>
-        <span>⌘</span>
-        <div>
-          <h3>Keyboard, meet command center.</h3>
-          <p>Bring actions and HUD layers to your favorite hotkeys.</p>
-        </div>
-      </article>
-      <article>
-        <span>⌁</span>
-        <div>
-          <h3>Made for ZSA Navigator.</h3>
-          <p>
-            Direct touch input, custom gestures, and pointer tuning. Current
-            hardware verification centers on Voyager.
-          </p>
-        </div>
-      </article>
-      <article>
-        <span>◈</span>
-        <div>
-          <h3>Apple trackpad, too. Experimentally.</h3>
-          <p>
-            Optional gesture actions for supported Apple trackpads. macOS keeps
-            control of normal pointing and scrolling.
-          </p>
-        </div>
-      </article>
-      <article>
-        <span>≋</span>
-        <div>
-          <h3>A voice when you want it.</h3>
-          <p>
-            Speak a command, review the suggestions, and confirm. Voice mode
-            is a paid add-on and uses your own OpenRouter or OpenAI API key.
-          </p>
-        </div>
-      </article>
-    </div>
-  </section>
-  <section class="section wrap home-pricing" id="pricing">
-    <div class="section-heading">
-      <p class="eyebrow">05 / PRICING</p>
-      <h2>
-        Free to download.
-        <br />
-        <span class="muted">Add your voice when you want it.</span>
-      </h2>
-      <p>
-        The launcher, window manager, macros, gestures and sync are free.
-        Voice mode is the one paid feature.
-      </p>
-    </div>
-    <PricingCards />
-  </section>
-  <section class="closing wrap">
-    <p class="eyebrow">LESS BETWEEN YOU AND YOUR NEXT IDEA.</p>
-    <h2>
-      Make your next move
-      <br />
-      <em>your best move.</em>
-    </h2>
-    <div class="button-row">
-      <DownloadButton showMeta={false} />
-      <a class="quiet-link" href="/download/">
-        Install guide
-      </a>
-    </div>
-    <p class="fineprint">
-      An independent Mac utility, in active development. Rotagivan checks for
-      new versions and lets you know when one is ready.
+
+  <div class="wrap">
+    <p class="works-with">
+      Works with
+      <span>Apple trackpad</span>
+      <span>ZSA Navigator</span>
+      <span>Google Chrome</span>
+      <span>Slack</span>
     </p>
+  </div>
+
+  <section class="section wrap" id="download">
+    <div class="card download-panel">
+      <h2>Download Rotagivan</h2>
+      <DownloadButton withVersion variant="large" label="Download Rotagivan" />
+      <p class="fineprint">
+        Free. Takes a minute to install. <a href="/download/">Install steps and checksum</a>
+      </p>
+    </div>
   </section>
 </Layout>

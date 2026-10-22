@@ -1932,6 +1932,24 @@ extension AppExplorerSettingsView {
                         options: HUDLayerPosition.allCases.map { RotaOption($0.title, value: $0, systemImage: $0.symbol) },
                         showsTitle: false, fill: true)
                     .help("Where this HUD sits around Main HUD for two-finger navigation. Choosing an occupied spot swaps the two HUDs.")
+                }
+                inspectorField("Computers") {
+                    let onlyHere = Binding(get: { !(layer.computers ?? []).isEmpty },
+                        set: { only in
+                            var next = baseSettings
+                            guard let index = next.holdLayers?.firstIndex(where: { $0.id == layer.id }) else { return }
+                            next.holdLayers![index].computers = only ? [ExplorerHoldLayer.thisComputer] : nil
+                            saveBase(next)
+                        })
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Only on this Mac", isOn: onlyHere).toggleStyle(.rotaCheckbox)
+                            .accessibilityIdentifier("hud-layer-only-this-mac")
+                        let others = (layer.computers ?? []).filter { $0 != ExplorerHoldLayer.thisComputer }
+                        Text(onlyHere.wrappedValue
+                             ? (layer.isOnThisComputer ? "Shown on \(ExplorerHoldLayer.thisComputer)" : "Shown only on " + others.joined(separator: ", ") + "; hidden here")
+                             : "Shown on every Mac you sync to.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     .accessibilityIdentifier("hud-inspector-position")
                 }
                 inspectorField("Type") {
@@ -2506,6 +2524,7 @@ struct ExplorerInlineEditor: View {
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(26).frame(width: contentWidth, height: contentHeight)
             .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
+            .environment(\.actionPickerMacroTools, ActionPickerMacroTools.live(store: store))
             .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
             .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))

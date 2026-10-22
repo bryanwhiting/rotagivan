@@ -73,6 +73,7 @@ struct HotkeyOrganizerView: View {
     @ObservedObject private var voiceApps = VoiceApplicationIndex.shared
     @StateObject private var catalog: ActionCatalogSnapshot
     @State private var tab = "Dictionary"
+    @State private var triggerFilter = "All"
     @AppStorage("actions.showIDs") private var showActionIDs = false
     @State private var actionGroupFilter = "All groups"
     @State private var actionSubgroupFilter = "All subgroups"
@@ -135,27 +136,21 @@ struct HotkeyOrganizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // The views are tabs, not a hidden menu: "Gestures & hotkeys" is the
+            // one place that lists every swipe, tap and hotkey with what it does.
+            RotaSegmented("View", selection: $tab, options: [
+                RotaOption("Actions", value: "Dictionary", systemImage: "square.grid.2x2"),
+                RotaOption("Gestures & hotkeys", value: "Assignments", systemImage: "hand.draw"),
+                RotaOption("Conflicts", value: "Conflicts", systemImage: "exclamationmark.triangle"),
+                RotaOption("Keyboard", value: "Keyboard", systemImage: "keyboard")])
+                .accessibilityIdentifier("actions-view")
             HStack {
                 TextField("Search actions, apps or shortcuts", text: $search).textFieldStyle(.roundedBorder)
                 addActionMenu
                 RotaMenuButton("Options", systemImage: "slider.horizontal.3") {
-                    Picker("View", selection: $tab) {
-                        Text("Actions").tag("Dictionary")
-                        Text("Conflicts").tag("Conflicts")
-                        Text("All assignments").tag("Assignments")
-                        Text("Keyboard").tag("Keyboard")
-                    }
-                    Divider()
                     Button("Application settings…") { managingOverrides = true }
                     Toggle("Show action IDs", isOn: $showActionIDs)
                 }.accessibilityIdentifier("actions-options")
-            }
-            if tab != "Dictionary" {
-                HStack {
-                    Text(tab == "Assignments" ? "All assignments" : tab).font(.headline)
-                    Spacer()
-                    Button("Back to actions") { tab = "Dictionary" }
-                }
             }
             RotaDisclosureSection("Find an assignment by hotkey or gesture") {
               VStack(alignment: .leading, spacing: 10) {
@@ -332,6 +327,17 @@ struct HotkeyOrganizerView: View {
         RotaMenuButton("Add action", systemImage: "plus") {
             Button("Add keyboard action or macro") { beginNewAction() }
                 .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
+            Button("Import macro pack…") { MacroPackImport.chooseAndImport(into: store) }
+                .disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
+                .accessibilityIdentifier("macro-pack-import")
+            if !MacroPackImport.builtInPacks.isEmpty {
+                Menu("Built-in packs") {
+                    ForEach(MacroPackImport.builtInPacks) { pack in
+                        Button(pack.name) { MacroPackImport.importBuiltIn(pack, into: store) }
+                            .accessibilityIdentifier("macro-pack-builtin-\(MacroPack.slug(pack.name))")
+                    }
+                }.disabled(store.settings.resolvedHotkeyDictionary.count >= 500)
+            }
             Button("Add application hotkey…") { chooseApplicationHotkey() }
             Button("Add application command…") { beginApplicationCommand() }
                 .disabled(store.settings.resolvedApplicationCommands.count >= 500)
@@ -477,6 +483,10 @@ struct HotkeyOrganizerView: View {
                             if let macro = store.settings.resolvedHotkeyDictionary.first(where: { $0.id == row.action.macroID }) {
                                 Divider()
                                 Button("Edit action…") { editing = macro }
+                                if let packName = macro.packName {
+                                    Button("Export \(packName) pack…") { MacroPackImport.export(packName: packName, from: store) }
+                                        .accessibilityIdentifier("macro-pack-export-\(row.id)")
+                                }
                                 Button("Remove action…", role: .destructive) { deleting = macro }
                             }
                         }
@@ -522,15 +532,26 @@ struct HotkeyOrganizerView: View {
         }
     }
 
+    /// Swipe, tap or hotkey: how an assignment is triggered, for the trigger filter.
+    private func triggerKind(_ row: HotkeyAudit.Assignment) -> String {
+        let text = row.trigger.lowercased()
+        if row.gesture?.direction != nil || text.contains("swipe") { return "Swipes" }
+        if row.gesture != nil || text.contains("tap") || text.contains("click") { return "Taps" }
+        return "Hotkeys"
+    }
     private func assignments(_ audit: HotkeyAudit) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Toggle("Show inactive or unassigned actions", isOn: $showInactive)
+                RotaSegmented("Trigger", selection: $triggerFilter, options: ["All", "Swipes", "Taps", "Hotkeys"].map { RotaOption($0, value: $0) })
+                    .accessibilityIdentifier("assignments-trigger-filter")
+                Toggle("Show inactive", isOn: $showInactive)
                 Spacer()
-                Text("\(audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }.count) matches")
+                Text("\(audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) && (triggerFilter == "All" || triggerKind($0) == triggerFilter) }.count) matches")
                     .foregroundStyle(.secondary)
             }
-            let rows = audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) }
+            Text("Every gesture and hotkey on the selected layer and device, with the action it runs. Swipes include tap-then-swipe gestures such as “one-finger tap, swipe down”.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            let rows = audit.displayAssignments.filter { (showInactive || $0.enabled || $0.precedence.hasPrefix("Replaces")) && assignmentMatches($0) && (triggerFilter == "All" || triggerKind($0) == triggerFilter) }
             ForEach(Array(Set(rows.map(\.scope))).sorted(), id: \.self) { scope in
                 Text(scope).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 5)
                 VStack(spacing: 1) {
@@ -713,6 +734,12 @@ struct NamedHotkeyEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Saved action", systemImage: entry.resolvedSequence.contains { $0.kind == .openApp } ? "app.badge" : "keyboard").font(.headline)
             TextField("Name", text: $entry.name).textFieldStyle(.roundedBorder)
+            if entry.packName != nil || entry.scope != nil {
+                Label([entry.packName.map { "From the \($0) pack" }, entry.scope.map { "runs in \($0.title), which is brought to the front first" }]
+                    .compactMap { $0 }.joined(separator: " · "), systemImage: "shippingbox")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("Re-importing the pack updates this macro in place and keeps its global hotkey.")
+            }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("Triggers").fontWeight(.medium)

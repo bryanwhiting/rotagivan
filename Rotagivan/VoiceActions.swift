@@ -251,14 +251,11 @@ enum OpenRouterCredential {
     private static func valid(_ value: String) -> Bool {
         !value.isEmpty && value.count <= 1024 && !value.contains(where: { $0.isWhitespace || $0.isNewline })
     }
-    static func load() throws -> String {
-        if let key = try VaultKeychain.currentAPIKey() { return key }
-        return try loadEnvironment()
-    }
+    /// The synced key in cloud mode, otherwise `~/.env`.
+    static func load() throws -> String { try SyncSecrets.value("OPENROUTER_API_KEY") }
     static func loadAsync() async throws -> String {
         do { return try await CredentialWorker.shared.run { try load() } }
         catch let error as CredentialWorkerError { throw VoiceError.message(error.localizedDescription) }
-        catch let error as VaultFailure { throw VoiceError.message(error.localizedDescription) }
     }
     static func loadEnvironment(variable: String = "OPENROUTER_API_KEY") throws -> String {
         if let value = ProcessInfo.processInfo.environment[variable], valid(value) { return value }

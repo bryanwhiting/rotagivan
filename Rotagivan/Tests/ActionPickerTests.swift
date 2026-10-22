@@ -15,6 +15,15 @@ import SwiftUI
         precondition(items.filter { $0.action == .command(.activateVoiceMode) }.count == 1)
         precondition(ActionPickerCatalog.search(items, query: "voice", category: .hud).first?.action == .command(.activateVoiceMode))
         precondition(ActionPickerCatalog.search(items, query: "research", category: .all).first?.action.macroID == macro.id)
+        // Pack macros name their pack and scope in the detail text, and are searchable by pack.
+        var packed = NamedHotkey(id: "pack:slack:jump", name: "Jump to a conversation", shortcut: RecordedShortcut(keyCode: 40, modifiers: 1 << 20, keyLabel: "K"))
+        packed.sequence = [.key(packed.shortcut)]; packed.packName = "Slack"; packed.appBundleID = "com.tinyspeck.slackmacgap"; packed.appName = "Slack"
+        precondition(ActionPickerCatalog.macroDetail(packed) == "Slack pack · Cmd+K")
+        packed.appBundleID = nil; packed.appName = nil; packed.website = "https://mail.google.com"; packed.packName = "Gmail"
+        precondition(ActionPickerCatalog.macroDetail(packed) == "Gmail pack · runs in mail.google.com · Cmd+K")
+        precondition(ActionPickerCatalog.macroDetail(macro) == macro.summary, "Hand-made macros keep their plain summary")
+        let packedItems = ActionPickerCatalog.make(dictionary: [macro, packed], layers: [], destinations: [], applications: [], allowPointer: false)
+        precondition(ActionPickerCatalog.search(packedItems, query: "gmail", category: .macros).first?.action.macroID == packed.id)
         precondition(ActionPickerCatalog.search(items, query: "slack", category: .apps).first?.action.bundleID == "test.slack")
         precondition(ActionPickerCatalog.search(items, query: "slack", category: .apps).first?.applicationURL == iconURL,
             "Application rows must preserve their local indexed path for icon loading")

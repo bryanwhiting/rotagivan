@@ -586,7 +586,7 @@ extension AppExplorerPresenting {
             launcherCatalogDirty = false
             launcherCatalogAppCount = apps.count
         }
-        model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot)
+        model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot) + LauncherAction.webSearches(model.launcherQuery)
         model.launcherResults = model.launcherActions.compactMap { if case .app(let app) = $0.target { return app }; return nil }
         model.launcherSelection = selectedID.flatMap { id in model.launcherActions.firstIndex { $0.id == id } } ?? 0
     }
@@ -622,6 +622,9 @@ extension AppExplorerPresenting {
         case .menu(let menu):
             dismiss()
             if let error = LauncherMenuCatalog.execute(menu) { NSLog("Rotagivan menu action unavailable: %@", error) }
+        case .webSearch(let provider, let query):
+            guard let url = provider.url(for: query) else { return }
+            performBoundAction(.openURL(url.absoluteString), fromKeyboard: true)
         }
     }
 
@@ -2444,7 +2447,8 @@ struct AppExplorerView: View {
         ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
             reduceMotion: reduceMotion || forceReduceMotion)
     }
-    private var feedback: Animation? { animates ? .easeOut(duration: 0.12) : nil }
+    // Short enough that the lens lands with the finger; 120 ms read as a lag on quick swipes.
+    private var feedback: Animation? { animates ? .easeOut(duration: 0.07) : nil }
     private var accent: Color { model.theme.accent }
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var opaqueChrome: Bool { reduceTransparency || forceReduceTransparency }
@@ -2535,6 +2539,8 @@ struct AppExplorerView: View {
             Image(systemName: "gearshape.fill")
         case .menu:
             Image(systemName: "menubar.rectangle")
+        case .webSearch(let provider, _):
+            Image(systemName: provider == .gmail ? "envelope.fill" : "magnifyingglass")
         case .registered:
             let detail = item.detail.lowercased()
             if detail.contains("macro") {

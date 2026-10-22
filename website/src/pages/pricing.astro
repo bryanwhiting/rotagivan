@@ -9,65 +9,49 @@ import PricingCards from "../components/PricingCards.astro";
 >
   <div class="wrap">
     <section class="page-hero">
-      <p class="eyebrow">PRICING</p>
-      <h1>
-        Free to download.
-        <br />
-        <em>Voice when you want it.</em>
-      </h1>
+      <h1>Free to download. Voice mode when you want it.</h1>
       <p class="lede">
-        The launcher, Window Manager, macros, gestures and sync are free. Voice
-        mode is the one paid feature.
+        The HUD, window tiling, macros, gestures and sync are free. Voice mode
+        is the one paid feature.
       </p>
     </section>
     <section aria-label="Plans">
       <PricingCards />
     </section>
-    <section class="faq">
-      <p class="eyebrow">A FEW THINGS TO KNOW</p>
-      <h2>Before your next move.</h2>
+    <section class="section" aria-labelledby="pricing-faq">
+      <h2 id="pricing-faq">Questions</h2>
       <details>
         <summary>What do I get for free?</summary>
         <p>
-          Everything except Voice mode: the radial HUD, Window Manager, Chrome
-          tabs and Recent Apps HUDs, macros and keybindings, profiles and
-          layers, per-app overrides, ZSA Navigator gestures and tuning, and
-          settings sync.
+          Everything except Voice mode: the radial HUD, window tiling, Chrome
+          tabs and bookmarks, Slack channels, macros and hotkeys, profiles and
+          layers, per-app overrides, ZSA Navigator gestures and settings sync.
         </p>
       </details>
       <details>
         <summary>How does Voice mode work?</summary>
         <p>
-          Start voice from the HUD or its hotkey and say a short command.
+          Start Voice mode from the HUD or its hotkey and say a short command.
           Rotagivan transcribes it with your configured provider (OpenAI, or
-          OpenRouter/xAI), ranks your own registered actions, and shows the top
-          three. Nothing runs until you confirm. Voice mode uses your own API
-          key, so provider usage is billed by that provider.
+          OpenRouter/xAI), ranks your own actions and shows the top three.
+          Nothing runs until you confirm. It uses your own API key, so provider
+          usage is billed by that provider.
         </p>
       </details>
       <details>
         <summary>How do I unlock Voice mode after paying?</summary>
         <p>
-          Checkout is handled securely by Stripe. Afterwards you get a license
-          key; paste it into Rotagivan to unlock Voice mode on up to three of
-          your Macs. The app re-checks the license periodically and keeps
-          working offline in between.
+          Checkout is handled by Stripe. Afterwards you get a license key.
+          Paste it into Rotagivan to unlock Voice mode on up to three of your
+          Macs. The app re-checks the license periodically and keeps working
+          offline in between.
         </p>
       </details>
       <details>
         <summary>Do I need a ZSA Navigator?</summary>
         <p>
-          No. Every HUD and action can be reached with keyboard hotkeys. The
-          app is built around ZSA Navigator touch input, and Apple trackpad
-          gesture actions are available experimentally.
-        </p>
-      </details>
-      <details>
-        <summary>Is the website demo the full app?</summary>
-        <p>
-          No. The demo simulates a handful of workflows inside your browser.
-          The Mac app connects actions to your real apps and inputs once you
-          grant the macOS permissions it asks for.
+          No. Every HUD and action can be reached from an Apple trackpad or a
+          keyboard hotkey. The Navigator adds direct touch input and tuning.
         </p>
       </details>
     </section>

@@ -188,6 +188,7 @@ struct ContentView: View {
         .buttonStyle(.rotaSecondary)
         .tint(.primary)
         .environment(\.hotkeyDictionary, store.settings.resolvedHotkeyDictionary)
+        .environment(\.actionPickerMacroTools, ActionPickerMacroTools.live(store: store))
         .environment(\.hudActionLayers, store.settings.appExplorer?.holdLayers ?? [])
         .environment(\.hudActionDestinations, store.settings.appExplorer?.hudActionDestinations() ?? [])
         // The HUD workspace needs room for its list, canvas and inspector.
@@ -364,7 +365,7 @@ struct ContentView: View {
 
     private var pageSubtitle: String {
         switch selection {
-        case "Sync & backup": return "Settings and API keys, automatically synced and encrypted."
+        case "Sync & backup": return "Keep settings and API keys in the cloud (encrypted) or in a local settings.yaml you can put in git."
         case "General": return "Permissions and startup belong to this Mac."
         case "Pointer & scrolling": return "Device controls for \(store.activeConfigurationName). Navigator tuning applies across its action layers."
         default: return "Settings for \(store.activeConfigurationName)"

@@ -1,44 +1,57 @@
 ---
-// Download CTA. The link always works (/download/latest redirects to the
-// newest DMG); version and size are filled in from /latest.json when present.
+// Download CTA. The link works before any script runs (/download/latest
+// redirects to the newest DMG). Once /latest.json loads, the link points
+// straight at the DMG and the label and meta line show the version.
 interface Props {
   label?: string;
   showMeta?: boolean;
-  variant?: "primary" | "small";
+  withVersion?: boolean;
+  variant?: "primary" | "small" | "large";
 }
-const { label = "Download for macOS", showMeta = true, variant = "primary" } = Astro.props;
+const {
+  label = "Download for Mac",
+  showMeta = true,
+  withVersion = false,
+  variant = "primary",
+} = Astro.props;
 ---
 
 <div class="download-cta" data-download>
-  <a class:list={["button", { small: variant === "small" }]} href="/download/latest" data-download-link>
-    {label}
+  <a
+    class:list={["button", { small: variant === "small", large: variant === "large" }]}
+    href="/download/latest"
+    data-download-link
+  >
+    <span data-download-label data-with-version={withVersion ? "" : undefined}>{label}</span>
     <span aria-hidden="true">↓</span>
   </a>
   {
     showMeta && (
       <p class="download-meta" data-download-meta>
-        Free download · macOS 13 or later
+        Free · macOS 13 or later · Apple silicon
       </p>
     )
   }
 </div>
 
 <script>
-  type Manifest = { version: string; build: string; size?: number; minimumOS?: string; architectures?: string[] };
-  const nodes = document.querySelectorAll<HTMLElement>("[data-download-meta]");
-  if (nodes.length) {
-    fetch("/latest.json", { cache: "no-cache" })
-      .then((r) => (r.ok ? (r.json() as Promise<Manifest>) : null))
-      .then((m) => {
-        if (!m) return;
-        const parts = [`Version ${m.version} (${m.build})`];
-        if (m.size) parts.push(`${(m.size / 1048576).toFixed(1)} MB`);
-        if (m.minimumOS) parts.push(`macOS ${m.minimumOS}+`);
-        if (m.architectures?.length) {
-          parts.push(m.architectures.join(" + ").replace("arm64", "Apple silicon").replace("x86_64", "Intel"));
-        }
-        nodes.forEach((n) => (n.textContent = parts.join(" · ")));
-      })
-      .catch(() => {});
-  }
+  import { getLatest, absoluteUrl, fileName, megabytes, architectureLabel } from "../scripts/latest";
+
+  getLatest().then((m) => {
+    if (!m) return;
+    const href = absoluteUrl(m.url);
+    document.querySelectorAll<HTMLAnchorElement>("[data-download-link]").forEach((a) => {
+      a.href = href.href;
+      if (href.origin === location.origin) a.download = fileName(m.url);
+      const label = a.querySelector<HTMLElement>("[data-download-label][data-with-version]");
+      if (label) label.textContent = `${label.textContent} ${m.version}`;
+    });
+    const parts = [`Version ${m.version} (build ${m.build})`];
+    if (m.size) parts.push(megabytes(m.size));
+    if (m.minimumOS) parts.push(`macOS ${m.minimumOS} or later`);
+    if (m.architectures?.length) parts.push(architectureLabel(m.architectures));
+    document
+      .querySelectorAll<HTMLElement>("[data-download-meta]")
+      .forEach((n) => (n.textContent = parts.join(" · ")));
+  });
 </script>

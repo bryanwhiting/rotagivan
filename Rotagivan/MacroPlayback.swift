@@ -20,30 +20,50 @@ import AppKit
     var wait: (TimeInterval) async -> Void = { delay in
         if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
     }
-    private struct Job { let steps: [MacroStep]; let delay: TimeInterval; let target: pid_t? }
+    var currentBundleID: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+    /// Brings a website to the front (reusing an open tab when the browser
+    /// integration offers one) and returns the browser's pid once it is frontmost.
+    var openWebsite: (URL, pid_t?) async -> pid_t? = { await MacroWebsiteLauncher.open($0, source: $1) }
+    private struct Job { let steps: [MacroStep]; let delay: TimeInterval; let target: pid_t?; let scope: MacroScope? }
     private var jobs: [Job] = []
     private(set) var running = false
 
-    func enqueue(_ steps: [MacroStep], delay: TimeInterval, target: pid_t?) {
+    func enqueue(_ steps: [MacroStep], delay: TimeInterval, target: pid_t?, scope: MacroScope? = nil) {
         guard jobs.count < 32, !steps.isEmpty, steps.count <= 32, steps.allSatisfy(\.isValid),
               delay.isFinite, (0...2).contains(delay) else { return }
-        jobs.append(Job(steps: steps, delay: delay, target: target))
+        jobs.append(Job(steps: steps, delay: delay, target: target, scope: scope))
         guard !running else { return }
         running = true
         Task {
             while !jobs.isEmpty {
                 let job = jobs.removeFirst()
-                _ = await execute(job.steps, delay: job.delay, target: job.target)
+                _ = await execute(job.steps, delay: job.delay, target: job.target, scope: job.scope)
             }
             running = false
         }
     }
 
-    @discardableResult func execute(_ steps: [MacroStep], delay: TimeInterval, target initialTarget: pid_t?) async -> Bool {
+    /// A scoped macro first brings its app or website to the front, as a prefix
+    /// step in the same serial lane, so every keystroke targets that app.
+    @discardableResult func execute(_ steps: [MacroStep], delay: TimeInterval, target initialTarget: pid_t?, scope: MacroScope? = nil) async -> Bool {
         guard !steps.isEmpty, steps.count <= 32, steps.allSatisfy(\.isValid), delay.isFinite, (0...2).contains(delay) else { return false }
         var target = initialTarget
+        if let scope {
+            guard currentApp() == target else { return false }
+            switch scope {
+            case .app(let bundleID, _):
+                if currentBundleID() == bundleID, let front = currentApp() { target = front }
+                else {
+                    guard let opened = await openApp(bundleID, target), currentApp() == opened else { return false }
+                    target = opened
+                }
+            case .website(let url):
+                guard let opened = await openWebsite(url, target), currentApp() == opened else { return false }
+                target = opened
+            }
+        }
         for (index, step) in steps.enumerated() {
-            if index > 0 { await wait(delay) }
+            if index > 0 || scope != nil { await wait(delay) }
             guard currentApp() == target else { return false }
             switch step.kind {
             case .openApp:
@@ -111,6 +131,36 @@ import AppKit
             guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
             if front == pid && app.isFinishedLaunching { stable += 1 } else { stable = 0 }
             if stable >= 4 { return pid }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        return nil
+    }
+}
+
+/// The default website scope: open the URL in its handler and wait for that
+/// browser to become frontmost. The HID manager swaps in the Chrome-aware
+/// dispatcher, which reuses an open tab on the same site, at startup.
+@MainActor enum MacroWebsiteLauncher {
+    static func open(_ url: URL, source: pid_t?) async -> pid_t? {
+        let workspace = NSWorkspace.shared
+        guard workspace.frontmostApplication?.processIdentifier == source,
+              let browser = workspace.urlForApplication(toOpen: url),
+              let bundleID = Bundle(url: browser)?.bundleIdentifier, workspace.open(url) else { return nil }
+        return await waitForFront(bundleID: bundleID, source: source)
+    }
+
+    /// Bounded wait (2 s) for `bundleID` to hold stable focus. Focus moving to
+    /// any other app means the user went elsewhere; never steal it back.
+    static func waitForFront(bundleID: String, source: pid_t?, timeout: TimeInterval = 2) async -> pid_t? {
+        let workspace = NSWorkspace.shared
+        var stable = 0
+        for _ in 0..<max(1, Int(timeout / 0.025)) {
+            guard let front = workspace.frontmostApplication else { return nil }
+            if front.bundleIdentifier == bundleID {
+                stable += 1
+                if stable >= 4 { return front.processIdentifier }
+            } else if front.processIdentifier != source { return nil }
+            else { stable = 0 }
             try? await Task.sleep(nanoseconds: 25_000_000)
         }
         return nil

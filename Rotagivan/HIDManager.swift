@@ -146,6 +146,8 @@ final class NavigatorHIDManager: ObservableObject {
                 self.browserURLDispatcher.open(url, targetBrowserBundleID: nil)
                 return true
             }
+            // Website-scoped macros reuse the same Chrome tab logic before typing.
+            MacroPlayback.shared.openWebsite = { [weak self] url, source in await self?.browserURLDispatcher.bringToFront(url, source: source) }
             (explorer as? AppExplorerController)?.onSettings = {
                 HUDSettingsNavigation.pending = true
                 NotificationCenter.default.post(name: .openHUDSettingsRequested, object: nil)
@@ -333,7 +335,7 @@ final class NavigatorHIDManager: ObservableObject {
             guard let placement = action.windowPlacement,
                   let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
                   let target = WindowTiling.capture(pid: pid) else { return }
-            _ = target.apply(placement.direction, placement.layout)
+            if let error = target.apply(placement.direction, placement.layout) { AppExplorerController.showWindowError(error) }
         case .tap:
             guard let tap = action.tap else { return }
             switch tap {

@@ -22,6 +22,34 @@ enum ActionPickerCategory: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the picker's Macros tab creates and imports macros. Hosts that own a
+/// settings store inject the live tools; previews and tests leave it nil and
+/// the tab shows only existing macros. Every closure persists before reporting.
+struct ActionPickerMacroTools {
+    /// The saved-action editor for a new macro. `onSave` receives the macro
+    /// after it has been stored.
+    let editor: (_ onSave: @escaping (NamedHotkey) -> Void, _ onCancel: @escaping () -> Void) -> AnyView
+    /// Runs the macro-pack import (file chooser, merge, confirmation) and
+    /// reports the stored macros from that pack; nil when cancelled or failed.
+    let importPack: (_ completion: @escaping ([NamedHotkey]?) -> Void) -> Void
+}
+
+extension ActionPickerMacroTools {
+    /// Installed at launch by the settings layer (MacroPackImport), which owns
+    /// the editor and the YAML import. Hosts compiled without that layer, such
+    /// as focused tests, get nil and the picker shows only existing macros.
+    @MainActor static var factory: ((SettingsStore) -> ActionPickerMacroTools)?
+    @MainActor static func live(store: SettingsStore) -> ActionPickerMacroTools? { factory?(store) }
+}
+
+private struct ActionPickerMacroToolsKey: EnvironmentKey { static let defaultValue: ActionPickerMacroTools? = nil }
+extension EnvironmentValues {
+    var actionPickerMacroTools: ActionPickerMacroTools? {
+        get { self[ActionPickerMacroToolsKey.self] }
+        set { self[ActionPickerMacroToolsKey.self] = newValue }
+    }
+}
+
 struct ActionPickerItem: Identifiable {
     let action: BindingAction
     let category: ActionPickerCategory
@@ -92,7 +120,7 @@ enum ActionPickerCatalog {
         }
         CommonMacShortcut.all.forEach { add($0.action, .shortcuts, detail: $0.detail) }
         dictionary.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            .forEach { add(.macro($0), .macros, detail: $0.summary) }
+            .forEach { add(.macro($0), .macros, detail: macroDetail($0)) }
         (AppExplorerAction.appCommands + AppExplorerAction.macOSCommands).forEach { add(.command($0), .mac) }
         AppExplorerAction.windowCommands.forEach { add(.command($0), .windows) }
         for layout in ExplorerWindowLayout.allCases {
@@ -123,6 +151,15 @@ enum ActionPickerCatalog {
              .windowManager, .enter, .optionF19].forEach { add(.tap($0), .pointer) }
         }
         return items
+    }
+
+    /// Pack macros show their pack and where they run: "Slack · Cmd+K".
+    static func macroDetail(_ macro: NamedHotkey) -> String {
+        var parts: [String] = []
+        if let pack = macro.packName { parts.append(pack + " pack") }
+        if let scope = macro.scope, scope.title != macro.packName { parts.append("runs in " + scope.title) }
+        parts.append(macro.summary)
+        return parts.joined(separator: " · ")
     }
 
     static func search(_ items: [ActionPickerItem], query: String, category: ActionPickerCategory) -> [ActionPickerItem] {
@@ -163,6 +200,16 @@ struct ActionPickerModal: View {
     @State private var draft: BindingAction?
     @State private var url = "https://"
     @State private var websiteName = ""
+    @Environment(\.actionPickerMacroTools) private var macroTools
+    @State private var creatingMacro = false
+    /// Macros created or imported while this picker is open, so they appear
+    /// at once even before the host's dictionary snapshot refreshes.
+    @State private var addedMacros: [NamedHotkey] = []
+    private var liveDictionary: [NamedHotkey] {
+        guard !addedMacros.isEmpty else { return dictionary }
+        let added = Set(addedMacros.map(\.id))
+        return dictionary.filter { !added.contains($0.id) } + addedMacros
+    }
 
     private var websiteDraft: BindingAction {
         var action = current.kind == .openURL ? current : .openURL(url)
@@ -179,7 +226,7 @@ struct ActionPickerModal: View {
     }
 
     private var items: [ActionPickerItem] {
-        ActionPickerCatalog.make(dictionary: dictionary, layers: layers, destinations: destinations,
+        ActionPickerCatalog.make(dictionary: liveDictionary, layers: layers, destinations: destinations,
             applications: loadApplications == nil ? applicationIndex.applications : applications, allowPointer: allowPointerActions,
             builtInHUDs: onSelectBuiltIn != nil)
     }
@@ -261,6 +308,18 @@ struct ActionPickerModal: View {
                             Text("\(results.count) actions").font(.caption).foregroundStyle(.secondary)
                             if loadingApps { ProgressView().controlSize(.mini).help("Loading installed applications") }
                         }.padding(.horizontal, 18).padding(.vertical, 12)
+                        if category == .macros, let macroTools {
+                            // The Macros tab is the one place to add macros from a picker.
+                            HStack(spacing: 8) {
+                                Button { creatingMacro = true } label: { Label("Add macro…", systemImage: "plus") }
+                                    .accessibilityIdentifier("action-picker-add-macro")
+                                    .help("Create a saved keystroke sequence, then assign it here")
+                                Button { importMacroPack(macroTools) } label: { Label("Import macro pack…", systemImage: "square.and.arrow.down") }
+                                    .accessibilityIdentifier("action-picker-import-pack")
+                                    .help("Add a YAML pack of app or website shortcuts")
+                                Spacer()
+                            }.controlSize(.small).padding(.horizontal, 18).padding(.bottom, 8)
+                        }
                         if results.isEmpty {
                             VStack(spacing: 10) {
                                 Image(systemName: "magnifyingglass").font(.system(size: 28)).foregroundStyle(.tertiary)
@@ -306,6 +365,16 @@ struct ActionPickerModal: View {
         }
         .frame(width: 760, height: 620)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $creatingMacro) {
+            if let macroTools {
+                macroTools.editor({ macro in
+                    // Saved and stored by the host: use it as the picked action.
+                    addedMacros.append(macro)
+                    creatingMacro = false
+                    onSelect(.macro(macro))
+                }, { creatingMacro = false })
+            }
+        }
         .onAppear {
             if current.kind == .openURL { editWebsite() }
             else { selectedID = current.identity; if selected == nil { selectFirst() } }
@@ -339,6 +408,15 @@ struct ActionPickerModal: View {
             if !applications.contains(where: { $0.bundleID == app.bundleID }) { applications.append(app) }
             custom = nil; draft = nil; category = .apps; query = app.name
             selectedID = BindingAction.openApp(bundleID: app.bundleID, name: app.name).identity
+        }
+    }
+
+    private func importMacroPack(_ tools: ActionPickerMacroTools) {
+        tools.importPack { imported in
+            guard let imported, !imported.isEmpty else { return }
+            addedMacros.append(contentsOf: imported)
+            custom = nil; draft = nil; category = .macros; query = ""
+            selectedID = BindingAction.macro(imported[0]).identity
         }
     }
 

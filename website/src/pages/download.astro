@@ -9,97 +9,105 @@ import DownloadButton from "../components/DownloadButton.astro";
 >
   <div class="wrap">
     <section class="page-hero">
-      <p class="eyebrow">DOWNLOAD</p>
-      <h1>
-        Rotagivan
-        <br />
-        <em>for Mac.</em>
-      </h1>
+      <h1>Download Rotagivan</h1>
       <p class="lede">
-        One disk image. Drag it to Applications, open it, and Rotagivan settles
-        into your menu bar.
+        One disk image. Drag it to Applications and Rotagivan lives in your
+        menu bar.
       </p>
-      <div class="button-row" style="justify-content:center;margin-top:36px">
-        <DownloadButton />
-      </div>
     </section>
 
-    <ol class="install-steps" aria-label="Install steps">
-      <li>
-        <span>
-          Open <b>Rotagivan.dmg</b> from your Downloads and drag
-          <b>Rotagivan</b> onto the <b>Applications</b> folder.
-        </span>
-      </li>
-      <li data-gatekeeper-step>
-        <span>
-          Open Rotagivan from Applications.
-          <small data-gatekeeper-note>
-            The first time, macOS may say it can't verify the developer —
-            this early build isn't notarized by Apple yet. Click <b>Done</b>,
-            open <b>System Settings → Privacy &amp; Security</b>, and click
-            <b>Open Anyway</b> next to Rotagivan. You only do this once.
-          </small>
-        </span>
-      </li>
-      <li>
-        <span>
-          Allow <b>Accessibility</b> when asked so Rotagivan can run your
-          actions and arrange windows.
-          <small>
-            Depending on your setup, macOS may also ask for Input Monitoring.
-            Voice mode asks for the microphone only when you first use it.
-          </small>
-        </span>
-      </li>
-      <li>
-        <span>
-          Add your favorite app to the HUD, give it a hotkey or gesture, and try
-          it.
-          <small>
-            Rotagivan checks for new versions and offers the download when one
-            is ready. To update, drag the new version over the old one.
-          </small>
-        </span>
-      </li>
-    </ol>
+    <div class="card download-panel">
+      <DownloadButton withVersion variant="large" label="Download Rotagivan" />
+      <p class="fineprint" data-published hidden></p>
+    </div>
 
-    <p class="release-facts" data-release-facts hidden></p>
+    <section class="section" aria-labelledby="install-heading">
+      <h2 id="install-heading">Install in three steps</h2>
+      <ol class="steps" aria-label="Install steps">
+        <li>
+          <span>
+            Open the disk image and drag <b>Rotagivan</b> onto the <b>Applications</b> folder.
+          </span>
+        </li>
+        <li data-gatekeeper-step>
+          <span>
+            First launch: in Applications, right-click <b>Rotagivan</b>,
+            choose <b>Open</b>, then click <b>Open</b> again.
+            <small>
+              This build is signed for development and not yet notarized by
+              Apple, so macOS asks once. If you double-clicked instead, go to
+              System Settings › Privacy &amp; Security and click <b>Open Anyway</b>.
+            </small>
+          </span>
+        </li>
+        <li>
+          <span>
+            Grant <b>Accessibility</b> in System Settings › Privacy &amp;
+            Security › Accessibility, and <b>Input Monitoring</b> if asked.
+            <small>
+              Rotagivan needs these to read trackpad gestures, send your
+              keystrokes and move windows. Voice mode asks for the microphone
+              only when you first use it.
+            </small>
+          </span>
+        </li>
+      </ol>
+      <p class="note">
+        Already installed? The app checks for updates daily. To update now,
+        open Settings › Sync &amp; backup › Download latest.
+      </p>
+    </section>
 
-    <section class="faq">
-      <h2>A little clarity.</h2>
-      <details open>
+    <section class="section verify" aria-labelledby="verify-heading">
+      <h2 id="verify-heading">Verify the download</h2>
+      <details>
+        <summary>Check the SHA-256 checksum</summary>
+        <dl>
+          <dt>File</dt>
+          <dd><code data-file-name>Rotagivan.dmg</code></dd>
+          <dt>SHA-256</dt>
+          <dd>
+            <code data-sha256>
+              <a href="/latest.json">see latest.json</a>
+            </code>
+          </dd>
+        </dl>
+        <p>Run this in Terminal and compare the output with the checksum above.</p>
+        <pre><code>shasum -a 256 ~/Downloads/<span data-file-name>Rotagivan.dmg</span></code></pre>
+      </details>
+    </section>
+
+    <section class="section" aria-labelledby="faq-heading">
+      <h2 id="faq-heading">Questions</h2>
+      <details>
         <summary>Which Macs does it support?</summary>
         <p>
-          macOS 13 or later. The download page lists the processor types each
-          build includes. Apple trackpad support is experimental; ZSA Navigator
-          testing has focused on Voyager.
+          macOS 13 or later on Apple silicon. The download above lists the
+          minimum macOS and architecture for the current build.
         </p>
       </details>
       <details>
         <summary>Why does it need Accessibility?</summary>
         <p>
-          Rotagivan uses macOS permissions to send the inputs you configure and
-          to move windows. You stay in control of those grants in System
-          Settings → Privacy &amp; Security.
+          Rotagivan sends the keystrokes you configure, reads trackpad input
+          and moves windows. macOS requires Accessibility for that, and you
+          can revoke it any time in System Settings.
         </p>
       </details>
       <details>
-        <summary>What stays local, and what goes online?</summary>
+        <summary>What stays on my Mac?</summary>
         <p>
-          Keyboard, gesture and HUD actions run on your Mac. Voice mode sends
-          audio and command text to the provider you configure. Account sync
-          uploads your settings when you sign in; API keys are end-to-end
-          encrypted. The update check downloads a small version file from this
-          site.
+          Gestures, hotkeys, macros and HUDs run locally. Voice mode sends
+          audio to the provider you configure with your own API key. Sync
+          uploads your settings only if you sign in. The daily update check
+          downloads <a href="/latest.json">latest.json</a> from this site.
         </p>
       </details>
       <details>
-        <summary>How do I verify the download?</summary>
+        <summary>Is there a zip instead of a disk image?</summary>
         <p>
-          Every release lists its SHA-256 checksum above and in
-          <a class="quiet-link" href="/latest.json">latest.json</a>. Run
-          <code>shasum -a 256 ~/Downloads/Rotagivan-*.dmg</code> and compare.
+          Yes. Each release also ships as a zip for scripted installs:
+          <a href="/latest.json" data-zip-link>see latest.json</a>.
         </p>
       </details>
     </section>
@@ -107,26 +115,30 @@ import DownloadButton from "../components/DownloadButton.astro";
 </Layout>
 
 <script>
-  fetch("/latest.json", { cache: "no-cache" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((m) => {
-      if (!m) return;
-      if (m.notarized) document.querySelector("[data-gatekeeper-note]")?.remove();
-      const facts = document.querySelector<HTMLElement>("[data-release-facts]");
-      if (!facts) return;
-      const date = m.publishedAt ? new Date(m.publishedAt).toLocaleDateString() : "";
-      facts.innerHTML = "";
-      const add = (label: string, value: string) => {
-        const line = document.createElement("div");
-        const code = document.createElement("code");
-        code.textContent = value;
-        line.append(`${label}: `, code);
-        facts.append(line);
-      };
-      add("Latest", `${m.version} (build ${m.build})${date ? ` · ${date}` : ""}`);
-      add("SHA-256", m.sha256);
-      if (m.zip?.url) add("Zip download", new URL(m.zip.url, location.href).pathname);
-      facts.hidden = false;
-    })
-    .catch(() => {});
+  import { getLatest, absoluteUrl, fileName } from "../scripts/latest";
+
+  getLatest().then((m) => {
+    if (!m) return;
+    if (m.notarized) document.querySelector("[data-gatekeeper-step]")?.remove();
+
+    const name = fileName(m.url);
+    document.querySelectorAll<HTMLElement>("[data-file-name]").forEach((n) => (n.textContent = name));
+    const sha = document.querySelector<HTMLElement>("[data-sha256]");
+    if (sha) sha.textContent = m.sha256;
+
+    const zip = document.querySelector<HTMLAnchorElement>("[data-zip-link]");
+    if (zip && m.zip?.url) {
+      zip.href = absoluteUrl(m.zip.url).href;
+      zip.textContent = fileName(m.zip.url);
+    }
+
+    const published = document.querySelector<HTMLElement>("[data-published]");
+    if (published && m.publishedAt) {
+      const date = new Date(m.publishedAt);
+      if (!Number.isNaN(date.getTime())) {
+        published.textContent = `Released ${date.toLocaleDateString(undefined, { dateStyle: "medium" })}.`;
+        published.hidden = false;
+      }
+    }
+  });
 </script>

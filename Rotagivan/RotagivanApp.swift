@@ -44,26 +44,6 @@ struct RotagivanApp: App {
             LocalUsageTracker.shared.start()
             sync.start()
             UpdateChecker.shared.start()
-            // Explicit local maintenance action, never a startup sync default.
-            // Emits only a non-secret receipt; private material remains Keychain-only.
-            if ProcessInfo.processInfo.arguments.contains("--initialize-voice-vault") {
-                UserDefaults.standard.set("pending", forKey: "vault.bootstrapStatus")
-                Task { @MainActor in
-                    await sync.awaitLoginRestore()
-                    guard sync.credentialsReady, sync.account != nil else {
-                        UserDefaults.standard.set("failed: saved login is unavailable", forKey: "vault.bootstrapStatus")
-                        return
-                    }
-                    await sync.vault.awaitLocalRestore()
-                    guard sync.vault.localReady else {
-                        UserDefaults.standard.set("failed: local vault is unavailable", forKey: "vault.bootstrapStatus")
-                        return
-                    }
-                    await sync.vault.save(importEnvironment: true)
-                    let receipt = sync.vault.error.map { "failed: " + $0 } ?? (sync.vault.hasKey ? "uploaded-encrypted" : "not-uploaded")
-                    UserDefaults.standard.set(receipt, forKey: "vault.bootstrapStatus")
-                }
-            }
         }
     }
 
@@ -134,6 +114,7 @@ struct RotagivanApp: App {
         hotKeys.configureActionBindings(store.settings.enabled ? store.settings.actionBindings ?? [] : [])
         hotKeys.configureProfiles(defaultID: store.defaultProfileID, customTaps: store.settings.customTapProfiles ?? [], availableIDs: Set(store.settings.availableLayerIDs))
         hotKeys.install()
+        MacroPackImport.registerPickerTools()
         if store.settings.enabled { hid.start() }
         if hid.needsOnboarding { hid.presentOnboarding() }
     }
@@ -314,14 +295,22 @@ struct NavigatorPanel: View {
 /// The menu-bar label stays mounted even when every settings window is closed.
 struct RotagivanMenuBarLabel: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject private var timer = FocusTimer.shared
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: store.activeProfileID != store.defaultProfileID ? "safari.fill" : "safari")
                 .accessibilityLabel("Rotagivan — \(store.activeProfileName) layer")
-            Text(AppVersion.versionLabel)
-                .help(AppVersion.buildDetails)
-                .accessibilityIdentifier("rota-menu-version")
+            if let endsAt = timer.endsAt {
+                // A running timer replaces the version with its countdown.
+                Text(endsAt, style: .timer).monospacedDigit()
+                    .help("Timer: \(timer.minutes) min, ends at " + endsAt.formatted(date: .omitted, time: .shortened))
+                    .accessibilityIdentifier("rota-menu-timer")
+            } else {
+                Text(AppVersion.versionLabel)
+                    .help(AppVersion.buildDetails)
+                    .accessibilityIdentifier("rota-menu-version")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openHUDSettingsRequested)) { _ in
             openWindow(id: "settings")

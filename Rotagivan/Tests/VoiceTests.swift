@@ -629,41 +629,25 @@ private final class GatedVoiceCloud: VoiceCloudServing, @unchecked Sendable {
             voice.cancel()
         }
 
-        let vaultServer = "https://fixture.invalid"
-        let vaultUser = "fixture-user"
-        let master = VaultCrypto.randomMaster()
-        let record = try VaultCrypto.seal(VaultPayload(openRouterAPIKey: "fixture-key"), master: master,
-            userID: vaultUser, vaultID: UUID().uuidString, revision: 1)
-        var local = VaultLocal.fresh(); local.masterKey = master; local.cached = record
-        let fixtureLocal = local
-        VaultKeychain.setActive(server: vaultServer, userID: vaultUser)
+        // API keys: cloud mode reads the synced copy; any other mode reads ~/.env only.
         do {
-            _ = try VaultKeychain.currentAPIKey()
-            fatalError("Locked cache must require explicit unlock")
-        } catch { precondition(error.localizedDescription.contains("Unlock API keys")) }
-        VaultKeychain.cache(fixtureLocal, server: vaultServer, userID: vaultUser)
-        for _ in 0..<20 {
-            let cachedKey = try VaultKeychain.currentAPIKey()
-            precondition(cachedKey == "fixture-key", "Repeated voice starts reuse cached credentials without Security calls")
+            let secretsDefaults = UserDefaults(suiteName: "Rotagivan.VoiceSecrets." + UUID().uuidString)!
+            defer { secretsDefaults.removePersistentDomain(forName: "Rotagivan.VoiceSecrets.") }
+            let previous = SyncSecrets.defaults
+            SyncSecrets.defaults = { secretsDefaults }
+            defer { SyncSecrets.defaults = previous }
+            SyncSecrets.store(["OPENROUTER_API_KEY": "fixture-key"], secretsDefaults)
+            secretsDefaults.set(SyncMode.cloud.rawValue, forKey: SyncSecrets.modeKey)
+            for _ in 0..<20 {
+                precondition(try SyncSecrets.value("OPENROUTER_API_KEY") == "fixture-key", "Cloud mode serves the synced key without Keychain or disk reads")
+            }
+            secretsDefaults.set(SyncMode.local.rawValue, forKey: SyncSecrets.modeKey)
+            let environmentKey = SyncSecrets.environmentValue("OPENROUTER_API_KEY")
+            do {
+                let served = try SyncSecrets.value("OPENROUTER_API_KEY")
+                precondition(served != "fixture-key" && served == environmentKey, "Local mode never serves the synced copy")
+            } catch { precondition(environmentKey == nil, "Local mode fails only when ~/.env has no key") }
         }
-        let fixtureKey = try VaultKeychain.currentAPIKey(readLocal: { _, _ in fixtureLocal })
-        precondition(fixtureKey == "fixture-key")
-        do {
-            _ = try VaultKeychain.currentAPIKey(readLocal: { _, _ in
-                VaultKeychain.setActive(server: vaultServer, userID: nil)
-                VaultKeychain.setActive(server: vaultServer, userID: vaultUser)
-                return fixtureLocal
-            })
-            fatalError("Accepted credential result across same-account sign-out/sign-in")
-        } catch { precondition(error.localizedDescription.contains("active account changed")) }
-        do {
-            _ = try VaultKeychain.currentAPIKey(readLocal: { _, _ in
-                VaultKeychain.setActive(server: vaultServer, userID: "different-user")
-                return nil
-            })
-            fatalError("Accepted missing-vault result after account change")
-        } catch { precondition(error.localizedDescription.contains("active account changed")) }
-        VaultKeychain.setActive(server: vaultServer, userID: nil)
 
         let controller = AppExplorerController(defaults: defaults)
         controller.configuration = { AppExplorerSettings(voiceAutoSelect: false) }

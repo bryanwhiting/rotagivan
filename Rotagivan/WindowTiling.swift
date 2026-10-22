@@ -307,6 +307,17 @@ enum WindowPlacement {
         let moveStatus = AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &movable)
         let sizeStatus = AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &resizable)
         if moveStatus == .success, !movable.boolValue { return "This window does not support moving." }
+        // macOS switches AXEnhancedUserInterface on in any app an Accessibility
+        // client talks to. Chrome and Electron then animate frame changes and
+        // report in-between geometry, so a read-back a few ms later sees the old
+        // height and the next write snaps the window back (measured: a left-half
+        // tile landed at the old 925 pt height with the flag on, exactly with it
+        // off). Turn it off for the duration of the placement and restore it.
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.2)
+        let enhanced = (attribute(app, "AXEnhancedUserInterface") as? Bool) == true
+        if enhanced { _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse) }
+        defer { if enhanced { _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) } }
         let access = WindowPlacement.Access(read: { frame(window) }, resize: { proposed in
             var size = proposed
             guard let value = AXValueCreate(.cgSize, &size) else { return false }
@@ -323,7 +334,17 @@ enum WindowPlacement {
                    size.width.isFinite, size.height.isFinite, size.width >= 0, size.height >= 0 { return size }
             }
             return nil
-        }, isCurrent: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid })
+        }, isCurrent: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }, pause: {
+            // Wait for the frame to stop changing rather than a fixed 25 ms, so an
+            // app that applies geometry asynchronously is read after it settled.
+            var last = frame(window)
+            for _ in 0..<12 {
+                Thread.sleep(forTimeInterval: 0.015)
+                let next = frame(window)
+                if let last, let next, WindowPlacement.close(last, next, tolerance: 0) { return }
+                last = next
+            }
+        })
         return WindowPlacement.apply(requested: requested, area: area, direction: direction,
             resizable: sizeStatus != .success || resizable.boolValue, access: access).error
     }

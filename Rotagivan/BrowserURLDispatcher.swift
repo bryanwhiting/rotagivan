@@ -271,6 +271,16 @@ enum ChromeLocalHistory {
         NSApp.activate()
     }
 
+    /// Website-scoped macros: open the URL (reusing a Chrome tab on the same
+    /// site when Chrome handles it) and wait, bounded, until the browser is
+    /// frontmost. Returns that browser's pid for the keystrokes that follow.
+    func bringToFront(_ url: URL, source: pid_t?) async -> pid_t? {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == source,
+              let bundleID = defaultBrowserBundleID(url) else { return nil }
+        open(url, targetBrowserBundleID: nil)
+        return await MacroWebsiteLauncher.waitForFront(bundleID: bundleID, source: source)
+    }
+
     func open(_ url: URL, targetBrowserBundleID: String?) {
         guard AppExplorerFavorite.webURL(url.absoluteString) != nil else { return }
         if targetBrowserBundleID == "com.google.Chrome" ||

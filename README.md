@@ -366,56 +366,16 @@ menu and in the Actions manager. Mac Actions includes Mission Control, Applicati
 Windows, previous/next desktop, Lock Screen, previous app, Show Desktop and Stage
 Manager (which still needs its shortcut configured in macOS).
 
-### Local YAML and account sync
+### Settings sync
 
-**General → Account & Sync → Encrypted API keys** shares your OpenRouter key
-between Macs without iCloud. Import/save on the first Mac, request access on
-the second, compare its code and approve on the first, then load on the second.
-Save the recovery code somewhere safe. Keys are encrypted before upload and
-unlocked locally using device-only Keychain storage. See the [vault guide and
-security boundaries](Rotagivan/VAULT.md). Ordinary settings are not end-to-end encrypted.
-
-**General → Account & Sync** has **Save**, **Load**, and **Last save**.
-Transfers are manual: edits, launch, sign-in, external YAML changes, and quit
-never save or load the sync copy. There is no polling, automatic retry, or
-first-login import. Ordinary app preferences still persist locally as you edit.
-
-- **Save** captures the current configuration in
-  ~/.config/rotagivan/settings.yaml and, when signed in, uploads that snapshot
-  to your account. Edits made during the save wait for your next Save.
-- **Load** reads your cloud copy when signed in, or settings.yaml when signed out.
-  Cloud Load first shows the save timestamp and saving computer before confirmation.
-  Computer names are attached to new cloud saves as a YAML comment; older saves
-  show “Unknown computer.” Confirmed loads recheck the revision and stop if it
-  changed, so a different save cannot be loaded silently. Loading never uploads.
-  Changes made while a load is in flight are kept; press Load again when ready.
-- **Last save** shows the saved copy's timestamp for the current account or local
-  file. Cloud timestamps are refreshed only by Save or Load, not background checks.
-  Signing in restores the cached timestamp; an unknown time is shown as a dash.
-
-To move settings to another Mac, press Save on the source Mac, sign in on the
-other Mac, then press Load. Account switching alone never transfers settings.
-A concurrent cloud save is rejected rather than overwritten; retry explicitly.
-If a cloud save fails, the error distinguishes the saved local YAML from the
-unchanged cloud copy.
-
-Previous app settings and replaced local/cloud copies are backed up in
-~/.config/rotagivan/backup/. Backup names use UTC with microseconds and never
-overwrite existing backups. Config files are owner-only (0600), in a private
-directory (0700). Symlink config files/directories are rejected. Invalid imports
-leave the working settings intact. Existing backups and legacy sync metadata
-remain untouched.
-
-Passwords never go in YAML or preferences; D1 stores salted scrypt hashes and
-Keychain stores the device's login token. Permissions, launch-at-login and this
-Mac's enable switch are not changed by sync. Config file IO/YAML decoding and
-network requests do not run in the trackpad report path.
-
-Email verification and password-reset email are not available yet: email is the
-login name, not verified mailbox ownership. Save your password in a password
-manager. **Change password** revokes other devices' sessions. Cloud settings are
-access-controlled but not end-to-end encrypted. See [backend setup and security
-notes](SyncBackend/README.md) for deployment and API details.
+**Settings → Sync & backup** asks you to choose one home for your settings:
+**Cloud sync** (the whole configuration and your API keys, encrypted on this
+Mac with a key derived from your account password, uploaded after each edit
+and picked up by your other Macs hourly or on use; the last Mac to edit wins)
+or **Local file** (a plain `settings.yaml` in a folder you control, rewritten
+after each edit and reloaded when it changes; with git, the app commits,
+pushes and pulls for you; API keys stay in `~/.env`). Nothing syncs until you
+choose. Details in [docs/sync.md](docs/sync.md).
 
 ### Keep the cursor still while tapping
 

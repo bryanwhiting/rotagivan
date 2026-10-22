@@ -1,6 +1,6 @@
 # Rotagivan website
 
-Astro static marketing site for Cloudflare Workers Static Assets. Includes the sales page, a browser-only HUD simulation, pricing status, customer setup information, and a custom 404 page.
+Astro static marketing site for Cloudflare Workers Static Assets, styled after the app's settings window (system font, light and dark, teal accent). Pages: home (hero, browser-only HUD demo, six feature cards, download block), download (direct DMG link from `/latest.json`, three install steps, checksum), pricing (Voice mode checkout), purchase success, and a custom 404.
 
 ## Local preview
 
@@ -18,7 +18,9 @@ npm run build
 npm run deploy:check
 ```
 
-The HUD has eight commands, scoped keyboard shortcuts (1–8 and Escape), reset, and a four-step workflow tour. Manual selection, stopping, and switching away from the tab cancel the tour. No microphone, native app control, account, payment, or data collection is implemented. Motion respects `prefers-reduced-motion`.
+The demo HUD has eight commands, scoped keyboard shortcuts (1–8 and Escape), reset, and a four-step workflow tour. Manual selection, stopping, and switching away from the tab cancel the tour. The demo uses no microphone and controls no native app. Motion respects `prefers-reduced-motion`.
+
+Download links point at `/download/latest` in the HTML and switch to the DMG URL from `/latest.json` once it loads (`src/scripts/latest.ts` shares one request per page). The download page hides the right-click › Open step when the manifest reports `notarized: true`. The Voice mode checkout posts to the Worker's `/api/checkout`; until Stripe is configured it shows "purchases open soon".
 
 ## Cloudflare deployment
 
@@ -50,4 +52,4 @@ notarization and the Gatekeeper status, see `../docs/customer-distribution.md`.
 
 ## Verification
 
-Initial browser QA covered all eight commands, keyboard selection, reset, tour completion and cancellation, the pricing FAQ, and setup-page navigation. Home, pricing, and setup were checked at mobile width with no document overflow, plus desktop visual review. `astro check`, production build, and Wrangler's dry-run are the release checks for this static site. Cloudflare authentication/deployment must be verified separately; a dry-run is not a deployment.
+`astro check`, the production build, `npm test` and Wrangler's dry-run are the release checks for this static site. Check home, download and pricing at phone width (16px gutters, no horizontal scroll) in both light and dark appearance after visual changes. Cloudflare authentication/deployment must be verified separately; a dry-run is not a deployment.

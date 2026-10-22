@@ -22,8 +22,11 @@ Database queries derive the user ID from that session, never from request data.
   authenticated requests are limited per user. Expired records are pruned daily.
 - Bounded JSON/YAML payloads, prepared statements, generic authentication errors,
   no CORS/cookie authentication, no credential/body logging, no-store responses.
-- Settings are access-controlled, **not end-to-end encrypted**. The service
-  operator can access D1. Never put secrets in a profile name or YAML field.
+- Since app 1.1.248 the `password` field the app sends is a 64-hex login
+  secret derived on the Mac from the real password (PBKDF2 + HKDF); the real
+  password never reaches the service. Settings arrive as `rota-e2ee-settings-v1:`
+  ciphertext sealed under a sibling key the service never sees, so the
+  operator can read D1 but not the settings. See `docs/sync.md`.
 
 Email verification, email-based password recovery, MFA, and account deletion UI
 are not implemented. Email is a login identifier, **not proof of mailbox
@@ -49,12 +52,10 @@ Atomic conditional writes prevent lost updates, including racing first uploads.
 
 ## Encrypted API-key vault
 
-Migration 0003 adds a separate client-encrypted vault. GET/PUT `/v1/vault`
-load/save signed ciphertext; POST `/v1/vault/devices` requests access, and
-POST `/v1/vault/approve` stores a signed, recipient-bound encrypted grant.
-Every route requires an account session. Vault writes and approvals also
-require Ed25519 signatures. The Worker never receives decryption keys or
-plaintext API keys. See the [protocol and limitations](../Rotagivan/VAULT.md).
+Migration 0003 added a separate client-encrypted vault (`/v1/vault*`). App
+builds from 1.1.248 no longer use it: API keys travel inside the encrypted
+settings document. The routes remain for older clients and can be removed once
+none are in use.
 
 The native VaultLiveSmoke test checks CryptoKit interoperability using a
 disposable production account. Delete exactly its test account afterward

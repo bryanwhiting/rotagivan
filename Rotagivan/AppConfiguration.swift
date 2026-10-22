@@ -77,7 +77,7 @@ struct AppConfiguration: Codable {
             throw ConfigurationError("Bindings need unique triggers and valid actions. Global letter hotkeys need a modifier.")
         }
         guard settings.resolvedHotkeyDictionary.isValidDictionary else {
-            throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 keystroke or open-app steps, and a 0–2000 ms step delay (maximum 500 macros).")
+            throw ConfigurationError("Macros need unique IDs, nonempty names, 1–32 keystroke or open-app steps, a 0–2000 ms step delay, and a valid pack scope (an app bundle ID or an http(s) website, not both; maximum 500 macros).")
         }
         if let profiles {
             guard !profiles.isEmpty, profiles.count <= 20, Set(profiles.map(\.id)).count == profiles.count,
@@ -226,12 +226,12 @@ private indirect enum ConfigurationValue: Codable {
             case "settings": allowed = "websiteBookmarks applicationCommands actionVocabulary actionBindings enabled launchAtLogin normal precision pointerMotion pointerCoastBaseline navigatorDragging navigatorRegripBaseline gestures oneFingerTap twoFingerTap additionalProfiles removedLayerIDs profileNames profileGestures customTapProfiles defaultProfileID sliderBaselines sliderBaselineRevision appOverrides appExplorer devices navigatorTapCalibration appleTapCalibration hotkeyDictionary"
             case "applicationCommands": allowed = "id bundleID appName name detail action enabled"
             case "actionVocabulary": allowed = "actionID keywordSets"
-            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut"
+            case "hotkeyDictionary": allowed = "id name shortcut steps stepDelayMilliseconds sequence activationShortcut packName appBundleID appName website"
             case "sequence": allowed = "kind shortcut bundleID appName"
             case "navigatorTapCalibration", "appleTapCalibration": allowed = "doubleTapInterval tripleTapFirstInterval tripleTapSecondInterval singleSwipeWindow singleSwipeDuration doubleSwipeWindow"
             case "appExplorer": allowed = "actionBindings defaultMode favorites holdShortcut holdLayers theme animationsEnabled centerCursorOnAppSwitch slotCount windowManager swipeDirection invertPickerDirection voiceAutoDecide voiceAutoStart voiceAutoSelect"
             case "windowManager": allowed = "actionBindings layout layers shortcuts favorites slotCount"
-            case "layers", "holdLayers": allowed = "builtIn actionBindings id name position holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName"
+            case "layers", "holdLayers": allowed = "builtIn actionBindings id name position holdShortcut favorites windowLayout slotCount activation windowTilesConfigured launchShortcut appBundleID appName computers"
             case "favorites", "children": allowed = "actionBindings direction bundleID name url iconSymbol children groupMode action shortcut activationShortcut holdLayers slotCount showsWindows windowPlacement"
             case "actionBindings": allowed = "id trigger action"
             case "trigger": allowed = "keyboard gesture"

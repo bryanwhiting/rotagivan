@@ -118,13 +118,13 @@ final class EventPoster: GestureEventPosting {
         guard !dragging, macro.isValid else { return }
         RotaActionUsage.record(.macro(macro))
         clickSequence.reset()
-        postSequence(macro.resolvedSequence, delay: Double(macro.resolvedDelay) / 1000)
+        postSequence(macro.resolvedSequence, delay: Double(macro.resolvedDelay) / 1000, scope: macro.scope)
     }
 
-    private func postSequence(_ steps: [MacroStep], delay: TimeInterval) {
+    private func postSequence(_ steps: [MacroStep], delay: TimeInterval, scope: MacroScope? = nil) {
         let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         DispatchQueue.main.async {
-            MacroPlayback.shared.enqueue(steps, delay: delay, target: targetPID)
+            MacroPlayback.shared.enqueue(steps, delay: delay, target: targetPID, scope: scope)
         }
     }
 

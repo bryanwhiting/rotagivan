@@ -81,10 +81,10 @@ import SwiftUI
         }
         render("Sync & backup") { host in
             precondition(find("settings-section-Sync & backup", in: host) != nil)
-            precondition(find("sync-restore-retry", in: host) != nil,
-                "Locked accounts must expose a clear unlock action")
-            precondition(find("sync-load", in: host) == nil,
-                "Automatic sync must not expose a competing manual Load operation")
+            precondition(find("sync-choose-cloud", in: host) != nil && find("sync-choose-local", in: host) != nil,
+                "Until a sync home is chosen the pane must offer exactly the two choices")
+            precondition(find("sync-now", in: host) == nil && find("sync-sign-in", in: host) == nil,
+                "Nothing syncs before the user chooses cloud or local")
         }
         render("General") { host in
             precondition(find("sync-save", in: host) == nil, "Sync must have one home rather than duplicate controls")

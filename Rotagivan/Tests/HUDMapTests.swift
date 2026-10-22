@@ -2,11 +2,11 @@ import Foundation
 
 @main struct HUDMapTests {
     static func main() throws {
-        precondition(AppExplorerSettings().resolvedSwipeDirection == .inverted)
+        precondition(AppExplorerSettings().resolvedSwipeDirection == .regular, "Two-finger navigation defaults to Regular")
         precondition(!AppExplorerSettings().resolvedInvertPickerDirection)
         let legacy = try JSONDecoder().decode(AppExplorerSettings.self, from: Data(#"{"defaultMode":"favorites","favorites":[]}"#.utf8))
-        precondition(legacy.swipeDirection == nil && legacy.resolvedSwipeDirection == .inverted,
-            "Existing profiles with no preference default to inverted")
+        precondition(legacy.swipeDirection == nil && legacy.resolvedSwipeDirection == .regular,
+            "Existing profiles with no preference default to Regular")
         for mode in HUDSwipeDirection.allCases {
             for invertedPicker in [false, true] {
             let preference = AppExplorerSettings(swipeDirection: mode, invertPickerDirection: invertedPicker)

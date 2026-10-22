@@ -1,6 +1,8 @@
-# Settings sync: audit and design
+# Settings sync: audit and design (historical)
 
-Status: branch `feature/sync-redesign`. This document records how sync worked
+Status: superseded in 1.1.248 by [sync.md](sync.md), which replaced the field journal and vault enrolment with a password-derived key and whole-document last-edit-wins. Kept for the audit of the earlier failures.
+
+Original status: branch `feature/sync-redesign`. This document records how sync worked
 at 1.1.217 (219), why two Macs drifted or stalled, which patterns are kept,
 and what changed. Security properties listed in `Rotagivan/VAULT.md` are
 preserved; nothing here weakens them.

@@ -24,7 +24,9 @@ struct ActionCatalogValue {
         let audit = HotkeyAudit(settings: input.settings, shortcuts: input.shortcuts,
             layerID: input.layerID, device: input.device)
         let rows = ActionTableRow.make(settings: input.settings, applications: input.applications, audit: audit)
-        let groups = Array(Set(rows.map(\.group))).sorted()
+        // "Primary" (launch main HUD, voice mode) leads; the rest alphabetical.
+        var groups = Array(Set(rows.map(\.group))).sorted()
+        if let primary = groups.firstIndex(of: "Primary") { groups.remove(at: primary); groups.insert("Primary", at: 0) }
         var subgroups: [String: [String]] = [:]
         for group in groups {
             subgroups[group] = Array(Set(rows.filter { $0.group == group }.map(\.subgroup)))

@@ -54,11 +54,9 @@ private struct WorkspaceViewportProbe: ViewModifier {
                 AppExplorerFavorite(direction: .right, name: "Window right", windowPlacement: ExplorerWindowPlacement(direction: .right))]))
         precondition(store.settings.appExplorer!.hasValidFavorites)
         let hid = NavigatorHIDManager(store: store)
-        let vault = CredentialVault(server: "https://fixture.test", transport: { _ in fatalError("No network") },
-            read: { _, _ in fatalError("HUD browsing must not read credentials") }, write: { _, _, _ in fatalError("No credential writes") })
         let sync = SettingsSync(store: store, hid: hid, defaults: defaults, server: "https://fixture.test",
             credentials: SyncCredentials(read: { _ in fatalError("HUD browsing must not start sync") },
-                save: { _, _ in fatalError("No credential writes") }, remove: { _ in fatalError("No credential deletes") }), vault: vault,
+                save: { _, _ in fatalError("No credential writes") }, remove: { _ in fatalError("No credential deletes") }),
             transport: { _ in fatalError("No network") })
         let viewportGeometry = WorkspaceViewportGeometry()
         let host = NSHostingView(rootView: ContentView(store: store, hid: hid, sync: sync, initialSection: "HUD")

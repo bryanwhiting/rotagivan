@@ -14,7 +14,13 @@ struct ActionTableRow: Identifiable {
     var customCommandID: UUID? = nil
     var isDefaultAppCommand = false
 
+    /// The two actions every setup starts from: opening the main HUD and voice mode.
+    static func isPrimary(_ action: BindingAction) -> Bool {
+        (action.kind == .hudLayer && action.hudLayerID == nil && (action.hudPath ?? []).isEmpty) ||
+            (action.kind == .command && action.command == .activateVoiceMode)
+    }
     static func group(for action: BindingAction) -> String {
+        if isPrimary(action) { return "Primary" }
         switch action.kind {
         case .macro: return "Macros"
         case .keystroke: return "Shortcuts"
@@ -44,7 +50,8 @@ struct ActionTableRow: Identifiable {
                 return input.trigger + " · " + scope + status
             }
             let macro = settings.resolvedHotkeyDictionary.first { $0.id == record.action.macroID }
-            let name = record.actionName ?? macro?.name ?? record.action.name ?? record.title
+            var name = record.actionName ?? macro?.name ?? record.action.name ?? record.title
+            if isPrimary(record.action) { name = record.action.kind == .hudLayer ? "Launch main HUD" : "Voice mode" }
             var keybindings = Array(Set(keys)).sorted().joined(separator: "\n")
             if record.appBundleID != nil {
                 if record.customCommandID != nil {
@@ -58,7 +65,8 @@ struct ActionTableRow: Identifiable {
                 }
             }
             let bundleID = record.appBundleID ?? record.action.bundleID
-            let subgroup = record.appName ?? (record.action.kind == .openApp ? name : "")
+            // Pack macros group under their pack ("Macros › Slack").
+            let subgroup = record.appName ?? macro?.packName ?? (record.action.kind == .openApp ? name : "")
             rows.append(Self(action: record.action, id: record.id, group: bundleID == nil ? group(for: record.action) : "Applications",
                 name: name, detail: record.detail, keybindings: keybindings, subgroup: subgroup, appBundleID: bundleID,
                 keywords: record.keywordSets.map { $0.joined(separator: ", ") }.joined(separator: "\n"), isAppScoped: record.appBundleID != nil,
@@ -66,6 +74,7 @@ struct ActionTableRow: Identifiable {
                 isDefaultAppCommand: record.appBundleID != nil && record.overrideTrigger == nil && record.customCommandID == nil))
         }
         return rows.sorted {
+            if ($0.group == "Primary") != ($1.group == "Primary") { return $0.group == "Primary" }
             if $0.group != $1.group { return $0.group < $1.group }
             if $0.subgroup != $1.subgroup { return $0.subgroup.localizedStandardCompare($1.subgroup) == .orderedAscending }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending

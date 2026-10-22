@@ -9,7 +9,7 @@ ui_sources=("${common[@]}" Rotagivan/TrackpadReport.swift Rotagivan/EventPoster.
   Rotagivan/TemporaryIntention.swift Rotagivan/TemporaryIntentionView.swift \
   Rotagivan/VoiceMicrophoneAdmission.swift Rotagivan/NoteDictationSession.swift \
   Rotagivan/DoubleTapSwipe.swift Rotagivan/GestureEngine.swift Rotagivan/GestureCalibration.swift \
-  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/VaultCrypto.swift Rotagivan/CredentialVault.swift Rotagivan/CredentialVaultView.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/OpenAIRealtime.swift Rotagivan/LauncherActions.swift Rotagivan/AppExplorer.swift \
+  Rotagivan/GestureCalibrationView.swift Rotagivan/AppExplorerSelection.swift Rotagivan/SyncCrypto.swift Rotagivan/VoiceActions.swift Rotagivan/VoiceRecognition.swift Rotagivan/OpenAIRealtime.swift Rotagivan/LauncherActions.swift Rotagivan/AppExplorer.swift \
   Rotagivan/UIComponents.swift Rotagivan/HotKeyManager.swift Rotagivan/ShortcutRecorder.swift Rotagivan/AppExplorerSettingsView.swift \
   Rotagivan/ExplorerApplicationCatalog.swift Rotagivan/BrowserBookmarks.swift Rotagivan/ExplorerDestinationPicker.swift \
   Rotagivan/ApplicationIndex.swift Rotagivan/ApplicationIndexObservation.swift \

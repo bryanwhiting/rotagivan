@@ -674,7 +674,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     var title: String {
         switch self {
         case .activateVoiceMode: return "Activate voice mode"
-        case .syncSettings: return "Sync settings"
+        case .syncSettings: return "Sync now"
         case .windowManager: return "Window Manager"
         case .mediaControls: return "Media Controls"
         case .appWindows: return "Show current app’s windows"
@@ -734,7 +734,7 @@ enum AppExplorerAction: String, Codable, CaseIterable {
     var description: String {
         switch self {
         case .activateVoiceMode: return "Open voice mode in the main HUD to speak an action."
-        case .syncSettings: return "Save all settings locally and publish them to your signed-in cloud account. Does not restore or merge remote settings, or transfer encrypted API keys."
+        case .syncSettings: return "Sync now: upload this Mac’s settings and pick up changes from your other Macs (or write and reload settings.yaml in local-file mode)."
         case .toggleStageManager: return "Turn Stage Manager on or off using your macOS shortcut. First enable Turn Stage Manager on/off in System Settings → Keyboard → Keyboard Shortcuts → Mission Control. No shortcut is assigned automatically."
         case .toggleDock: return "Toggle automatic hiding of the Dock with Option–Command–D."
         case .previousApp: return "Switch to the most recently used other app with Command–Tab. Repeating toggles between the last two apps."
@@ -1029,7 +1029,12 @@ struct ExplorerHoldLayer: Codable, Equatable, Identifiable {
     var launchShortcut: RecordedShortcut? = nil
     var appBundleID: String? = nil
     var appName: String? = nil
-    func isAvailable(in _: String?) -> Bool { true }
+    /// Computer names this HUD is shown on; nil or empty means every Mac. The
+    /// layer still syncs everywhere so it can be edited from any Mac.
+    var computers: [String]? = nil
+    static var thisComputer: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+    var isOnThisComputer: Bool { (computers ?? []).isEmpty || computers!.contains(Self.thisComputer) }
+    func isAvailable(in _: String?) -> Bool { isOnThisComputer }
     // Old Window Manager layers generated their slots from windowLayout.
     // True distinguishes a deliberately empty custom grid from a legacy preset.
     var windowTilesConfigured: Bool? = nil
@@ -1470,6 +1475,7 @@ struct AppExplorerSettings: Codable, Equatable {
                 }
                 if let key = layer.launchShortcut, !key.isPhysicalShortcut || key.keyCode == 53 || (key.keyCode < 64 && key.modifiers == 0) { return false }
                 if let app = layer.appBundleID, app.isEmpty || app.count > 512 { return false }
+                if let computers = layer.computers, computers.count > 20 || computers.contains(where: { $0.isEmpty || $0.count > 128 }) { return false }
                 guard valid(layer.favorites, depth: groupDepth, nesting: depth + 1, count: layer.slotCount ?? count,
                     bindings: layer.actionBindings ?? [], reserved: layers.compactMap(\.holdShortcut) + commandKeys,
                     commandKeys: commandKeys) else { return false }
@@ -2029,6 +2035,19 @@ struct MacroStep: Codable, Equatable {
     }
 }
 
+/// Where a macro's keystrokes belong. Playback brings the scope to the front
+/// before the first keystroke, so a Slack macro works from any app.
+enum MacroScope: Equatable {
+    case app(bundleID: String, name: String)
+    case website(URL)
+    var title: String {
+        switch self {
+        case .app(_, let name): return name
+        case .website(let url): return url.host ?? url.absoluteString
+        }
+    }
+}
+
 struct NamedHotkey: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
@@ -2039,16 +2058,47 @@ struct NamedHotkey: Codable, Equatable, Identifiable {
     /// Optional registered input that runs this saved action from anywhere.
     /// Kept separate from `shortcut`, which is the legacy first output step.
     var activationShortcut: RecordedShortcut? = nil
+    /// Macro-pack metadata. A pack groups macros under one name; a scope says
+    /// which app (bundle ID) or website (https URL) receives the keystrokes.
+    /// All nil for hand-made macros, which keep their existing behaviour.
+    var packName: String? = nil
+    var appBundleID: String? = nil
+    var appName: String? = nil
+    var website: String? = nil
     var resolvedSteps: [RecordedShortcut] { steps ?? [shortcut] }
     var resolvedSequence: [MacroStep] { sequence ?? resolvedSteps.map(MacroStep.key) }
     var resolvedDelay: Int { stepDelayMilliseconds ?? 100 }
     var summary: String { resolvedSequence.map(\.title).joined(separator: " → ") }
+    var scope: MacroScope? {
+        if let appBundleID { return .app(bundleID: appBundleID, name: appName ?? packName ?? appBundleID) }
+        if let website, let url = Self.websiteURL(website) { return .website(url) }
+        return nil
+    }
+    /// Pack metadata that is set must be well formed; nil fields are the legacy default.
+    var hasValidPackMetadata: Bool {
+        func text(_ value: String?, max: Int) -> Bool {
+            guard let value else { return true }
+            return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.count <= max &&
+                !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        }
+        guard text(packName, max: 120), text(appName, max: 128), appBundleID == nil || website == nil else { return false }
+        if let appBundleID { guard MacroStep.app(bundleID: appBundleID, name: appName ?? "App").isValid else { return false } }
+        if let website { guard website.count <= 512, Self.websiteURL(website) != nil else { return false } }
+        return true
+    }
+    /// An absolute http(s) URL with a host and no embedded credentials.
+    static func websiteURL(_ text: String) -> URL? {
+        guard let components = URLComponents(string: text), let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil, let url = components.url else { return nil }
+        return url
+    }
     var isValid: Bool {
         !id.isEmpty && id.count <= 128 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         name.count <= 120 && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) && shortcut.isPhysicalShortcut &&
         !resolvedSequence.isEmpty && resolvedSequence.count <= 32 && resolvedSequence.allSatisfy(\.isValid) &&
         (sequence == nil || steps == nil) && (activationShortcut?.isValidGlobalHotkey ?? true) &&
-        (0...2000).contains(resolvedDelay)
+        (0...2000).contains(resolvedDelay) && hasValidPackMetadata
     }
 }
 

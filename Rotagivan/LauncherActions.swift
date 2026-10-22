@@ -18,7 +18,7 @@ struct LauncherMenuAction: Hashable, Sendable {
     var id: String { "menu:\(pid):" + indices.map(String.init).joined(separator: ".") }
 }
 struct LauncherAction: Identifiable, Hashable, Sendable {
-    enum Target: Hashable, Sendable { case app(ExplorerApplication), folder(ExplorerFolder), chromeTab(ChromeRecentTab), rotaSettings, menu(LauncherMenuAction), registered(String) }
+    enum Target: Hashable, Sendable { case app(ExplorerApplication), folder(ExplorerFolder), chromeTab(ChromeRecentTab), rotaSettings, menu(LauncherMenuAction), registered(String), webSearch(WebSearchProvider, String) }
     let id: String
     let name: String
     let detail: String
@@ -54,6 +54,16 @@ struct LauncherAction: Identifiable, Hashable, Sendable {
     static var settings: Self {
         Self(id:"rota:settings",name:"Rotagivan settings preferences",detail:"Open this app’s settings",target:.rotaSettings)
     }
+    /// Whatever was typed can always be searched on the web; these rows follow
+    /// the matches so an exact app name still wins the first slot.
+    static func webSearches(_ text: String) -> [Self] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return WebSearchProvider.allCases.map { provider in
+            Self(id: "websearch:" + provider.rawValue, name: "Search \(provider.title) for “\(query)”",
+                 detail: provider.detail + " · Return to search", target: .webSearch(provider, query))
+        }
+    }
     static func query(_ spoken: String) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         for prefix in ["please open ", "please launch ", "open ", "launch ", "switch to "] {
@@ -68,6 +78,19 @@ struct LauncherAction: Identifiable, Hashable, Sendable {
         return LauncherUsageOrder.apply(index.search(query, actions: actions, engine: engine), query: query)
     }
 
+}
+
+enum WebSearchProvider: String, CaseIterable, Sendable {
+    case google, gmail
+    var title: String { self == .google ? "Google" : "Gmail" }
+    var detail: String { self == .google ? "Web search" : "Search your mail" }
+    func url(for query: String) -> URL? {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? query
+        switch self {
+        case .google: return URL(string: "https://www.google.com/search?q=" + encoded)
+        case .gmail: return URL(string: "https://mail.google.com/mail/u/0/#search/" + encoded)
+        }
+    }
 }
 
 /// Optional local-only personalization. Identity until the activity feature starts.

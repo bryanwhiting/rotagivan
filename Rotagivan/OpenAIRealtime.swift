@@ -15,9 +15,8 @@ enum OpenAIRealtimeCredential {
     static func parse(_ text: String) -> String? { OpenRouterCredential.parse(text, variable: "OPENAI_ROTA_KEY") }
     static func load() async throws -> String {
         try await CredentialWorker.shared.run {
-            if let key = try VaultKeychain.currentAPIKey(provider: .openAI) { return key }
-            do { return try OpenRouterCredential.loadEnvironment(variable: "OPENAI_ROTA_KEY") }
-            catch { throw VaultFailure.message("Add your OpenAI API key in General → Account & Sync → Encrypted API keys, then save or load your keys.") }
+            do { return try SyncSecrets.value("OPENAI_ROTA_KEY") }
+            catch { throw VoiceError.message("Add your OpenAI API key under Sync & backup → API keys, or OPENAI_ROTA_KEY to ~/.env.") }
         }
     }
 }

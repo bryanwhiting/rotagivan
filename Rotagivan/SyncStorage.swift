@@ -7,12 +7,15 @@ struct SyncAccount: Codable, Equatable, Sendable {
     var userID: String
     var email: String
     var expiresAt: Double
+    /// The password-derived key (SyncCrypto.masterKey). Absent for a login
+    /// saved by an older build; the user enters the password once to add it.
+    var master: Data? = nil
 }
 
 enum SyncKeychain {
     private static func query(_ server: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: "local.rotagivan.sync",
+         kSecAttrService as String: "local.rotagivan.sync.v2",
          kSecAttrAccount as String: server]
     }
     static func read(server: String, allowInteraction: Bool = false) throws -> SyncAccount? {
@@ -76,33 +79,6 @@ extension AppConfiguration {
         }
         let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(portable))
         return SyncFiles.digest(try JSONSerialization.data(withJSONObject: canonical(object), options: [.sortedKeys]))
-    }
-}
-
-struct SyncBaseline: Codable {
-    var revision: Int
-    var fingerprint: String
-}
-
-enum SyncDecision: Equatable {
-    case equal, upload, download, conflict
-    static func decide(local: String, remote: String?, baseline: String?) -> Self {
-        guard let remote else { return .upload }
-        if local == remote { return .equal }
-        guard let baseline else { return .conflict }
-        if local == baseline { return .download }
-        if remote == baseline { return .upload }
-        return .conflict
-    }
-    static func forAccount(local: String, remote: String?, baseline: String?,
-                           ownerMatches: Bool, hasPreviousOwner: Bool,
-                           firstLogin: Bool, allowInitialUpload: Bool) -> Self {
-        if !ownerMatches {
-            if let remote { return local == remote ? .equal : .download }
-            if hasPreviousOwner && !allowInitialUpload { return .conflict }
-        }
-        if firstLogin && baseline == nil && remote != nil { return local == remote ? .equal : .download }
-        return decide(local: local, remote: remote, baseline: baseline)
     }
 }
 
@@ -211,17 +187,5 @@ actor SyncFiles {
         }
         try data.write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-    }
-    func baseline(for account: String) throws -> SyncBaseline? {
-        let url = directory.appendingPathComponent("sync-state.json")
-        guard let data = try readData(url) else { return nil }
-        return try JSONDecoder().decode([String: SyncBaseline].self, from: data)[account]
-    }
-    func setBaseline(_ baseline: SyncBaseline, for account: String) throws {
-        try prepare()
-        let url = directory.appendingPathComponent("sync-state.json")
-        var all = try readData(url).map { try JSONDecoder().decode([String: SyncBaseline].self, from: $0) } ?? [:]
-        all[account] = baseline
-        try writePrivate(JSONEncoder().encode(all), to: url)
     }
 }

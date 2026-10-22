@@ -1,0 +1,41 @@
+# Rotagivan macro pack · Gmail
+# Import: Settings → Actions → Add action → Built-in packs → Gmail.
+# Every macro opens https://mail.google.com (reusing an open Gmail tab when
+# Chrome is the default browser) and waits for the browser before typing.
+format: rotagivan-macro-pack/1
+name: Gmail
+website: https://mail.google.com
+notes: >-
+  Gmail's single-key shortcuts (c, e, /, j, k, g then i…) only work when
+  keyboard shortcuts are turned on in Gmail: Settings → See all settings →
+  General → Keyboard shortcuts → on. Two-key macros such as "Go to Inbox"
+  press g, then i.
+macros:
+  - name: Compose
+    keys: c
+  - name: Search mail
+    keys: /
+  - name: Archive
+    keys: e
+  - name: Reply
+    keys: r
+  - name: Reply all
+    keys: a
+  - name: Forward
+    keys: f
+  - name: Newer conversation
+    keys: k
+  - name: Older conversation
+    keys: j
+  - name: Mark as read
+    keys: shift+i
+  - name: Mark as unread
+    keys: shift+u
+  - name: Send message
+    keys: cmd+return
+  - name: Go to Inbox
+    steps: [g, i]
+    delay: 150
+  - name: Go to Starred
+    steps: [g, s]
+    delay: 150

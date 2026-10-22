@@ -64,6 +64,44 @@ import AppKit
         log = []
         let stale = await player.execute(sequence, delay: 0, target: 99)
         precondition(!stale && log.isEmpty)
-        print("Macro playback passed: app-before-keys, active apps, delays, failed/misdirected opens, focus cancellation, explicit multi-app sequences, serialization, legacy-compatible data and invalid steps. No apps launched or keys posted.")
+        // Pack scopes: the app or website comes to the front as a prefix step
+        // in the same lane, and keys target it. An app already in front is not relaunched.
+        var frontBundle: String? = "test.other"
+        var sites: [String] = []
+        player.currentBundleID = { frontBundle }
+        player.wait = { waits.append($0) }
+        player.openApp = { bundle, source in
+            precondition(bundle == "com.example.slack" && source == front)
+            log.append("open:\(bundle)"); front = 40; frontBundle = bundle; return 40
+        }
+        player.openWebsite = { url, source in
+            precondition(source == front)
+            sites.append(url.absoluteString); log.append("site"); front = 50; frontBundle = "com.google.Chrome"; return 50
+        }
+        front = 10; log = []; waits = []
+        let slack = MacroScope.app(bundleID: "com.example.slack", name: "Slack")
+        let launched = await player.execute([.key(copy)], delay: 0.1, target: 10, scope: slack)
+        precondition(launched && log == ["open:com.example.slack", "key:C:40"] && waits == [0.1], "\(log) \(waits)")
+        log = []; waits = []
+        let alreadyFront = await player.execute([.key(copy), .key(paste)], delay: 0.1, target: 40, scope: slack)
+        precondition(alreadyFront && log == ["key:C:40", "key:V:40"] && waits == [0.1, 0.1], "No relaunch when the scope is frontmost")
+        log = []; front = 10; frontBundle = "test.other"
+        let site = await player.execute([.key(copy)], delay: 0, target: 10, scope: .website(URL(string: "https://mail.google.com")!))
+        precondition(site && sites == ["https://mail.google.com"] && log == ["site", "key:C:50"])
+        log = []; front = 10; frontBundle = "test.other"
+        player.openWebsite = { _, _ in nil }
+        let noSite = await player.execute([.key(copy)], delay: 0, target: 10, scope: .website(URL(string: "https://mail.google.com")!))
+        precondition(!noSite && log.isEmpty)
+        player.openApp = { _, _ in front = 77; return 40 }
+        let wrongFront = await player.execute([.key(copy)], delay: 0, target: 10, scope: slack)
+        precondition(!wrongFront && log.isEmpty, "Focus elsewhere after launch cancels")
+        let staleSource = await player.execute([.key(copy)], delay: 0, target: 99, scope: slack)
+        precondition(!staleSource && log.isEmpty, "Stale source cancels before any launch")
+        front = 10; frontBundle = "test.other"; log = []
+        player.openApp = { bundle, _ in front = 40; frontBundle = bundle; return 40 }
+        player.enqueue([.key(copy)], delay: 0, target: 10, scope: slack)
+        while player.running { await Task.yield() }
+        precondition(log == ["key:C:40"], "Scoped jobs run through the serial lane")
+        print("Macro playback passed: pack scopes (app/website prefix step), app-before-keys, active apps, delays, failed/misdirected opens, focus cancellation, explicit multi-app sequences, serialization, legacy-compatible data and invalid steps. No apps launched or keys posted.")
     }
 }

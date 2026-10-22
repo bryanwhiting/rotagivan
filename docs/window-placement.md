@@ -10,9 +10,15 @@ Compared with [Rectangle](https://github.com/rxhanson/Rectangle) at commit
 - [ScreenDetection](https://github.com/rxhanson/Rectangle/blob/1d46069c27b3b0564bd7cc1e6d97bf6d53093079/Rectangle/ScreenDetection.swift): choose the window's display by overlap rather than assuming the primary display.
 
 The new geometry and settling engine is an independent implementation of these
-ideas. Rectangle code is not vendored. We do not toggle AXEnhancedUserInterface,
-change VoiceOver settings, reset permissions, install Rectangle, or add private
-window APIs. Existing desktop-transfer code is unchanged.
+ideas. Rectangle code is not vendored. Like Rectangle, placement turns the target
+app's `AXEnhancedUserInterface` flag off for the duration of one placement and
+restores it afterwards: macOS sets that flag in any app an Accessibility client
+talks to, and Chrome and Electron then animate frame changes and report
+in-between geometry. Measured on Chrome 1.1.247: a left-half tile with the flag
+on ended at the window's old height and origin after the settling passes; with
+it off the tile landed exactly in one pass. We do not change VoiceOver settings,
+reset permissions, install Rectangle, or add private window APIs. Existing
+desktop-transfer code is unchanged.
 
 ## Behavior
 
@@ -43,7 +49,9 @@ An oversized window keeps its top/left edge reachable and reports a limitation.
 Position refusals, disappearing windows, invalid geometry and focus changes do
 not report exact success. Focus loss stops further writes to the captured window.
 Existing full-screen/minimized guards remain; no other window is silently chosen.
-Settling uses up to four passes, with short pauses and bounded AX messaging timeouts.
+Settling uses up to four passes and bounded AX messaging timeouts; each pause
+waits until two consecutive frame reads agree (at most ~180 ms) instead of a
+fixed delay. A placement the app refuses is reported on the swipe path too.
 
 ## Verification
 

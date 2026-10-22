@@ -29,8 +29,10 @@ enum SettingsPersistence {
                 for key in UserDefaults.standard.dictionaryRepresentation().keys where sensitive(key) {
                     UserDefaults.standard.removeObject(forKey: key)
                 }
-                try migrateManagedFiles(key: key)
+                // Local-file sync keeps a plaintext settings.yaml on purpose.
+                if adapter.string(forKey: SyncSecrets.modeKey) != SyncMode.local.rawValue { try migrateManagedFiles(key: key) }
                 defaults = adapter; encrypted = adapter
+                SyncSecrets.defaults = { adapter }
                 return
             } catch {
                 let alert = NSAlert()

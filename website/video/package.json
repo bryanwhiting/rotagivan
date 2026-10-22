@@ -1,0 +1,12 @@
+{
+  "name": "rota-tour-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record": "node record.mjs",
+    "assemble": "node assemble.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

@@ -1,6 +1,6 @@
 # Voice mode payments and licensing
 
-Voice mode is the paid feature. Everything else in Rotagivan is free. Payments
+Voice mode is the paid feature. Everything else in Rota is free. Payments
 go through Stripe Checkout; licensing runs in the `rotagivan-website` Worker
 (`website/worker/`), which also serves rota.silvermine.dev. It does not use
 `SyncBackend`.
@@ -28,7 +28,7 @@ Run Wrangler commands from `website/`. `node scripts/cloudflare.mjs …` runs
 Wrangler with the Cloudflare credentials from `~/.env`.
 
 1. **Create the product in Stripe.** Dashboard → Product catalog → Add product
-   "Rotagivan Voice mode". Add a price: recurring (for example monthly) or
+   "Rota Voice mode". Add a price: recurring (for example monthly) or
    one-time. Copy the price id (`price_…`). Do this in test mode first.
 2. **Set the price id and mode** in `website/wrangler.jsonc` `vars`:
    - `STRIPE_PRICE_ID_VOICE`: `price_…`

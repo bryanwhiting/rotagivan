@@ -1,10 +1,12 @@
 # Performance audit
 
-Every interaction was measured on the main thread with `Rotagivan/benchmark.sh`
+Every interaction was measured on the main thread with `Rota/benchmark.sh`
 (a synthetic heavy configuration: 12 HUD layers × 8 tiles, 60 bookmarks,
 40 macros, 3 profiles, 600 indexed apps) and with a HUD open/close harness.
 Numbers are medians on an M-series Mac, optimized build. Run the script before
-and after any change that touches these paths.
+and after any change that touches these paths. `benchmark.sh --only-chrome`
+times tab activation against a running Chrome (it brings Chrome to the front)
+and `--only-macro` times a three-chord macro without posting keys.
 
 | Interaction | Before | After | What changed |
 | --- | ---: | ---: | --- |
@@ -16,6 +18,11 @@ and after any change that touches these paths.
 | Bookmark tiles after relaunch | network fetch | instant | Favicons cached on disk for a week; known icons skip the 300 ms fetch delay. |
 | Chrome tabs HUD open | blank until AppleScript | previous snapshot at once | Fresh snapshot replaces it; the script asks Chrome per window, not per tab. |
 | Chrome recency sampler (every 2 s while Chrome is frontmost) | AppleScript each tick | AX title read; AppleScript only when the title changed | |
+| Chrome tab tile → tab in front (`ChromeBookmarkTabs.activate`, live Chrome, 7 windows / 43 tabs) | 33 ms | 3 ms | AppleScript's `activate` verb alone cost 25 ms (50 ms when Chrome was behind another app); the script now only orders the tab and window, and Launch Services activation (`NSRunningApplication.activate`, <3 ms, frontmost ~5 ms later) brings Chrome forward when it is not already. The window/tab count round trips are gone (out-of-range raises inside the `try`). Scripts compile once per process and take parameters as Apple event arguments (compile was only 0.5 ms; the big win is the verb). `osascript` was never used: a spawn measured 6 s. |
+| Bookmark / website-macro open of an already-open tab (`ChromeBookmarkTabs.open`) | 50–60 ms | 8 ms | Two list reads per window (`URL of every tab`, `id of every tab`) with the four-rank choice made inside the script, instead of up to four passes of two round trips per tab; same ranking (last selection, exact match, most recent on site, any on site, in window and tab order), same new-tab fallback. |
+| Macro, three chords (default delay, playback lane end to end) | 400 ms | 97 ms | Default inter-step delay 100 → 35 ms (still per-macro configurable, 0–2000). Within a chord, modifier changes and the key down post back-to-back (the HID tap delivers them in order) and only the key up waits an 8 ms hold: 64 → 8 ms per chord. The per-step frontmost check costs <0.01 ms and stays. |
+| Macro start from a HUD tile / hotkey | dismiss + 2 run-loop hops | dismiss + 1 hop | `postSequence` enqueues on the main actor directly when already on the main thread; the HUD has no dismiss animation (`orderOut`), the remaining hop lets the panel leave before keys go. |
+| Scoped macro: wait for the app/browser to be frontmost | 4 stable samples 25 ms apart (≥100 ms) | 4 samples 10 ms apart (≥40 ms), same 2 s bound | Same stability rule and cancellation on focus elsewhere. |
 | Settings slider tick (one `settings` change) | 2.4 ms | 0.6 ms | Profile library written once per run-loop turn; explicit renames still write at once. |
 | Launcher search per keystroke, Swift fallback engine (966 rows) | 2.2–2.8 ms | 0.9–1.3 ms | Folded names, bundle ids and their character arrays cached per app; only the shown top matches are ordered (bounded insertion); no per-token array allocations. The bundled Rust engine keeps its own index. |
 | Profile switch | 2.4 ms + full HID stop/start (~10 ms without a device, plus the Navigator leaving and re-entering precision mode) | 2.4 ms + gesture reset only | The trackpad stays open unless the new profile enables or disables the Navigator itself; gesture state resets and Apple input re-reads its settings in place. |
@@ -52,3 +59,8 @@ Also found and fixed: 25,174 leftover `UserDefaults` suite files from test runs 
 - HUD workspace cost still scales ~9 ms per layer for the full-detail satellite
   faces. Rendering faces to cached images would remove it at the cost of
   stale previews while editing.
+- The Chrome tabs snapshot behind the tab HUD costs 45 ms of AppleScript plus
+  ~370 ms of profile-history SQLite reads (`--only-chrome` shows the split).
+  The HUD shows the previous snapshot at once, so this is not on the
+  tab-switch path; enriching profiles after the tab list arrives would shorten
+  the refresh.

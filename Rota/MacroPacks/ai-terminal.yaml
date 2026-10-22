@@ -1,0 +1,35 @@
+# Rota macro pack · AI terminal (Claude Code and Codex CLIs in iTerm)
+# Import: Settings → Actions → Add action → Built-in packs → AI terminal.
+# Every macro brings iTerm to the front (launching it if needed), opens a new
+# window or tab, types the command and presses Return.
+format: rota-macro-pack/1
+name: AI terminal
+app: com.googlecode.iterm2
+appName: iTerm
+notes: >-
+  Needs the claude and codex commands on your shell's PATH (the installers put
+  them in ~/.local/bin). The 600 ms step delay gives a new window time to start
+  its shell before the command is typed. For Terminal.app, copy this file and
+  change app to com.apple.Terminal; Cmd+N and Cmd+T mean the same there.
+macros:
+  - name: Claude Code in a new window
+    steps: [cmd+n, {type: "claude"}, return]
+    delay: 600
+  - name: Claude Code in a new tab
+    steps: [cmd+t, {type: "claude"}, return]
+    delay: 600
+  - name: Continue the last Claude Code session
+    steps: [cmd+n, {type: "claude --continue"}, return]
+    delay: 600
+  - name: Resume a Claude Code session
+    steps: [cmd+n, {type: "claude --resume"}, return]
+    delay: 600
+  - name: Codex in a new window
+    steps: [cmd+n, {type: "codex"}, return]
+    delay: 600
+  - name: Codex in a new tab
+    steps: [cmd+t, {type: "codex"}, return]
+    delay: 600
+  - name: Resume a Codex session
+    steps: [cmd+n, {type: "codex resume"}, return]
+    delay: 600

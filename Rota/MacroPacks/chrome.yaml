@@ -1,0 +1,37 @@
+# Rota macro pack · Google Chrome
+# Import: Settings → Actions → Add action → Built-in packs → Google Chrome.
+# Every macro brings Chrome to the front (launching it if needed) before typing.
+format: rota-macro-pack/1
+name: Google Chrome
+app: com.google.Chrome
+appName: Google Chrome
+notes: Shortcuts follow Chrome's macOS defaults.
+macros:
+  - name: New tab
+    keys: cmd+t
+  - name: Close tab
+    keys: cmd+w
+  - name: Reopen closed tab
+    keys: cmd+shift+t
+  - name: Next tab
+    keys: ctrl+tab
+  - name: Previous tab
+    keys: ctrl+shift+tab
+  - name: New window
+    keys: cmd+n
+  - name: New incognito window
+    keys: cmd+shift+n
+  - name: Focus the address bar
+    keys: cmd+l
+  - name: Reload page
+    keys: cmd+r
+  - name: Bookmark this page
+    keys: cmd+d
+  - name: Find in page
+    keys: cmd+f
+  - name: Downloads
+    keys: cmd+shift+j
+  - name: History
+    keys: cmd+y
+  - name: Developer tools
+    keys: cmd+opt+i

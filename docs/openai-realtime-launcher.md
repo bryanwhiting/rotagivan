@@ -1,6 +1,6 @@
 # OpenAI Realtime launcher
 
-Select **OpenAI Realtime · live speech to text** in Settings → Voice mode → Voice provider. The preference is local to this Mac. Existing OpenRouter/Jev voice remains the default. Invoke the existing App Explorer/voice hotkey or gesture; this is not the Settings window startup. Live transcript fragments update the same Rust search used by typing. Say an app/action name, use arrows, then Return. Apps and opening Rotagivan settings need one Return; menu and registered Mac actions need a second distinct Return. Holding Return cannot confirm. No partial/final speech automatically executes anything, even if the existing Jev Auto-decide option is enabled.
+Select **OpenAI Realtime · live speech to text** in Settings → Voice mode → Voice provider. The preference is local to this Mac. Existing OpenRouter/Jev voice remains the default. Invoke the existing App Explorer/voice hotkey or gesture; this is not the Settings window startup. Live transcript fragments update the same Rust search used by typing. Say an app/action name, use arrows, then Return. Apps and opening Rota settings need one Return; menu and registered Mac actions need a second distinct Return. Holding Return cannot confirm. No partial/final speech automatically executes anything, even if the existing Jev Auto-decide option is enabled.
 
 ## Provider and protocol
 
@@ -17,7 +17,7 @@ No live provider/microphone test was performed. Before a live test, authorize us
 ## Catalog and execution
 
 - Existing indexed native and installed Chrome/Safari app bundles: 117 on the test Mac.
-- Open Rotagivan settings; System Settings is discoverable as its installed app. This does not navigate arbitrary System Settings panels or change their values. No undocumented deep links were added.
+- Open Rota settings; System Settings is discoverable as its installed app. This does not navigate arbitrary System Settings panels or change their values. No undocumented deep links were added.
 - 99 reusable default Mac actions from the existing allowlist (shortcuts, window/media/HUD controls); user-configured actions/macros remain available when enabled. 17 Chrome and 23 Slack shortcuts are available only in the matching active app. All registered non-app actions require confirmation and are revalidated against their captured registry and current app before dispatch.
 - Up to 200 enabled, pressable items from the captured app’s standard menu bar, discovered through public AX APIs only when Accessibility is already granted. Discovery does not click/open menus or prompt for permission. Execution resolves the menu path again and validates titles, availability, active PID and AXPress support. Every menu action requires confirmation.
 
@@ -27,15 +27,15 @@ Menu discovery is bounded to one second plus an in-flight AX call (0.15-second m
 
 Mock assertions cover configuration, literal key-variable parsing with dummy values, partial/final ordering and duplication, sanitized errors, PCM append without replay, commit, mic denial, private-note cancellation, pending permission cancellation, handshake timeout, disconnect/manual retry, missing-key setup failure, local action routing and unavailable menus. Native mocked HUD tests cover immediate key focus, incremental Rust results, no speech execution, explicit injected app launch, cancellation/stale deltas, two-Return confirmation, held-Return rejection, stale action rejection and one injected execution. Test screenshots were inspected. Original native typing/search checks were rerun and passed after the expanded-catalog integration.
 
-Run `./Rotagivan/test-realtime.sh` for mock checks; append `--ui` for the disposable native HUD (requires a logged-in macOS UI session). `./Rotagivan/test-typing.sh` covers typing. `./Rotagivan/build.sh` produces the signed app with the existing development identity. Full repository regressions remain available through `./Rotagivan/test.sh`; this update does not claim that entire long suite was rerun.
+Run `./Rota/test-realtime.sh` for mock checks; append `--ui` for the disposable native HUD (requires a logged-in macOS UI session). `./Rota/test-typing.sh` covers typing. `./Rota/build.sh` produces the signed app with the existing development identity. Full repository regressions remain available through `./Rota/test.sh`; this update does not claim that entire long suite was rerun.
 
 Limits: real OpenAI account/model access, live acoustic accuracy/latency, device interruptions, and live AX menu execution were not validated. Menus that macOS/apps do not expose remain absent; arbitrary right-side menu-bar status icons are not indexed. There are no direct panel edits, automatic sensitive actions, permissions grants, or translation. App launch remains deliberate; sensitive/registered/menu actions use action-time confirmation, with any further system dialog left to the user. Multistage IME composition remains outside the typing feature.
 
 ## Installed release verification — October 13, 2026
 
-Rotagivan **1.1.199 (201)** was built and installed/reopened at
-`/Applications/Rotagivan.app` using `./launch.sh --keep-accessibility`.
-The running executable is `/Applications/Rotagivan.app/Contents/MacOS/Rotagivan`.
+Rota **1.1.199 (201)** was built and installed/reopened at
+`/Applications/Rota.app` using `./launch.sh --keep-accessibility`.
+The running executable is `/Applications/Rota.app/Contents/MacOS/Rota`.
 The app and embedded Rust dylib pass strict verification against the existing
 D47A development certificate; no signing identity, trust, or TCC permissions changed.
 Built/installed executable SHA-256:
@@ -52,4 +52,4 @@ executed during verification. The entire long regression suite was not rerun.
 The pending sync-settings redesign is excluded from this release.
 
 A signed rollback copy of 1.1.195 (197) was retained locally at
-`/private/tmp/rotagivan-pre-gptlive.gLsBEB/Rotagivan.app`.
+`/private/tmp/rota-pre-gptlive.gLsBEB/Rota.app`.

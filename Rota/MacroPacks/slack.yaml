@@ -1,0 +1,42 @@
+# Rota macro pack · Slack
+# Import: Settings → Actions → Add action → Built-in packs → Slack.
+# Every macro brings Slack to the front (launching it if needed) before typing.
+format: rota-macro-pack/1
+name: Slack
+app: com.tinyspeck.slackmacgap
+appName: Slack
+notes: Shortcuts follow Slack's macOS defaults for the English keyboard layout.
+macros:
+  - name: Jump to a conversation
+    keys: cmd+k
+  - name: Direct messages
+    keys: cmd+shift+k
+  - name: Threads
+    keys: cmd+shift+t
+  - name: Activity
+    keys: cmd+shift+m
+  - name: All unread messages
+    keys: cmd+shift+a
+  - name: Browse channels
+    keys: cmd+shift+l
+  - name: Search Slack
+    keys: cmd+g
+  - name: Mark all messages as read
+    keys: shift+esc
+  - name: Mark channel as read
+    keys: esc
+  - name: Back
+    keys: "cmd+["
+  - name: Forward
+    keys: "cmd+]"
+  - name: Next unread channel
+    keys: opt+shift+down
+  - name: Previous unread channel
+    keys: opt+shift+up
+  - name: Set a status
+    keys: cmd+shift+y
+  - name: Preferences
+    keys: "cmd+,"
+  - name: Reply in thread, then jump back
+    steps: [cmd+shift+t, esc]
+    delay: 120

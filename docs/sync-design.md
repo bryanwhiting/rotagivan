@@ -4,7 +4,7 @@ Status: superseded in 1.1.248 by [sync.md](sync.md), which replaced the field jo
 
 Original status: branch `feature/sync-redesign`. This document records how sync worked
 at 1.1.217 (219), why two Macs drifted or stalled, which patterns are kept,
-and what changed. Security properties listed in `Rotagivan/VAULT.md` are
+and what changed. Security properties listed in `Rota/VAULT.md` are
 preserved; nothing here weakens them.
 
 ## 1. Audit of the 1.1.217 implementation
@@ -86,7 +86,7 @@ GET `/v1/settings` (full 45 KB+ ciphertext, decrypt, merge) → possibly PUT.
    every Mac that fetched it. Status: "Sync paused … error 1".
 3. **Opaque errors.** `EncryptedSyncFailure`/`EncryptedSettingsError` had no
    `LocalizedError`, so the UI showed "The operation couldn't be completed.
-   (Rotagivan.EncryptedSyncFailure error 2.)".
+   (Rota.EncryptedSyncFailure error 2.)".
 4. **Network chatter and rate limits.** `SettingsStore.foregroundBundleID`
    is `@Published` (`Models.swift:2648`), so every app switch fired
    `objectWillChange` → two network requests. With the 120 req/min/user limit
@@ -215,7 +215,7 @@ encrypted backup of the current settings is taken first.
 ## 4. Verification
 
 - `cd SyncBackend && npx vitest run` — adds the ETag/304 test.
-- `zsh Rotagivan/test-encrypted-sync.sh` — core actor (conditional polls, forged
+- `zsh Rota/test-encrypted-sync.sh` — core actor (conditional polls, forged
   304, invalid-merge fallback), codec (orphan profile fragment), integration
   (no-op local change costs no request, idle poll is one 304, backoff).
-- `Rotagivan/test.sh` — full suite including `SyncCodecTests`.
+- `Rota/test.sh` — full suite including `SyncCodecTests`.

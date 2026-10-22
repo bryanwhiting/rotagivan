@@ -1,4 +1,4 @@
-# Rotagivan
+# Rota
 
 An editable, independent macOS driver and settings app for the ZSA Navigator Trackpad. It connects directly to the Voyager's precision-touchpad HID interface, so it does not depend on the official Navigator app. This is an initial implementation, not yet verified for full behavioral parity with ZSA Navigator.
 
@@ -139,7 +139,7 @@ without changing saved motion or gesture values. Up to 20 profiles are supported
   Existing default-layer drag settings are the compatibility fallback; other
   saved layer values remain intact. The macOS pane links to native Trackpad and
   Accessibility settings. Apple's motion, scrolling and native dragging remain
-  system-managed (machine-wide), not Rotagivan profile-specific response curves.
+  system-managed (machine-wide), not Rota profile-specific response curves.
 - **General:** complete YAML export/import and sync include all profiles and
   their shortcuts, including inactive profiles. Legacy single-configuration YAML
   imports as one Default profile. Account, permission grants, input opt-in,
@@ -165,11 +165,28 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   app-specific overrides. Enable **tap actions** in the layer for tap bindings.
   Native three/four-finger contacts and uncertain/palm contacts are ignored and
   drained until all fingers lift; they are not treated as two-finger taps.
+- One-finger taps are macOS's own clicks, so a lone one-finger tap and one-finger
+  double/triple taps never fire a Rota action on an Apple trackpad. The
+  one-finger **Single tap, then quick swipe** and **One-finger tap, then two-finger
+  swipe** bindings do work: tap, lift, then swipe and lift within the same window,
+  distance, and quick-swipe duration as on Navigator, using the Apple tap
+  calibration from **General → Tap calibration**. The swipe moves the pointer
+  natively. No macOS setting is required. With macOS **Tap to click** on, the tap
+  also clicks natively at that spot before the swipe fires its action; Rota
+  recognizes that click as the tap's own echo (whether it arrives just before or
+  after the finger's lift) instead of cancelling the gesture. A left click while
+  the finger keeps resting is still a physical press and cancels the gesture.
+  Keep Accessibility → Pointer Control → Trackpad Options → **Use trackpad for
+  dragging** off (the default): with it on, macOS turns tap-then-touch into a
+  held drag, which cancels the gesture. If a second finger joins the swipe
+  contact, the swipe is abandoned and the touch continues as an ordinary
+  two-finger touch: a quick close pair still fires the layer's two-finger tap
+  binding, and two-finger movement stays native scrolling.
 - Keyboard actions, **App Explorer**, and **Window Manager** work through the same
   action pipeline. Once a HUD opens, swipe and lift to select; nested groups,
   Explorer hold layers, tiling sizes, and media controls remain available.
 - macOS still owns Apple pointer acceleration, scrolling/momentum, clicks, and
-  dragging. Rotagivan does **not** post extra mouse events for Apple touches,
+  dragging. Rota does **not** post extra mouse events for Apple touches,
   change System Settings, or seize the device.
   Navigator motion/scroll sliders and synthetic click/drag bindings do not apply
   to the Apple trackpad. Click bindings remain macOS's responsibility, including
@@ -178,7 +195,7 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   motion-only event filter saves, hides, and pins the actual cursor position so
   swipes select HUD actions without moving it. Closing the HUD restores the saved
   position before showing the cursor. Entering inline editing, disconnecting,
-  disabling Apple actions, or stopping Rotagivan releases the filter. Done in the
+  disabling Apple actions, or stopping Rota releases the filter. Done in the
   editor resumes HUD selection. A keyboard-opened HUD also pauses movement when
   an Apple trackpad is connected, until a different input source takes ownership.
   macOS has a shared pointer, so other mice also pause during this interval;
@@ -198,7 +215,7 @@ migration. It is not reinterpreted or silently enabled as a new gesture binding.
   centering. Partially off-screen windows use the visible portion if their center
   is outside the displays. Geometry checks use bounded retries and short
   Accessibility timeouts; there is no unbounded wait.
-- Native gestures can happen **alongside** a Rotagivan binding. Choose bindings
+- Native gestures can happen **alongside** a Rota binding. Choose bindings
   that do not conflict with macOS/app gestures, or change those gestures yourself
   in System Settings. Native mouse-down events cancel pending Apple gestures; a short
   80 ms arbitration window before touch-triggered HUDs lets secondary clicks
@@ -230,9 +247,9 @@ The adapter's contact layout is informed by the reverse-engineered
 and [TrackMagic's earlier header](https://github.com/calftrail/TrackMagic/blob/master/MultitouchSupport.h).
 Its millimeter vector is converted to the same logical distance scale as
 Navigator (2,048 units per 55 mm). Raw-frame fixtures, gesture output isolation,
-device arbitration, and simulated HUD integration run in `Rotagivan/test.sh`.
+device arbitration, and simulated HUD integration run in `Rota/test.sh`.
 The separate native HUD smoke harness is
-`Rotagivan/Tests/ExplorerCalibrationUISmoke.swift`.
+`Rota/Tests/ExplorerCalibrationUISmoke.swift`.
 Hardware enumeration was checked on a Mac mini with a Magic Mouse; physical
 Apple-trackpad recognition and distance calibration still need verification on
 a built-in or Magic Trackpad.
@@ -243,24 +260,37 @@ a built-in or Magic Trackpad.
 cd ~/gh/bryanwhiting/rotagivan
 
 # One-time only, unless the signing identity is missing:
-zsh Rotagivan/setup-signing.sh
+zsh Rota/setup-signing.sh
 
 # Build the app:
-zsh Rotagivan/build.sh
+zsh Rota/build.sh
 
 # Optional regression checks:
-zsh Rotagivan/test.sh
+zsh Rota/test.sh
 
 # Install and launch:
 ./launch.sh
 ```
 
-`launch.sh` quits Rotagivan gracefully, waits for it to exit, copies the signed
+`launch.sh` quits Rota gracefully, waits for it to exit, copies the signed
 build into `/Applications` with `ditto`, verifies its signature, resets only
-Rotagivan's Accessibility permission, and reopens the installed copy. It works
+Rota's Accessibility permission, and reopens the installed copy. It works
 from any directory, preserves your app settings, and does
 not rebuild or re-sign the app. Use `./launch.sh --check` for a read-only check.
 If a copy will not quit, it stops instead of overwriting a running app.
+
+**Upgrading from Rotagivan.** The app used to be named Rotagivan with the
+bundle identifier `local.rotagivan`. When `launch.sh` finds
+`/Applications/Rotagivan.app`, it quits that copy, removes it, and installs
+`/Applications/Rota.app`. macOS keys Accessibility and Input Monitoring by
+bundle identifier, so you must grant them to Rota once more, even with
+`--keep-accessibility` (later installs keep the grant as before). Nothing else
+is lost: on first launch Rota copies the settings key to its new Keychain
+service, moves `~/Library/Application Support/Rotagivan` to
+`.../Application Support/Rota`, moves `~/.config/rotagivan` to `~/.config/rota`
+when that default local-sync folder is in use, and reuses a saved sync login.
+macOS may ask once to allow Rota to read the Keychain items the old app saved;
+click **Allow**.
 
 The reset now runs by default. To keep a working Accessibility permission:
 
@@ -270,13 +300,13 @@ The reset now runs by default. To keep a working Accessibility permission:
 
 Without `--keep-accessibility`, the launcher installs and verifies the build,
 runs `tccutil reset Accessibility
-local.rotagivan` while Rotagivan is closed, then opens the app and Accessibility
-settings. Manually enable `/Applications/Rotagivan.app` (add it with **+** if
-needed), then reconnect or relaunch Rotagivan. Close and reopen System Settings
+local.rota` while Rota is closed, then opens the app and Accessibility
+settings. Manually enable `/Applications/Rota.app` (add it with **+** if
+needed), then reconnect or relaunch Rota. Close and reopen System Settings
 if its list appears stale. This resets the permission decision; it does not
 guarantee every old app entry disappears from the list.
 
-The reset is **on by default**, affects only this user's Rotagivan Accessibility
+The reset is **on by default**, affects only this user's Rota Accessibility
 permission, and leaves Input Monitoring, other apps, layers, YAML, and login
 credentials untouched. Run it as your normal logged-in user, not with `sudo`.
 It cannot grant access automatically or override a managed Mac's policy. A
@@ -289,10 +319,10 @@ still accepted. After granting access, reopen the app from Applications or use
 Built app path:
 
 ```sh
-Rotagivan/build/Rotagivan.app
+Rota/build/Rota.app
 ```
 
-Do not run ZSA Navigator and Rotagivan at the same time; both apps would receive and respond to the same touch reports. On first launch, macOS may require Accessibility and possibly Input Monitoring permission for `/Applications/Rotagivan.app`. If macOS blocks the local build because it is not notarized, right-click the app in Finder and choose **Open** once.
+Do not run ZSA Navigator and Rota at the same time; both apps would receive and respond to the same touch reports. On first launch, macOS may require Accessibility and possibly Input Monitoring permission for `/Applications/Rota.app`. If macOS blocks the local build because it is not notarized, right-click the app in Finder and choose **Open** once.
 
 Features:
 
@@ -317,14 +347,14 @@ in the app resources.
 
 ```sh
 # One-time setup, only after approving a local code-signing certificate:
-zsh Rotagivan/setup-signing.sh
-chmod +x Rotagivan/build.sh
-Rotagivan/build.sh
+zsh Rota/setup-signing.sh
+chmod +x Rota/build.sh
+Rota/build.sh
 ```
 
-Run `./launch.sh` after building to install and open Rotagivan. Quit the official
-Navigator app separately before using Rotagivan. On first installation, macOS
-will ask for Accessibility access so Rotagivan can post pointer and scroll events.
+Run `./launch.sh` after building to install and open Rota. Quit the official
+Navigator app separately before using Rota. On first installation, macOS
+will ask for Accessibility access so Rota can post pointer and scroll events.
 
 Do not run both apps together: each would receive and respond to the same touch reports.
 
@@ -661,7 +691,7 @@ group, or open an existing group's editor and set **Group contents → Recent ap
 You can rename it, nest it inside other groups, and tap the HUD center to go back.
 Its slots are ranked **left, top-left, top, top-right, right, bottom-right, bottom,
 bottom-left**, from most to least recently used. It shows up to eight other running
-apps, excluding the current app and Rotagivan. The editor previews the rank in
+apps, excluding the current app and Rota. The editor previews the rank in
 each direction. Switching an existing group to Recent apps preserves its assigned
 favorites; switch back to **Assigned favorites** to restore them. The group type
 syncs, but recent-app history stays local to each Mac.
@@ -729,10 +759,10 @@ to cancel completely. It also closes after 15 seconds of navigation inactivity, 
 switch/Space change, layer or tap-setting changes, sleep, or device disconnect.
 
 Recency is learned from [macOS application activation notifications](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification)
-while Rotagivan runs. Only bundle IDs are stored locally; this history is not
+while Rota runs. Only bundle IDs are stored locally; this history is not
 included in exported YAML or cloud sync. On first use, unknown running apps fill
 remaining slots in launch-date order until their actual usage is observed.
-The current app, Rotagivan, and background-only helpers are excluded. If fewer
+The current app, Rota, and background-only helpers are excluded. If fewer
 than eight eligible apps are running, remaining tiles stay empty. Gesture
 assignments themselves do inherit, copy, export, and sync with layers.
 
@@ -784,6 +814,11 @@ The feature is off until enabled with at least one binding. When configured,
 single-click output waits for a possible swipe, and held drags wait for the
 quick-swipe duration. Inheritance, Tapping **Copy from**, YAML, and account sync
 include these settings. Existing layers and motion tuning are unchanged.
+
+On an Apple trackpad the same gesture fires the same binding with the same
+window, duration, and distance (see **Apple trackpad actions**). The tap itself
+stays macOS's click and the swipe moves the pointer natively; only the lift
+dispatches the binding.
 
 ### Double-tap, then swipe
 
@@ -901,15 +936,15 @@ Open **Keybindings and Macros** in the settings sidebar:
   shortcut. App overrides show the global action → app action, including explicit
   “Nothing” rules. Two-finger navigation remains independent of tap-to-click.
   HUD-local overlaps and shortcuts sent to combinations also registered by
-  Rotagivan are flagged as potential overlaps, not guaranteed failures.
+  Rota are flagged as potential overlaps, not guaranteed failures.
 - **All assignments** is a searchable inventory with app scope, precedence, and
   an option to include inactive actions. Choose another layer/device to audit
   its actions; keys in unrelated HUD groups are not treated as simultaneous
   conflicts.
 
-This is an audit of **Rotagivan's configured bindings**, not a scanner of other
+This is an audit of **Rota's configured bindings**, not a scanner of other
 apps' private shortcuts or macOS shortcut settings. Runtime registration errors
-are displayed when macOS rejects one of Rotagivan's global hotkeys. Macro steps
+are displayed when macOS rejects one of Rota's global hotkeys. Macro steps
 are audited as outgoing combinations, not registered keys. Launchers restricted
 to different apps do not conflict with one another.
 
@@ -937,19 +972,19 @@ sequence. Start with an exported file when editing by hand. Imports reject
 unknown keys, duplicate keys/IDs, invalid ranges or references, multiple documents,
 aliases, and files over 1 MB.
 
-`Rotagivan/DefaultConfiguration.yaml` is the factory configuration captured from
+`Rota/DefaultConfiguration.yaml` is the factory configuration captured from
 the current tuned app for v1.1.49 (51). Fresh installations use it without applying
 legacy slider migrations. Existing saved settings are not overwritten by an
 upgrade. **General → Restore defaults…** restores that snapshot. No automatic
 renormalization is performed by import or reset.
 
-Run all regression checks with `zsh Rotagivan/test.sh` (isolated test preferences).
+Run all regression checks with `zsh Rota/test.sh` (isolated test preferences).
 
 ## Accessibility onboarding
 
-When Accessibility is missing, Rotagivan opens a small setup guide instead of
+When Accessibility is missing, Rota opens a small setup guide instead of
 only displaying the system permission prompt. Choose **Open Accessibility
-Settings**, drag the **Rotagivan.app** tile into the app list, then enable its
+Settings**, drag the **Rota.app** tile into the app list, then enable its
 switch. The guide stays visible beside System Settings. The tile carries the
 running app’s file URL, so macOS receives the actual application rather than an
 icon image; it never moves or deletes the app.
@@ -978,15 +1013,15 @@ silently opts into Apple input.
 
 ## Current verification and setup
 
-The application builds locally and detects the connected Voyager. An initial “device not open” setup error was corrected by explicitly opening the HID device; successful live operation still needs verification. Enable Rotagivan in System Settings → Privacy & Security → Accessibility and, if requested, Input Monitoring. Quit ZSA Navigator, launch Rotagivan, and use General → Reconnect.
+The application builds locally and detects the connected Voyager. An initial “device not open” setup error was corrected by explicitly opening the HID device; successful live operation still needs verification. Enable Rota in System Settings → Privacy & Security → Accessibility and, if requested, Input Monitoring. Quit ZSA Navigator, launch Rota, and use General → Reconnect.
 
-Bundle identifier and preferences domain: `local.rotagivan`. Existing preferences are migrated from `local.navigator.clone`. Builds now require a persistent signing identity and pin the designated requirement to its certificate and the bundle identifier. The build fails rather than falling back to ad-hoc signing. Local setup keeps the non-extractable private key in your user Keychain, grants codesign access, and trusts the certificate for code signing only. The public certificate is kept in ignored `Rotagivan/.signing/`. This is local development signing, not Apple notarization or a distribution certificate.
+Bundle identifier and preferences domain: `local.rota`. Existing preferences are migrated from `local.navigator.clone`. Builds now require a persistent signing identity and pin the designated requirement to its certificate and the bundle identifier. The build fails rather than falling back to ad-hoc signing. Local setup keeps the non-extractable private key in your user Keychain, grants codesign access, and trusts the certificate for code signing only. The public certificate is kept in ignored `Rota/.signing/`. This is local development signing, not Apple notarization or a distribution certificate.
 
-Moving from old ad-hoc builds to this identity requires a one-time removal and re-addition of `/Applications/Rotagivan.app` in Accessibility. Quit the app and System Settings before resetting its grant, then add that exact installed path. Do not launch older copies from build or backup folders. Preserve the Keychain identity across updates; deleting or replacing it requires granting permission again. A new computer needs a new local identity (or an Apple Developer signing setup).
+Moving from old ad-hoc builds to this identity requires a one-time removal and re-addition of `/Applications/Rota.app` in Accessibility. Quit the app and System Settings before resetting its grant, then add that exact installed path. Do not launch older copies from build or backup folders. Preserve the Keychain identity across updates; deleting or replacing it requires granting permission again. A new computer needs a new local identity (or an Apple Developer signing setup).
 
 Live cursor feel, scrolling, hotkey release, dragging, and multi-monitor behavior still require hardware testing after permission is granted. ZSA's exact acceleration/smoothing algorithms and automatic updater have not been reproduced. This version matches the connected Voyager product ID; other ZSA keyboards need additional verified device IDs.
 
-To return to the original, quit Rotagivan and launch `/Applications/Navigator.app`. The clone never writes the original app's settings.
+To return to the original, quit Rota and launch `/Applications/Navigator.app`. The clone never writes the original app's settings.
 
 ## Hacking guide
 
@@ -1004,12 +1039,12 @@ Protocol references: the connected device's HID descriptor and [ZSA's firmware r
 Run decoder checks:
 
 ```sh
-xcrun swiftc Rotagivan/TrackpadReport.swift Rotagivan/Tests/ReportTests.swift -o Rotagivan/build/report-tests
-Rotagivan/build/report-tests
-xcrun swiftc Rotagivan/Models.swift Rotagivan/CursorResponse.swift Rotagivan/EventPoster.swift Rotagivan/Tests/ClickTests.swift -o Rotagivan/build/click-tests
-Rotagivan/build/click-tests
-xcrun swiftc Rotagivan/Models.swift Rotagivan/CursorResponse.swift Rotagivan/Tests/CursorResponseTests.swift -o Rotagivan/build/curve-tests
-Rotagivan/build/curve-tests
+xcrun swiftc Rota/TrackpadReport.swift Rota/Tests/ReportTests.swift -o Rota/build/report-tests
+Rota/build/report-tests
+xcrun swiftc Rota/Models.swift Rota/CursorResponse.swift Rota/EventPoster.swift Rota/Tests/ClickTests.swift -o Rota/build/click-tests
+Rota/build/click-tests
+xcrun swiftc Rota/Models.swift Rota/CursorResponse.swift Rota/Tests/CursorResponseTests.swift -o Rota/build/curve-tests
+Rota/build/curve-tests
 ```
 
 ## Cursor response editor
@@ -1080,6 +1115,6 @@ Design references (no external implementation copied):
 
 ## Local development and uninstalling
 
-The coding checkout is `~/gh/bryanwhiting/rotagivan`. Build artifacts, old app backups, and local preferences are not committed. Quit the app before deleting `/Applications/Rotagivan.app`; deleting the installed app does not delete this source checkout or its saved preferences. Rebuild and copy the app back into Applications to reinstall.
+The coding checkout is `~/gh/bryanwhiting/rotagivan`. Build artifacts, old app backups, and local preferences are not committed. Quit the app before deleting `/Applications/Rota.app`; deleting the installed app does not delete this source checkout or its saved preferences. Rebuild and copy the app back into Applications to reinstall.
 
 No public redistribution license has been selected. This is a private development project, with AI-generated code and protocol references documented above.

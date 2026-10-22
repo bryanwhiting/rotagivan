@@ -1,11 +1,11 @@
 # Build provenance
 
 The build reads Git once, before compiling, and stamps the **built bundle**, never
-the tracked `Rotagivan/Info.plist`. Numeric macOS version/build fields stay separate
+the tracked `Rota/Info.plist`. Numeric macOS version/build fields stay separate
 from labels such as `v1.1.203-abcd-dirty`.
 
 The first four lowercase SHA characters are a convenient label, not a unique
-identifier. **About Rotagivan** and version-label tooltips show the full commit,
+identifier. **About Rota** and version-label tooltips show the full commit,
 source state, build-input SHA-256, and UTC build time. The signed app also includes
 these values in its Info.plist and `Contents/Resources/BuildProvenance.json`.
 
@@ -23,9 +23,9 @@ inputs and cannot make repeated builds dirty. Build-input bytes and file modes
 are compared to HEAD, including untracked inputs. HEAD and all input hashes are
 checked again before signing; concurrent source changes abort the build.
 
-Build from the actual Git checkout with `zsh Rotagivan/build.sh`. Missing Git/HEAD
+Build from the actual Git checkout with `zsh Rota/build.sh`. Missing Git/HEAD
 is an explicit build error, rather than guessed provenance. Unstamped development
 bundles display `unknown`. No running app queries Git or the current checkout.
 
-Run `zsh Rotagivan/test-provenance.sh` for isolated clean/dirty/hash tests. Pass an
+Run `zsh Rota/test-provenance.sh` for isolated clean/dirty/hash tests. Pass an
 installed `Contents/Info.plist` path to also validate its rendered version string.

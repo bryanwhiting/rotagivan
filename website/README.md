@@ -1,4 +1,4 @@
-# Rotagivan website
+# Rota website
 
 Astro static marketing site for Cloudflare Workers Static Assets, styled after the app's settings window (system font, light and dark, teal accent). Pages: home (hero, browser-only HUD demo, six feature cards, download block), download (direct DMG link from `/latest.json`, three install steps, checksum), pricing (Voice mode checkout), purchase success, and a custom 404.
 

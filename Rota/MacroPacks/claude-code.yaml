@@ -1,0 +1,52 @@
+# Rota macro pack · Claude Code (Claude desktop app)
+# Import: Settings → Actions → Add action → Built-in packs → Claude Code.
+# Every macro brings the Claude app to the front (launching it if needed) before typing.
+# Shortcuts were read from the app's File, View, Go and Help menus.
+format: rota-macro-pack/1
+name: Claude Code
+app: com.anthropic.claudefordesktop
+appName: Claude
+notes: >-
+  Shortcuts follow the Claude desktop app's menus. Cmd+N starts a new Claude
+  Code session while the Code view is showing and a new chat while the chat
+  view is showing; the app has no shortcut for Go → Code, so switch views once
+  and the session macros keep working. "New session and ask…" types a prompt
+  into the new session without sending it, so you can edit it first.
+macros:
+  - name: New Claude Code session
+    keys: cmd+n
+  - name: New session and ask for a plan
+    steps: [cmd+n, {type: "Look over this project and propose a plan before changing anything."}]
+    delay: 600
+  - name: New session on the right
+    keys: ctrl+cmd+backslash
+  - name: New session below
+    keys: ctrl+cmd+minus
+  - name: Open folder…
+    keys: shift+cmd+o
+  - name: Close session
+    keys: cmd+w
+  - name: Reopen closed session
+    keys: shift+cmd+t
+  - name: Search sessions
+    keys: shift+cmd+k
+  - name: Previous session
+    keys: "shift+cmd+["
+  - name: Next session
+    keys: "shift+cmd+]"
+  - name: Command palette
+    keys: cmd+k
+  - name: Toggle sidebar
+    keys: cmd+b
+  - name: Show side chat
+    keys: "cmd+;"
+  - name: Show files
+    keys: shift+cmd+f
+  - name: Show changes
+    keys: shift+cmd+d
+  - name: Show browser
+    keys: shift+cmd+b
+  - name: Close pane
+    keys: cmd+backslash
+  - name: Keyboard shortcuts
+    keys: cmd+/

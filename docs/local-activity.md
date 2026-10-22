@@ -1,6 +1,6 @@
 # Local activity
 
-Open **Activity today** from the Rotagivan menu-bar panel. Tracking starts off;
+Open **Activity today** from the Rota menu-bar panel. Tracking starts off;
 enable **Screen Time** in the Activity window to opt in on this Mac. The UI says
 “Opt in to Screen Time settings to see computer usage insights.” This is Rota's
 own local setting, not a request to read Apple's Screen Time database. It counts
@@ -44,8 +44,8 @@ The app does not store speech transcripts or copy action statistics into sync.
 ## Storage and deletion
 
 History lives only at
-`~/Library/Application Support/Rotagivan/Activity/usage.sqlite`. Local opt-in and
-personalization preferences use the separate `local.rotagivan.activity` defaults
+`~/Library/Application Support/Rota/Activity/usage.sqlite`. Local opt-in and
+personalization preferences use the separate `local.rota.activity` defaults
 domain. Neither is part of profiles, settings YAML, settings export, cloud sync,
 API-key storage, or voice-provider prompts. Different Macs build different histories.
 
@@ -72,4 +72,4 @@ reranked. Exact-name matches retain priority. It does not change remote voice-mo
 prompts or transmit activity data. Turning it off restores the normal search order;
 deleting activity clears its learned state.
 
-Run `bash Rotagivan/test-usage.sh` for isolated synthetic accounting/database tests.
+Run `bash Rota/test-usage.sh` for isolated synthetic accounting/database tests.

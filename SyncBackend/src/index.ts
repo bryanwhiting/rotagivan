@@ -158,7 +158,7 @@ async function route(request: Request, env: Env): Promise<Response> {
       : await env.DB.prepare(`UPDATE settings SET yaml=?,revision=revision+1,updated_at=?
           WHERE user_id=? AND revision=? AND (yaml NOT GLOB 'rota-e2ee-settings-v1:*' OR ? GLOB 'rota-e2ee-settings-v1:*')`)
           .bind(input.yaml,updatedAt,user.id,input.baseRevision,input.yaml).run();
-    if (!result.meta.changes) throw new HTTPError(409, 'Settings changed or require encrypted sync. Update Rotagivan and retry.');
+    if (!result.meta.changes) throw new HTTPError(409, 'Settings changed or require encrypted sync. Update Rota and retry.');
     return json({ revision: input.baseRevision + 1, updatedAt }, 200, { 'ETag': etag(input.baseRevision + 1) });
   }
   throw new HTTPError(404, 'Not found.');

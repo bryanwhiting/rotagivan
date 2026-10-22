@@ -7,14 +7,14 @@ The development install and the customer install are separate workflows.
 1. Explore the website and browser demo; view published pricing and terms.
 2. Purchase/activate only once an actual licensing and payment model is chosen, or download if a free release is chosen.
 3. Download a release signed by the publisher with Apple Developer ID, notarized by Apple, and stapled before distribution.
-4. Move Rotagivan into Applications and open it. Grant Accessibility and any applicable Input Monitoring permissions through macOS. Microphone permission and provider configuration are needed only for optional voice features.
+4. Move Rota into Applications and open it. Grant Accessibility and any applicable Input Monitoring permissions through macOS. Microphone permission and provider configuration are needed only for optional voice features.
 5. Configure a first action, test it, then build up profiles, gestures, and macros.
 
 Customers do not install Xcode, compile source, create a signing identity, or trust a development certificate. Signing and notarization do not grant privacy permissions automatically.
 
 ## Publisher release path
 
-The current `Rotagivan/build.sh` / `launch.sh` intentionally use a persistent local development identity and certificate pin. Preserve that path for local updates. Do not replace or weaken it to ship a download.
+The current `Rota/build.sh` / `launch.sh` intentionally use a persistent local development identity and certificate pin. Preserve that path for local updates. Do not replace or weaken it to ship a download.
 
 A future distribution workflow should:
 
@@ -28,8 +28,8 @@ A future distribution workflow should:
 
 ## Current release pipeline
 
-`scripts/release.sh` builds with `Rotagivan/build.sh`, then packages
-`Rotagivan-<version>-<build>.dmg` (drag-to-Applications) and `.zip`. It uploads
+`scripts/release.sh` builds with `Rota/build.sh`, then packages
+`Rota-<version>-<build>.dmg` (drag-to-Applications) and `.zip`. It uploads
 them to the private `rotagivan-releases` R2 bucket and publishes
 `latest.json`. The `rotagivan-website` Worker serves:
 
@@ -51,11 +51,11 @@ To ship a normal "download and open" app:
 
 1. Join the Apple Developer Program, then create a **Developer ID Application**
    certificate and install it in the login Keychain.
-2. `xcrun notarytool store-credentials rotagivan-notary --apple-id … --team-id … --password <app-specific password>`
-3. `DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=rotagivan-notary scripts/release.sh`
+2. `xcrun notarytool store-credentials rota-notary --apple-id … --team-id … --password <app-specific password>`
+3. `DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=rota-notary scripts/release.sh`
 
 The script re-signs a *copy* of the app with hardened runtime, a secure
-timestamp and `Rotagivan/Release.entitlements` (microphone and Apple Events).
+timestamp and `Rota/Release.entitlements` (microphone and Apple Events).
 It then notarizes and staples the app and the DMG, and checks the DMG with
 `spctl`. Local `build.sh` builds keep the development identity. A Developer
 ID build has a different designated requirement, so its first launch needs a

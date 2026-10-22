@@ -1,0 +1,3221 @@
+import AppKit
+import SwiftUI
+import OSLog
+import Combine
+
+@MainActor protocol AppExplorerPresenting: AnyObject {
+    var isVisible: Bool { get }
+    var isEditing: Bool { get }
+    var onDismiss: (() -> Void)? { get set }
+    var contextIsValid: (() -> Bool)? { get set }
+    var onPresentationChanged: (() -> Void)? { get set }
+    func show(waitingForLift: Bool)
+    func showWindowManager(waitingForLift: Bool)
+    func showLayer(_ id: UUID, waitingForLift: Bool)
+    func activateVoiceMode()
+    func process(_ report: TrackpadReport)
+    func dismiss()
+    func setAlternateHeld(_ held: Bool)
+}
+extension AppExplorerPresenting {
+    func showLayer(_ id: UUID, waitingForLift: Bool) {}
+    func activateVoiceMode() {}
+    var onPresentationChanged: (() -> Void)? { get { nil } set {} }
+    var isEditing: Bool { false }
+    func setAlternateHeld(_ held: Bool) {}
+}
+
+@MainActor final class AppExplorerController: AppExplorerPresenting {
+    private let workspace = NSWorkspace.shared
+    private let defaults: UserDefaults
+    private var recents: AppExplorerRecents
+    private var observers: [NSObjectProtocol] = []
+    private var panel: ExplorerPanel?
+    /// The HUD window and its SwiftUI hierarchy are built once and reused, so
+    /// reopening costs a frame, not a rebuild. Nil until the first open or warm-up.
+    private var hudPanel: ExplorerPanel?
+    private var launcherMenuSnapshot: [LauncherAction] = []
+    private var launcherMenuRefresh: Task<Void, Never>?
+    private var launcherRegisteredSnapshot: [VoiceRegisteredAction] = []
+    private var launcherActionSnapshot: [LauncherAction] = []
+    /// The catalog only changes when a snapshot (apps, folders, tabs, menus)
+    /// arrives, not per keystroke; reusing the same array lets the search
+    /// index skip its element-by-element comparison.
+    private var launcherCatalogDirty = true
+    private var launcherCatalogAppCount = -1
+    private var chromeTabSnapshot: [ChromeRecentTab] = []
+    private var chromeTabsLoaded = false
+    /// Opt-in Chrome history rows; kept across dismiss so the next open shows
+    /// the last list at once while the actor refreshes a stale one.
+    private var chromeHistorySnapshot: [ChromeHistoryEntry] = []
+    var chromeHistoryEnabled: () -> Bool = { false }
+    var chromeHistoryProvider: @Sendable () async -> [ChromeHistoryEntry] = { await ChromeHistoryIndex.shared.snapshot() }
+    private var chromeTabsPage = 0
+    private var chromeSnapshotSession = UUID()
+    var chromeTabsProvider: @Sendable () -> [ChromeRecentTab] = { ChromeBookmarkTabs.snapshot() }
+    private var folderSnapshot: [ExplorerFolder] = []
+    private var pendingMenuAction: LauncherAction?
+    private var searchObservation: AnyCancellable?
+    private var privateEditorOpen = false
+    private var timer: Timer?
+    private var escapeMonitor: Any?
+    private var input = AppExplorerSelection(waitingForLift: false)
+    private var localGestureReports: [TrackpadReport] = []
+    private var localGestureStrokeStart = 0
+    private var localGestureTapCount = 0
+    private var localGestureFingerCount = 0
+    private var localGestureSequenceFingers = 0
+    private var localGestureMaxTravel = 0.0
+    private var localGesturePendingWindow = 0.0
+    private var localGestureFollowupDelay = 0.0
+    private var localGestureStarted = Date.distantPast
+    private var localGestureLastLift = Date.distantPast
+    private var orbitDragUnit = CGPoint.zero
+    private var localGestureOrigin: CGPoint?
+    private var localGestureLast = CGPoint.zero
+    private var localGestureFingerOrigins: [UInt8: CGPoint] = [:]
+    private var localGestureFingerLast: [UInt8: CGPoint] = [:]
+    private var localGestureTimer: Timer?
+    private let model = ExplorerModel()
+    private var voicePreparation: Task<Void, Never>?
+    private var voiceSwipeMatchID: String?
+    private var voiceAutoSelection: Task<Void, Never>?
+    /// Long enough to read what was heard and picked, short enough to feel automatic.
+    var voiceAutoSelectDelay: TimeInterval = 0.7
+    var voiceCatalog: (() -> [VoiceRegisteredAction])?
+    var prepareVoice: ((VoiceSession, [VoiceRegisteredAction]) -> Void)?
+    var displayedVoiceSession: VoiceSession? { model.voiceSession }
+    // Prepared on presentation and reused across rotations; never retain stale
+    // configuration or machine-local app icons across separate HUD sessions.
+    private var entryCache: [(favorite: AppExplorerFavorite, depth: Int, entry: ExplorerEntry)] = []
+    private var entryCacheSettings: AppExplorerSettings?
+    private var entryCacheDictionary: [NamedHotkey] = []
+    private var sourcePID: pid_t?
+    private let shortcutPoster = EventPoster()
+    var sendShortcut: ((RecordedShortcut) -> Void)?
+    var frontmostPID: () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    var frontmostBundleID: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+    private var sourceBundleID: String?
+    private var deadline = Date.distantPast
+    private var alternateHeld = false
+    private var heldKeys = ExplorerScopedHeldKeys()
+    private var windowKeys = ExplorerScopedHeldKeys()
+    private var windowGroupPath: [ExplorerSlot] = []
+    private var baseWindowGroupPath: [ExplorerSlot] = []
+    private var windowOwnerPath: [ExplorerSlot]?
+    private var windowList: [WindowTiling.AppWindow] = []
+    private var windowPage = 0
+    var listWindows: (pid_t) -> [WindowTiling.AppWindow] = { WindowTiling.windows(pid: $0) }
+    private var baseGroupPath: [ExplorerSlot] = []
+    var performMedia: (ExplorerMediaAction) -> Void = { ExplorerMediaAction.perform($0) }
+    var performMacCommand: (AppExplorerAction) -> Void = { action in
+        guard let shortcut = action.macOSShortcut else { return }
+        EventPoster().performTap(.shortcut, shortcut: shortcut)
+    }
+    private(set) var groupPath: [ExplorerSlot] = []
+    private var contactIsDown = false
+    private var selectionGeneration: UInt64 = 0
+    private let cursorCentering = ExplorerCursorCentering()
+    var cursorPosition: () -> CGPoint? = { CGEvent(source: nil)?.location }
+    var centerApplication: ((pid_t, CGPoint?, @escaping () -> Bool) -> Void)?
+    var focusApplicationWindow: (pid_t) -> Void = { WindowTiling.focusApplicationWindow(pid: $0) }
+    private var tilingTarget: WindowTilingTarget?
+    private var controlDirection: ExplorerSlot?
+    var captureWindow: (pid_t) -> WindowTilingTarget? = { WindowTiling.capture(pid: $0) }
+    var configuration: () -> AppExplorerSettings = { AppExplorerSettings() }
+    var gestureSettings: () -> ProfileGestures = {
+        ProfileGestures(gestures: GestureSettings(), oneFingerTap: .none, twoFingerTap: .none)
+    }
+    var hotkeyDictionary: () -> [NamedHotkey] = { [] }
+    var applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }
+    var openWebURL: (URL) -> Bool = { NSWorkspace.shared.open($0) }
+    var openApplication: (URL, NSWorkspace.OpenConfiguration, @escaping @MainActor (pid_t?) -> Void) -> Void = { url, configuration, completion in
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
+            if let error {
+                // Launch Services may invoke this callback off the main actor.
+                // Keep logging local so it never accesses actor-isolated state.
+                let logger = Logger(subsystem: "local.rota", category: "AppExplorer")
+                logger.error("Application open failed: \(error.localizedDescription, privacy: .public)")
+            }
+            let pid = error == nil ? app?.processIdentifier : nil
+            Task { @MainActor in completion(pid) }
+        }
+    }
+    var onDismiss: (() -> Void)?
+    var onSettings: (() -> Void)?
+    var onBindingAction: ((BindingAction) -> Void)?
+    var onKeyboardBindingAction: ((BindingAction) -> Void)?
+    var onPresentationChanged: (() -> Void)?
+    var contextIsValid: (() -> Bool)?
+    var noteStore = TemporaryIntentionStore.shared
+    var microphoneAdmission = VoiceMicrophoneAdmission.shared
+    var makeVoiceSession: () -> VoiceSession = { VoiceSession() }
+    var loadVoiceApplications: () async -> Void = { await VoiceApplicationIndex.shared.load() }
+    weak var editingStore: SettingsStore?
+    var onEditingChanged: ((Bool) -> Void)?
+    var isVisible: Bool { panel != nil }
+    var isEditing: Bool { model.isEditing || privateEditorOpen }
+    var makeRealtimeSession: () -> RealtimeLauncherSession = { RealtimeLauncherSession() }
+    var useRealtimeVoice: () -> Bool = { UserDefaults.standard.string(forKey: LauncherVoiceProvider.preferenceKey) == LauncherVoiceProvider.openAIRealtime.rawValue }
+    var displayedRealtimeSession: RealtimeLauncherSession? { model.realtimeSession }
+    var displayedLauncherActions: [LauncherAction] { model.launcherActions }
+    var displayedLauncherQuery: String { model.launcherQuery }
+    var displayedLauncherResults: [ExplorerApplication] { model.launcherResults }
+    var displayedLauncherSelection: Int { model.launcherSelection }
+    var displayedEntries: [ExplorerEntry] { model.entries }
+    var displayedMessage: String? { model.message }
+    var displayedOrbitProgress: Double { model.orbitProgress }
+    var displayedHUDMap: [HUDCarouselPreview] { model.carouselPreviews }
+    var displayedLayerID: UUID? { heldKeys.activeID }
+    var displayedOrbitOffset: HUDMapPoint { model.orbitOffset }
+    var displayedLevelDirections: [ExplorerSlot] { model.groupDirections }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        recents = AppExplorerRecents(defaults.stringArray(forKey: "appExplorer.recentBundleIDs") ?? [])
+        if let app = workspace.frontmostApplication { record(app) }
+        observers.append(workspace.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                self.record(app)
+                if self.isVisible && (self.isEditing
+                    ? app.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                    : app.processIdentifier != self.sourcePID) { self.dismiss() }
+            }
+        })
+        for notification in [NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification, NSWorkspace.activeSpaceDidChangeNotification] {
+            observers.append(workspace.notificationCenter.addObserver(forName: notification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.dismiss() }
+            })
+        }
+    }
+
+    deinit {
+        for observer in observers { workspace.notificationCenter.removeObserver(observer) }
+        timer?.invalidate()
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+    }
+
+    private func record(_ app: NSRunningApplication) {
+        guard app.activationPolicy == .regular, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let identifier = app.bundleIdentifier, identifier != "local.rota" else { return }
+        recents.record(identifier)
+        defaults.set(recents.identifiers, forKey: "appExplorer.recentBundleIDs")
+    }
+
+    func show(waitingForLift: Bool) {
+        show(waitingForLift: waitingForLift, windowManager: false)
+    }
+
+    func showLayer(_ id: UUID, waitingForLift: Bool) {
+        guard let layer = configuration().holdLayers?.first(where: { $0.id == id }), layer.isAvailable(in: frontmostBundleID()) else { return }
+        if isVisible { dismiss() }
+        show(waitingForLift: waitingForLift, windowManager: false, layerID: id)
+    }
+
+    func showWindowManager(waitingForLift: Bool) {
+        show(waitingForLift: waitingForLift, windowManager: true)
+    }
+
+    /// Switch the open panel's scope without changing its source application or
+    /// releasing the trackpad that owns its pointer lock.
+    func switchLayer(_ id: UUID?) {
+        if model.voiceSession != nil || model.realtimeSession != nil { endVoiceMode() }
+        pendingMenuAction = nil
+        guard isVisible, !isEditing else { return }
+        if let id {
+            guard let layer = configuration().holdLayers?.first(where: { $0.id == id }),
+                  layer.isAvailable(in: sourceBundleID) else { return }
+        }
+        heldKeys = ExplorerScopedHeldKeys()
+        if let id { heldKeys.selectRootLayer(id, settings: configuration()) }
+        windowKeys = ExplorerScopedHeldKeys()
+        groupPath = []; baseGroupPath = []
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+        model.showingWindowManager = false
+        model.directWindowManager = false
+        controlDirection = nil
+        model.message = nil
+        refreshGroup()
+    }
+
+    private var mappedBuiltIn: HUDLayerBuiltIn? {
+        guard groupPath.isEmpty, windowGroupPath.isEmpty, !model.showingAppWindows else { return nil }
+        return configuration().holdLayers?.first { $0.id == heldKeys.activeID }?.builtIn
+    }
+    private var mapNavigationAvailable: Bool {
+        !model.showingAppWindows &&
+        (!model.showingWindowManager || mappedBuiltIn == .windowManager) &&
+        (!model.showingMediaControls || mappedBuiltIn == .mediaControls) && !model.showingTimer
+    }
+
+    /// Move within the fixed map without closing the panel or wrapping at its edges.
+    @discardableResult func navigateHUD(_ direction: HUDNavigationAction) -> Bool {
+        guard isVisible, !isEditing, mapNavigationAvailable else { return false }
+        let map = configuration().hudMap(in: sourceBundleID)
+        guard let origin = map.first(where: { $0.layerID == heldKeys.activeID })?.point,
+              let target = HUDMapPoint.nearestIndex(in: map.map { $0.point - origin }, toward: direction) else { return false }
+        switchLayer(map[target].layerID)
+        return true
+    }
+
+    @discardableResult func switchContainer(_ tokens: [String]) -> Bool {
+        guard isVisible, !isEditing, tokens.count <= 16 else { return false }
+        let path = tokens.compactMap(ExplorerTilePathStep.init(token:))
+        guard path.count == tokens.count else { return false }
+        var keys = ExplorerScopedHeldKeys()
+        guard let groups = keys.selectContainer(path, settings: configuration()) else { return false }
+        heldKeys = keys
+        groupPath = groups; baseGroupPath = groups
+        windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+        model.showingWindowManager = false
+        model.directWindowManager = false
+        controlDirection = nil
+        model.message = nil
+        refreshGroup()
+        return true
+    }
+
+    @discardableResult func switchWindowContainer(ownerTokens: [String], targetTokens: [String]) -> Bool {
+        guard isVisible, !isEditing, ownerTokens.count <= 16, targetTokens.count <= 16 else { return false }
+        let owner = ownerTokens.compactMap(ExplorerTilePathStep.init(token:))
+        let target = targetTokens.compactMap(ExplorerTilePathStep.init(token:))
+        guard owner.count == ownerTokens.count, target.count == targetTokens.count,
+              let window = configuration().windowActionSettings(ownerPath: owner) else { return false }
+        var selectedWindow = ExplorerScopedHeldKeys()
+        guard let windowGroups = selectedWindow.selectContainer(target, settings: window) else { return false }
+        var selectedExplorer = ExplorerScopedHeldKeys()
+        var ownerGroups: [ExplorerSlot] = []
+        var ownerSlot: ExplorerSlot?
+        if !owner.isEmpty {
+            guard case .group(let slot) = owner.last!,
+                  let groups = selectedExplorer.selectContainer(Array(owner.dropLast()), settings: configuration()) else { return false }
+            ownerGroups = groups
+            ownerSlot = slot
+        }
+        heldKeys = selectedExplorer
+        groupPath = ownerGroups; baseGroupPath = ownerGroups
+        windowKeys = selectedWindow
+        windowGroupPath = windowGroups; baseWindowGroupPath = windowGroups
+        windowOwnerPath = ownerSlot.map { ownerGroups + [$0] }
+        windowList = []; windowPage = 0
+        model.showingAppWindows = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+        model.showingWindowManager = true
+        model.directWindowManager = ownerSlot == nil
+        controlDirection = ownerSlot
+        tilingTarget = sourcePID.flatMap(captureWindow)
+        model.message = tilingTarget == nil
+            ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
+        refreshGroup()
+        return true
+    }
+
+    func showBuiltIn(_ command: AppExplorerAction) {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        switch command {
+        case .mediaControls:
+            model.showingMediaControls = true
+            model.showingTimer = false
+            model.showingAppWindows = false
+            controlDirection = nil
+            refreshGroup()
+        case .timer:
+            model.showingTimer = true
+            model.showingMediaControls = false
+            model.showingAppWindows = false
+            controlDirection = nil
+            refreshGroup()
+        default: break
+        }
+    }
+
+    private func show(waitingForLift: Bool, windowManager: Bool, layerID: UUID? = nil, autoStartVoice: Bool = true) {
+        guard !isVisible else { return }
+        resetLocalGesture()
+        cursorCentering.cancel()
+        selectionGeneration &+= 1
+        groupPath = []
+        heldKeys = ExplorerScopedHeldKeys()
+        sourceBundleID = frontmostBundleID()
+        if let layerID { heldKeys.selectRootLayer(layerID, settings: configuration()) }
+        windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        windowList = []; windowPage = 0; model.showingAppWindows = false
+        baseGroupPath = []
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+        model.showingWindowManager = windowManager
+        model.directWindowManager = windowManager
+        model.message = nil
+        tilingTarget = nil
+        controlDirection = nil
+        model.canEdit = editingStore != nil
+        contactIsDown = waitingForLift
+        sourcePID = frontmostPID()
+        if windowManager {
+            tilingTarget = sourcePID.flatMap(captureWindow)
+            model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
+        }
+        // The last Chrome snapshot shows at once while a fresh one loads; it is
+        // only dropped when Chrome itself is gone.
+        chromeTabsLoaded = false; chromeTabsPage = 0; chromeSnapshotSession = UUID()
+        loadChromeHistory(session: chromeSnapshotSession)
+        if !workspace.runningApplications.contains(where: { $0.bundleIdentifier == RecentPlaces.chromeBundleID }) { chromeTabSnapshot = [] }
+        loadEntries()
+        model.selected = nil
+        model.launcherQuery = ""; model.launcherResults = []; model.launcherActions = []; model.launcherSelection = 0
+        pendingMenuAction = nil; launcherMenuSnapshot = []; folderSnapshot = []
+        launcherRegisteredSnapshot = currentVoiceCatalog().filter { $0.enabled && $0.action.kind != .openApp }
+        launcherCatalogDirty = true
+        let menuGeneration = selectionGeneration
+        let tabProvider = chromeTabsProvider
+        let tabSession = chromeSnapshotSession
+        Task.detached(priority: .utility) { [weak self] in
+            let tabs = tabProvider()
+            let folders = ExplorerFolderCatalog.scan()
+            await self?.acceptLauncherSnapshots(tabs: tabs, folders: folders, session: tabSession)
+        }
+        if let pid = sourcePID {
+            launcherMenuRefresh = Task { [weak self] in
+                let menus = await Task.detached(priority: .utility) { LauncherMenuCatalog.scan(pid: pid) }.value
+                guard let self, self.isVisible, self.selectionGeneration == menuGeneration, !Task.isCancelled else { return }
+                self.launcherMenuSnapshot = menus
+                self.launcherCatalogDirty = true
+                if !self.model.launcherQuery.isEmpty { self.updateLauncherResults(VoiceApplicationIndex.shared.applications) }
+            }
+        }
+        searchObservation = VoiceApplicationIndex.shared.$applications.sink { [weak self] apps in
+            guard let self, !self.model.launcherQuery.isEmpty else { return }
+            self.updateLauncherResults(apps)
+        }
+        Task { await VoiceApplicationIndex.shared.load() }
+        input = makeSelection(waitingForLift: waitingForLift)
+        let panel = preparedHUDPanel()
+        panel.hasShadow = !model.theme.isFloating
+        model.presentation &+= 1
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        if let frame = screen?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
+        }
+        self.panel = panel
+        onPresentationChanged?()
+        // The owner may decline presentation if pointer capture is unavailable.
+        guard self.panel === panel else { return }
+        panel.makeKeyAndOrderFront(nil)
+        // Selection uses raw HID, not per-event SwiftUI pointer updates.
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { self?.dismiss() }
+        }
+        deadline = Date().addingTimeInterval(15)
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if (!self.isEditing && Date() >= self.deadline) || self.contextIsValid?() == false { self.dismiss() }
+                else if self.isVisible && self.model.showingWindowManager && self.model.windowFullScreen != (self.tilingTarget?.isFullScreen() == true) {
+                    self.refreshGroup()
+                }
+            }
+        }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        if autoStartVoice, !windowManager, layerID == nil, configuration().resolvedVoiceAutoStart {
+            beginVoiceMode()
+        }
+    }
+
+    /// The reusable HUD window, created on first use. Callbacks are reset on
+    /// every open because the inline editor clears them while it owns the screen.
+    private func preparedHUDPanel() -> ExplorerPanel {
+        let panel = hudPanel ?? makeHUDPanel()
+        hudPanel = panel
+        panel.allowsEditing = false
+        panel.privateEntryEditing = false
+        panel.onCancel = { [weak self] in self?.dismiss() }
+        panel.onSettings = { [weak self] in self?.openSettings() }
+        panel.onKey = { [weak self] in self?.processLayerKey($0) ?? false }
+        return panel
+    }
+
+    private func makeHUDPanel() -> ExplorerPanel {
+        let panel = ExplorerPanel(contentRect: NSRect(x: 0, y: 0, width: 950, height: 850),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.title = "App Explorer"
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.contentView = NSHostingView(rootView: AppExplorerView(model: model,
+            onSelect: { [weak self] in self?.choose($0) }, onCancel: { [weak self] in self?.dismiss() },
+            onDeepSelect: { [weak self] in self?.chooseDeep($0) },
+            onBack: { [weak self] in self?.centerTap() },
+            onSettings: { [weak self] in self?.openSettings() },
+            onWindowCommand: { [weak self] in self?.performWindowCommand($0) },
+            onWindowPage: { [weak self] in self?.changeWindowPage($0) },
+            onVoiceExit: { [weak self] in self?.endVoiceMode() },
+            onVoiceRetry: { [weak self] in self?.beginVoiceMode() },
+            onVoiceConfirm: { [weak self] in self?.confirmVoiceAction() }))
+        return panel
+    }
+
+    /// Builds the HUD window and draws it once, invisibly, so the first real
+    /// open after launch is as quick as every later one. Safe to call anytime;
+    /// it does nothing while the HUD is showing.
+    func warmUp() {
+        guard !isVisible, hudPanel == nil else { return }
+        let panel = preparedHUDPanel()
+        panel.onCancel = nil
+        panel.alphaValue = 0
+        if let frame = NSScreen.main?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.midY - panel.frame.height / 2))
+        }
+        // Draw the real root tiles once so their icons are decoded and cached.
+        let settings = configuration()
+        let dictionary = hotkeyDictionary()
+        entryCache.removeAll(keepingCapacity: true)
+        entryCacheSettings = settings; entryCacheDictionary = dictionary
+        model.theme = settings.resolvedTheme
+        model.slotCount = settings.count(at: [])
+        model.entries = (settings.favorites(at: []) ?? []).map { makeEntry($0, depth: 0) }
+        panel.orderFrontRegardless()
+        panel.displayIfNeeded()
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+        // Bookmark favicons are fetched now (and kept on disk) rather than on
+        // the first open.
+        for url in model.entries.filter(\.isWebURL).compactMap(\.url) {
+            Task.detached(priority: .utility) { _ = await FaviconService.shared.icon(for: url) }
+        }
+        model.entries = []
+        // The first global key monitor is the slow one; install and drop it now.
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { _ in }) {
+            NSEvent.removeMonitor(monitor)
+        }
+        Task { await VoiceApplicationIndex.shared.load() }
+    }
+
+    func setAlternateHeld(_ held: Bool) {
+        guard alternateHeld != held else { return }
+        alternateHeld = held
+        if isVisible && !isEditing {
+            // The HID owner reopens with the actual contact state. Never carry
+            // a partial selection across modes or discard a fresh first swipe.
+            dismiss()
+        }
+    }
+
+    private var layerScopePath: [ExplorerSlot] {
+        if model.showingWindowManager { return windowOwnerPath ?? [] }
+        if model.showingControlHUD,
+           let controlDirection { return groupPath + [controlDirection] }
+        return groupPath
+    }
+    var inlineEditorWindowOwnerPath: [ExplorerTilePathStep]? {
+        guard model.showingWindowManager else { return nil }
+        return (windowOwnerPath ?? []).map { .group($0) }
+    }
+    private var windowConfiguration: AppExplorerSettings {
+        let saved = configuration(), projected = heldKeys.resolved(saved)
+        return projected.windowEditor(at: windowOwnerPath ?? [])
+    }
+
+    private var visibleActionBindings: [ActionBinding] {
+        let original = configuration()
+        if model.showingWindowManager {
+            let window = windowConfiguration
+            let resolved = windowKeys.resolved(window)
+            if !windowGroupPath.isEmpty { return resolved.favorite(at: windowGroupPath)?.actionBindings ?? [] }
+            if let layer = windowKeys.activeLayer(at: windowGroupPath, in: window) { return layer.actionBindings ?? [] }
+            return window.actionBindings ?? []
+        }
+        let resolved = heldKeys.resolved(original)
+        if !groupPath.isEmpty { return resolved.favorite(at: groupPath)?.actionBindings ?? [] }
+        if let layer = heldKeys.activeLayer(at: layerScopePath, in: original) {
+            return layer.actionBindings ?? []
+        }
+        return original.actionBindings ?? []
+    }
+
+    private func performBoundAction(_ action: BindingAction, fromKeyboard: Bool = false) {
+        guard action.isValid, contextIsValid?() != false else { return }
+        if action.kind == .command, action.command == .activateVoiceMode {
+            RotaActionUsage.record(action)
+            activateVoiceMode()
+            return
+        }
+        if action.kind == .hudNavigation, let direction = action.hudNavigation {
+            RotaActionUsage.record(action)
+            _ = navigateHUD(direction)
+            return
+        }
+        // Window placements and window commands bound to a HUD key or swipe act
+        // on the captured window like a tile: close on success, stay open with
+        // the message on an error.
+        if action.kind == .windowPlacement, let placement = action.windowPlacement {
+            RotaActionUsage.record(action)
+            applyWindowPlacement(placement)
+            return
+        }
+        if action.kind == .command, let command = action.command, AppExplorerAction.windowCommands.contains(command) {
+            performWindowCommand(command)
+            return
+        }
+        let dispatch = fromKeyboard ? (onKeyboardBindingAction ?? onBindingAction) : onBindingAction
+        if action.kind == .hudLayer ||
+           (action.kind == .command && (action.command == .mediaControls || action.command == .timer)) {
+            dispatch?(action)
+            return
+        }
+        let originalPID = sourcePID
+        dismiss()
+        let generation = selectionGeneration
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation,
+                      self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
+                if fromKeyboard { (self.onKeyboardBindingAction ?? self.onBindingAction)?(action) }
+                else { self.onBindingAction?(action) }
+            }
+        }
+    }
+
+    /// Off: the History file is never touched and any cached rows go away.
+    /// On: the actor answers from its cache, or refreshes off the main thread
+    /// when the cache is older than 30 s; the launcher updates when it lands.
+    private func loadChromeHistory(session: UUID) {
+        let enabled = chromeHistoryEnabled() || editingStore?.settings.resolvedSearchChromeHistory == true
+        guard enabled else {
+            if !chromeHistorySnapshot.isEmpty { chromeHistorySnapshot = []; launcherCatalogDirty = true }
+            Task { await ChromeHistoryIndex.shared.setEnabled(false) }
+            return
+        }
+        let provider = chromeHistoryProvider
+        Task { [weak self] in
+            await ChromeHistoryIndex.shared.setEnabled(true)
+            let entries = await provider()
+            self?.acceptChromeHistory(entries, session: session)
+        }
+    }
+
+    private func acceptChromeHistory(_ entries: [ChromeHistoryEntry], session: UUID) {
+        guard isVisible, chromeSnapshotSession == session, entries != chromeHistorySnapshot else { return }
+        chromeHistorySnapshot = entries
+        launcherCatalogDirty = true
+        if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
+    }
+
+    private func acceptLauncherSnapshots(tabs: [ChromeRecentTab], folders: [ExplorerFolder], session: UUID) {
+        guard isVisible, chromeSnapshotSession == session else { return }
+        chromeTabSnapshot = ChromeTabRecency.shared.ranked(tabs)
+        chromeTabsLoaded = true
+        folderSnapshot = folders
+        launcherCatalogDirty = true
+        if model.showingChromeTabs || model.showingRecentPlaces { refreshGroup() }
+        if !model.launcherQuery.isEmpty { updateLauncherResults(VoiceApplicationIndex.shared.applications) }
+    }
+
+    private func updateLauncherResults(_ apps: [ExplorerApplication]) {
+        let selectedID = model.launcherActions.indices.contains(model.launcherSelection)
+            ? model.launcherActions[model.launcherSelection].id : nil
+        if launcherCatalogDirty || launcherCatalogAppCount != apps.count {
+            launcherActionSnapshot = LauncherAction.apps(apps) + LauncherAction.folders(folderSnapshot) + LauncherAction.chromeTabs(chromeTabSnapshot) + [.settings] + LauncherAction.registered(launcherRegisteredSnapshot) + launcherMenuSnapshot + LauncherAction.chromeHistory(chromeHistorySnapshot)
+            launcherCatalogDirty = false
+            launcherCatalogAppCount = apps.count
+        }
+        model.launcherActions = LauncherAction.search(model.launcherQuery, actions: launcherActionSnapshot) + LauncherAction.webSearches(model.launcherQuery)
+        model.launcherResults = model.launcherActions.compactMap { if case .app(let app) = $0.target { return app }; return nil }
+        model.launcherSelection = selectedID.flatMap { id in model.launcherActions.firstIndex { $0.id == id } } ?? 0
+    }
+
+    private func chooseLauncherAction() {
+        guard model.launcherActions.indices.contains(model.launcherSelection) else { return }
+        let action = model.launcherActions[model.launcherSelection]
+        // Stop speech before confirmation: incoming partials must never change the
+        // identity selected by an explicit Return key.
+        model.realtimeSession?.cancel(); model.realtimeSession = nil
+        switch action.target {
+        case .app(let app): launchSearchResult(app)
+        case .folder(let folder):
+            dismiss()
+            _ = NSWorkspace.shared.open(folder.url)
+        case .chromeTab(let tab):
+            dismiss()
+            Task.detached(priority: .userInitiated) {
+                if ChromeBookmarkTabs.activate(tab) {
+                    await MainActor.run { ChromeTabRecency.shared.record(tab) }
+                }
+            }
+        case .rotaSettings: dismiss(); openSettings()
+        case .registered(let id):
+            guard let original = launcherRegisteredSnapshot.first(where: { $0.id == id }),
+                  let current = currentVoiceCatalog().first(where: { $0.id == id }), current == original,
+                  current.enabled, current.appBundleID == nil || current.appBundleID == frontmostBundleID() else {
+                pendingMenuAction = nil
+                model.message = "This action or active app changed. Reopen the launcher and choose again."
+                return
+            }
+            performBoundAction(current.action, fromKeyboard: true)
+        case .menu(let menu):
+            dismiss()
+            if let error = LauncherMenuCatalog.execute(menu) { NSLog("Rota menu action unavailable: %@", error) }
+        case .webSearch(let provider, let query):
+            guard let url = provider.url(for: query) else { return }
+            performBoundAction(.openURL(url.absoluteString), fromKeyboard: true)
+        case .chromeHistory(let url, _):
+            // The bound-action path reuses an open tab for the same site.
+            performBoundAction(.openURL(url), fromKeyboard: true)
+        }
+    }
+
+    @discardableResult private func processLauncherKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, !model.showingWindowManager, !model.showingAppWindows,
+              !model.showingControlHUD else { return false }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+        guard modifiers.isEmpty else { return false }
+        let searching = !model.launcherQuery.isEmpty || model.realtimeSession != nil
+        if !searching, event.charactersIgnoringModifiers == "/" {
+            openSettings(); return true
+        }
+        if searching {
+            switch event.keyCode {
+            case 53: dismiss(); return true
+            case 125, 126:
+                if pendingMenuAction != nil { model.message = nil }
+                pendingMenuAction = nil
+                let count = model.launcherActions.count
+                if count > 0 { model.launcherSelection = (model.launcherSelection + (event.keyCode == 125 ? 1 : count - 1)) % count }
+                deadline = Date().addingTimeInterval(60); return true
+            case 36, 76:
+                if !event.isARepeat { chooseLauncherAction() }; return true
+            case 51, 117:
+                model.realtimeSession?.cancel(); model.realtimeSession = nil; pendingMenuAction = nil
+                if !model.launcherQuery.isEmpty { model.launcherQuery.removeLast() }
+                updateLauncherResults(VoiceApplicationIndex.shared.applications)
+                deadline = Date().addingTimeInterval(60); return true
+            default: break
+            }
+        }
+        guard let text = event.characters, !text.isEmpty,
+              text.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && !($0.value >= 0xF700 && $0.value <= 0xF8FF) }),
+              searching || !text.trimmingCharacters(in: .whitespaces).isEmpty else { return searching }
+        // Printable keys take precedence over plain-letter layer bindings. Modified
+        // shortcuts and Window Manager keys retain their existing behavior.
+        if model.voiceSession != nil { endVoiceMode() }
+        model.launcherQuery = String((model.launcherQuery + text).prefix(256))
+        model.launcherSelection = 0
+        resetLocalGesture(); model.selected = nil
+        updateLauncherResults(VoiceApplicationIndex.shared.applications)
+        deadline = Date().addingTimeInterval(60)
+        return true
+    }
+
+    private func launchSearchResult(_ app: ExplorerApplication) {
+        guard isVisible, contextIsValid?() != false else { return }
+        guard ExplorerApplicationCatalog.bundleIdentifier(at: app.url) == app.bundleID else {
+            model.message = "This app moved or was removed. Refreshing the index…"
+            Task { await VoiceApplicationIndex.shared.refresh(force: true) }
+            return
+        }
+        RotaActionUsage.record(.openApp(bundleID: app.bundleID, name: app.name))
+        dismiss()
+        let generation = selectionGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectionGeneration == generation, !self.isVisible,
+                  self.contextIsValid?() != false else { return }
+            self.openApplication(app.url, Self.activationConfiguration()) { [weak self] pid in
+                guard let self, let pid, self.selectionGeneration == generation, !self.isVisible else { return }
+                self.focusApplicationWindow(pid)
+            }
+        }
+    }
+
+    @discardableResult func processLayerKey(_ event: NSEvent) -> Bool {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return false }
+        if processLauncherKey(event) { return true }
+        if let voice = model.voiceSession {
+            if event.type == .keyDown && !event.isARepeat {
+                if event.keyCode == 53 { endVoiceMode(); return true }
+                guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return true }
+                switch event.keyCode {
+                case 36, 49, 76: confirmVoiceAction()
+                case 126: voice.select(.up)
+                case 124: voice.select(.right)
+                case 125: voice.select(.down)
+                case 123: voice.select(.left)
+                default: break
+                }
+            }
+            return true
+        }
+        if event.type == .keyDown && event.keyCode == 53 { return false }
+        if model.showingAppWindows {
+            if event.type == .keyDown && [123, 124].contains(event.keyCode) {
+                changeWindowPage(event.keyCode == 123 ? -1 : 1); return true
+            }
+            return false
+        }
+        let flags = UInt64(event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue)
+        if event.type == .keyDown, let binding = visibleActionBindings.first(where: {
+            $0.trigger.keyboard?.keyCode == event.keyCode && $0.trigger.keyboard?.modifiers == flags
+        }) {
+            if !event.isARepeat { performBoundAction(binding.action, fromKeyboard: true) }
+            return true
+        }
+        if event.type == .keyDown, let entry = model.entries.first(where: {
+            $0.activationShortcut?.keyCode == event.keyCode && $0.activationShortcut?.modifiers == flags
+        }) {
+            if !event.isARepeat { choose(entry.direction, fromKeyboard: true) }
+            return true
+        }
+        if model.showingWindowManager {
+            if event.type == .keyDown && event.isARepeat { return true }
+            let fullScreen = tilingTarget?.isFullScreen() == true
+            if event.type == .keyDown, let binding = configuration().windowManager?.shortcuts.first(where: {
+                $0.shortcut.keyCode == event.keyCode && $0.shortcut.modifiers == flags
+            }) {
+                if !fullScreen || [.exitFullScreen, .toggleFullScreen].contains(binding.command) {
+                    performWindowCommand(fullScreen ? .exitFullScreen : binding.command)
+                }
+                return true
+            }
+            guard !fullScreen else { return true }
+            let previous = windowKeys.activeID
+            let previousSettings = windowKeys.resolved(windowConfiguration)
+            var handled = false
+            switch event.type {
+            case .keyDown: handled = windowKeys.press(key: event.keyCode, modifiers: flags, path: windowGroupPath, settings: windowConfiguration, bundleID: sourceBundleID)
+            case .keyUp: windowKeys.release(key: event.keyCode)
+            case .flagsChanged: windowKeys.updateModifiers(flags)
+            default: return false
+            }
+            windowKeys.reconcile(windowConfiguration)
+            if previous != windowKeys.activeID || previousSettings != windowKeys.resolved(windowConfiguration) {
+                if previous == nil { baseWindowGroupPath = windowGroupPath }
+                if windowKeys.activeID == nil { windowGroupPath = baseWindowGroupPath }
+                else if windowKeys.activeScope?.isEmpty == true { windowGroupPath = [] }
+                refreshGroup(); handled = true
+            }
+            return handled
+        }
+        let previous = heldKeys.activeID
+        let previousSettings = heldKeys.resolved(configuration())
+        var handled = false
+        switch event.type {
+        case .keyDown:
+            // A held key must not activate a different tile after navigating back.
+            if event.isARepeat { return true }
+            handled = heldKeys.press(key: event.keyCode, modifiers: flags, path: layerScopePath, settings: configuration(), bundleID: sourceBundleID)
+        case .keyUp: heldKeys.release(key: event.keyCode); handled = previous != heldKeys.activeID
+        case .flagsChanged: heldKeys.updateModifiers(flags)
+        default: return false
+        }
+        heldKeys.reconcile(configuration())
+        if previous != heldKeys.activeID || previousSettings != heldKeys.resolved(configuration()) {
+            if previous == nil { baseGroupPath = groupPath }
+            if heldKeys.activeID == nil { groupPath = baseGroupPath }
+            else if heldKeys.activeScope?.isEmpty == true && !model.showingWindowManager && !model.showingControlHUD { groupPath = [] }
+            model.message = nil
+            refreshGroup() // Drain any in-progress swipe before changing its targets.
+        }
+        return handled
+    }
+
+    private func updateCarouselContext(_ settings: AppExplorerSettings) {
+        guard mapNavigationAvailable else {
+            model.previousLayerName = nil
+            model.nextLayerName = nil
+            model.carouselPosition = nil
+            model.carouselPreviews = []
+            return
+        }
+        let map = settings.hudMap(in: sourceBundleID)
+        guard let current = map.firstIndex(where: { $0.layerID == heldKeys.activeID }), map.count > 1 else {
+            model.previousLayerName = nil
+            model.nextLayerName = nil
+            model.carouselPosition = nil
+            model.carouselPreviews = []
+            return
+        }
+        model.carouselPreviews = HUDCarouselPreview.makeMap(map, activeLayerID: heldKeys.activeID) { makeEntry($0, depth: 0) }
+        model.carouselPreviews = model.carouselPreviews.map { preview in
+            if map.first(where: { $0.id == preview.id })?.builtIn == .chromeTabs {
+                return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                    slotCount: preview.slotCount, entries: chromeEntries(count: preview.slotCount, page: 0))
+            }
+            if map.first(where: { $0.id == preview.id })?.builtIn == .recentAppsAndTabs {
+                return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                    slotCount: preview.slotCount, entries: recentPlaceEntries(count: preview.slotCount, page: 0).entries)
+            }
+            guard map.first(where: { $0.id == preview.id })?.builtIn == .recentApps else { return preview }
+            return HUDCarouselPreview(id: preview.id, name: preview.name, offset: preview.offset,
+                slotCount: preview.slotCount, entries: recentEntries(slotCount: preview.slotCount))
+        }
+        model.previousLayerName = orbitDestination(.previous)?.name
+        model.nextLayerName = orbitDestination(.next)?.name
+        model.carouselPosition = "\(current + 1) of \(map.count)"
+    }
+
+    private func orbitDestination(_ direction: HUDNavigationAction) -> HUDCarouselPreview? {
+        guard let index = HUDMapPoint.nearestIndex(in: model.carouselPreviews.map(\.offset), toward: direction) else { return nil }
+        return model.carouselPreviews[index]
+    }
+
+    private func loadEntries() {
+        let original = configuration()
+        if let builtIn = mappedBuiltIn {
+            // Mapped media layers are editable templates, not the generated media applet.
+            if builtIn == .windowManager {
+                model.showingWindowManager = true
+                if tilingTarget == nil { tilingTarget = sourcePID.flatMap(captureWindow) }
+            }
+        }
+        let dictionary = hotkeyDictionary()
+        if entryCacheSettings != original || entryCacheDictionary != dictionary {
+            entryCache.removeAll(keepingCapacity: true)
+            entryCacheSettings = original
+            entryCacheDictionary = dictionary
+        }
+        model.actionBindings = visibleActionBindings.map { binding in
+            var display = binding
+            if display.action.kind == .macro {
+                display.action.name = dictionary.title(for: display.action)
+            }
+            return display
+        }
+        model.theme = original.resolvedTheme
+        model.animationsEnabled = original.resolvedAnimationsEnabled
+        updateCarouselContext(original)
+        let layer = heldKeys.activeLayer(at: layerScopePath, in: original)
+        let settings = heldKeys.resolved(original)
+        model.layerName = layer?.name
+        model.windowLayout = layer?.windowLayout ?? .halves
+        model.layerHint = settings.layers(at: settings.layerScope(at: layerScopePath))
+            .filter { $0.isAvailable(in: sourceBundleID) }
+            .compactMap { layer in layer.holdShortcut.map { "\(layer.activation == .toggle ? "Press" : "Hold") \($0.displayName) → \(layer.name)" } }.joined(separator: " · ")
+        model.mode = layer == nil ? settings.mode(holdingShortcut: alternateHeld) : .favorites
+        if model.mode != .favorites || settings.favorites(at: groupPath) == nil { groupPath = [] }
+        model.groupNames = groupPath.indices.compactMap { settings.favorite(at: Array(groupPath.prefix($0 + 1)))?.name }
+        model.groupDirections = groupPath
+        model.groupSlotCounts = groupPath.indices.map { settings.count(at: Array(groupPath.prefix($0))) }
+        if model.showingAppWindows || model.showingControlHUD || (model.showingWindowManager && !model.directWindowManager),
+           let controlDirection {
+            model.groupDirections.append(controlDirection)
+            model.groupSlotCounts.append(settings.count(at: groupPath))
+        }
+        let recentGroup = settings.favorite(at: groupPath)?.isRecentGroup == true || mappedBuiltIn == .recentApps
+        model.showingChromeTabs = model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isChromeTabsGroup == true
+            : settings.favorite(at: groupPath)?.isChromeTabsGroup == true || mappedBuiltIn == .chromeTabs
+        model.showingRecentPlaces = !model.showingChromeTabs && (model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isRecentAppsAndTabsGroup == true
+            : settings.favorite(at: groupPath)?.isRecentAppsAndTabsGroup == true || mappedBuiltIn == .recentAppsAndTabs)
+        model.showingSlackChannels = !model.showingChromeTabs && !model.showingRecentPlaces && (model.showingWindowManager
+            ? windowKeys.resolved(windowConfiguration).favorite(at: windowGroupPath)?.isSlackChannelsGroup == true
+            : settings.favorite(at: groupPath)?.isSlackChannelsGroup == true || mappedBuiltIn == .slackChannels)
+        model.page = 0; model.pageCount = 1
+        model.showingRecents = model.mode == .recent || recentGroup
+        model.canEdit = editingStore != nil && !model.showingAppWindows && !model.showingWindowManager && !model.showingControlHUD && layer == nil
+        model.slotCount = settings.count(at: groupPath)
+        if model.showingChromeTabs {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            model.pageCount = max(1, (chromeTabSnapshot.count + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = chromeEntries(count: count, page: chromeTabsPage)
+            model.message = !chromeTabsLoaded && chromeTabSnapshot.isEmpty ? "Loading Chrome tabs…" : chromeTabSnapshot.isEmpty
+                ? "No Chrome tabs available. Open Chrome and allow Rota in Privacy & Security → Automation."
+                : "Swipe to a tab and lift to focus it · use Previous / Next for more tabs"
+            return
+        }
+        if model.showingSlackChannels {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            let channels = SlackChannelRecents.shared.ranked()
+            model.pageCount = max(1, (channels.count + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = slackEntries(channels, count: count, page: chromeTabsPage)
+            model.message = channels.isEmpty
+                ? "No Slack channels yet. Visit a few channels in Slack and they appear here, most used first."
+                : "Swipe to a channel and lift to jump there · use Previous / Next for more channels"
+            return
+        }
+        if model.showingRecentPlaces {
+            model.canEdit = false
+            if model.showingWindowManager { model.slotCount = windowKeys.resolved(windowConfiguration).count(at: windowGroupPath) }
+            let count = model.slotCount
+            let probe = recentPlaceEntries(count: count, page: 0)
+            model.pageCount = max(1, (probe.total + count - 1) / count)
+            chromeTabsPage = min(chromeTabsPage, model.pageCount - 1)
+            model.page = chromeTabsPage
+            model.entries = chromeTabsPage == 0 ? probe.entries : recentPlaceEntries(count: count, page: chromeTabsPage).entries
+            let chromeRunning = workspace.runningApplications.contains { $0.bundleIdentifier == RecentPlaces.chromeBundleID }
+            model.message = probe.total == 0 ? "Open another app to see it here"
+                : !chromeTabsLoaded && chromeRunning && chromeTabSnapshot.isEmpty ? "Loading Chrome tabs…"
+                : chromeTabSnapshot.isEmpty && chromeRunning ? "Chrome tabs unavailable. Allow Rota in Privacy & Security → Automation to include them."
+                : "Swipe to an app or tab and lift to return to it"
+            return
+        }
+        if model.showingAppWindows {
+            model.slotCount = 16
+            model.groupNames.append("App windows")
+            model.layerHint = ""
+            model.page = windowPage; model.pageCount = max(1, (windowList.count + 15) / 16)
+            model.entries = windowList.dropFirst(windowPage * 16).prefix(16).enumerated().map { offset, window in
+                ExplorerEntry(direction: ExplorerSlot.slots(16)[offset], bundleID: nil,
+                    name: window.title + (window.minimized ? " (minimized)" : ""), icon: nil, url: nil, windowIndex: windowPage * 16 + offset)
+            }
+            model.message = windowList.isEmpty ? "No accessible windows. Enable Accessibility and make sure the app is running." : nil
+            return
+        }
+        if model.showingTimer {
+            model.slotCount = 8
+            model.groupNames.append("Timer")
+            model.entries = FocusTimerPreset.swipes.map { preset in
+                var entry = ExplorerEntry(direction: ExplorerSlot(preset.direction), bundleID: nil, name: preset.title, icon: nil, url: nil)
+                entry.timerMinutes = preset.minutes
+                return entry
+            }
+            return
+        }
+        if model.showingMediaControls {
+            model.slotCount = 8
+            model.groupNames.append("Media Controls")
+            model.entries = ExplorerMediaAction.allCases.map { action in
+                ExplorerEntry(direction: ExplorerSlot(action.direction), bundleID: nil, name: action.title, icon: nil, url: nil, mediaAction: action)
+            }
+            return
+        }
+        if model.showingWindowManager {
+            let windowBase = windowConfiguration
+            let window = windowKeys.resolved(windowBase)
+            while !windowGroupPath.isEmpty && window.favorites(at: windowGroupPath) == nil { windowGroupPath.removeLast() }
+            model.slotCount = window.count(at: windowGroupPath)
+            let windowLayer = windowKeys.activeLayer(at: windowGroupPath, in: windowBase)
+            model.windowLayout = windowLayer?.windowLayout ?? original.windowManager?.layout ?? .halves
+            model.layerName = windowLayer?.name
+            let wasFullScreen = model.windowFullScreen
+            model.windowFullScreen = tilingTarget?.isFullScreen() == true
+            if wasFullScreen && !model.windowFullScreen { model.message = nil }
+            model.layerHint = model.windowFullScreen ? "" : window.layers(at: window.layerScope(at: windowGroupPath)).compactMap {
+                guard $0.isAvailable(in: sourceBundleID), let key = $0.holdShortcut else { return nil }
+                return "\($0.activation == .toggle ? "Press" : "Hold") \(key.displayName) → \($0.name)"
+            }.joined(separator: " · ")
+            model.groupNames.append("Window Manager")
+            model.groupNames += windowGroupPath.indices.compactMap { window.favorite(at: Array(windowGroupPath.prefix($0 + 1)))?.name }
+            model.groupDirections += windowGroupPath
+            model.groupSlotCounts += windowGroupPath.indices.map { window.count(at: Array(windowGroupPath.prefix($0))) }
+            model.canEdit = editingStore != nil && heldKeys.activeID == nil && windowKeys.activeID == nil && !model.windowFullScreen
+            if model.windowFullScreen {
+                model.entries = [ExplorerEntry(direction: .up, bundleID: nil, name: "Exit full screen", icon: nil, url: nil, command: .exitFullScreen)]
+                model.message = "This window is full screen. Exit full screen to enable tiling."
+                return
+            }
+            if window.favorite(at: windowGroupPath)?.isRecentGroup == true { loadRecentEntries(); return }
+            model.entries = (window.favorites(at: windowGroupPath) ?? []).map { makeEntry($0, depth: windowGroupPath.count) }
+            return
+        }
+        if model.mode == .favorites && !recentGroup {
+            model.entries = (settings.favorites(at: groupPath) ?? []).map { makeEntry($0, depth: groupPath.count) }
+            return
+        }
+        loadRecentEntries()
+    }
+
+    private func chromeEntries(count: Int, page: Int) -> [ExplorerEntry] {
+        let icon = applicationURL("com.google.Chrome").map { workspace.icon(forFile: $0.path) }
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return chromeTabSnapshot.dropFirst(page * count).prefix(count).enumerated().map { offset, tab in
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: "com.google.Chrome",
+                name: tab.title.isEmpty ? tab.url : tab.title, icon: icon, url: URL(string: tab.url))
+            entry.chromeTab = tab
+            entry.isActiveApp = page == 0 && offset == 0
+            return entry
+        }
+    }
+
+    /// Most active channel on the left, the rest clockwise from top-left, like Chrome tabs.
+    private func slackEntries(_ channels: [SlackChannelVisit], count: Int, page: Int) -> [ExplorerEntry] {
+        let icon = applicationURL(SlackChannelRecents.bundleID).map { workspace.icon(forFile: $0.path) }
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return channels.dropFirst(page * count).prefix(count).enumerated().map { offset, channel in
+            var entry = ExplorerEntry(direction: slots[offset], bundleID: SlackChannelRecents.bundleID,
+                name: "#" + channel.name, icon: icon, url: nil)
+            entry.slackChannel = channel.name
+            return entry
+        }
+    }
+
+    private func recentPlaceEntries(count: Int, page: Int) -> (entries: [ExplorerEntry], total: Int) {
+        let sources = configuration().defaultLayout(for: .recentAppsAndTabs).resolvedRecentSources
+        let running = Self.recentRunningApps()
+        let order = sources.apps ? recents.mostRecentFirst(available: running.compactMap(\.bundleIdentifier)) : []
+        let slack = sources.slackChannels ? SlackChannelRecents.shared.ranked().map(\.name) : []
+        let places = Self.recentPlaces(running: running, order: order, tabs: sources.chromeTabs ? chromeTabSnapshot : [],
+            slack: slack, sourcePID: sourcePID)
+        let icon = applicationURL(RecentPlaces.chromeBundleID).map { workspace.icon(forFile: $0.path) }
+        let slackIcon = applicationURL(RecentPlaces.slackBundleID).map { workspace.icon(forFile: $0.path) }
+        return (Self.recentPlaceEntries(places, running: running, sourcePID: sourcePID, chromeIcon: icon, slackIcon: slackIcon,
+            count: count, page: page), places.count)
+    }
+
+    static func recentRunningApps() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated &&
+            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
+            $0.bundleIdentifier != "local.rota"
+        }.sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+    }
+
+    /// Shared by the live HUD and its settings previews. Chrome appears only as its tabs.
+    static func recentPlaces(running: [NSRunningApplication], order: [String], tabs: [ChromeRecentTab], slack: [String] = [],
+                             sourcePID: pid_t?) -> [RecentPlace<ChromeRecentTab>] {
+        let recency = ChromeTabRecency.shared
+        return RecentPlaces.merged(apps: order, tabs: tabs, slack: slack,
+            active: running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier,
+            appStamp: { recency.stamp(app: $0) }, tabStamp: { recency.stamp(tab: $0) }, slackStamp: { recency.stamp(slack: $0) })
+    }
+
+    /// Settings preview: live running apps, the supplied Chrome tabs and learned
+    /// Slack channels, without a source app.
+    static func previewRecentPlaceEntries(tabs: [ChromeRecentTab], count: Int,
+                                          sources: RecentPlaceSources = RecentPlaceSources()) -> [ExplorerEntry] {
+        let running = recentRunningApps()
+        let order = sources.apps ? AppExplorerRecents(UserDefaults.standard.stringArray(forKey: "appExplorer.recentBundleIDs") ?? [])
+            .mostRecentFirst(available: running.compactMap(\.bundleIdentifier)) : []
+        let slack = sources.slackChannels ? SlackChannelRecents.shared.ranked().map(\.name) : []
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: RecentPlaces.chromeBundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        let slackIcon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: RecentPlaces.slackBundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return recentPlaceEntries(recentPlaces(running: running, order: order, tabs: sources.chromeTabs ? tabs : [], slack: slack, sourcePID: nil),
+            running: running, sourcePID: nil, chromeIcon: icon, slackIcon: slackIcon, count: count, page: 0)
+    }
+
+    /// The current place is outlined on the left; the rest continue clockwise from top-left.
+    static func recentPlaceEntries(_ places: [RecentPlace<ChromeRecentTab>], running: [NSRunningApplication], sourcePID: pid_t?,
+                                   chromeIcon: NSImage?, slackIcon: NSImage? = nil, count: Int, page: Int) -> [ExplorerEntry] {
+        let slots = ExplorerSlot.slots(count).sorted {
+            ($0.angle + 180).truncatingRemainder(dividingBy: 360) < ($1.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return places.dropFirst(page * count).prefix(count).compactMap { place -> ExplorerEntry? in
+            switch place {
+            case .tab(let tab):
+                var entry = ExplorerEntry(direction: .up, bundleID: RecentPlaces.chromeBundleID,
+                    name: tab.title.isEmpty ? tab.url : tab.title, icon: chromeIcon, url: URL(string: tab.url))
+                entry.chromeTab = tab
+                return entry
+            case .app(let id):
+                return (running.first { $0.bundleIdentifier == id && $0.processIdentifier == sourcePID }
+                    ?? running.first { $0.bundleIdentifier == id }).map { ExplorerEntry(direction: .up, app: $0) }
+            case .slack(let channel):
+                var entry = ExplorerEntry(direction: .up, bundleID: RecentPlaces.slackBundleID, name: "#" + channel, icon: slackIcon, url: nil)
+                entry.slackChannel = channel
+                return entry
+            }
+        }.enumerated().map { offset, entry in
+            var entry = entry
+            entry.direction = slots[offset]
+            entry.isActiveApp = page == 0 && offset == 0
+            return entry
+        }
+    }
+
+    private func makeEntry(_ favorite: AppExplorerFavorite, depth: Int) -> ExplorerEntry {
+        if let cached = entryCache.first(where: { $0.depth == depth && $0.favorite == favorite }) {
+            return cached.entry
+        }
+        let entry = Self.makeEntry(favorite, depth: depth, dictionary: entryCacheDictionary, applicationURL: applicationURL)
+        entryCache.append((favorite, depth, entry))
+        return entry
+    }
+
+    /// Shared by the live HUD and its inert settings preview.
+    static func makeEntry(_ favorite: AppExplorerFavorite, depth: Int, dictionary: [NamedHotkey],
+                          applicationURL: (String) -> URL? = { ExplorerApplicationCatalog.applicationURL(for: $0) }) -> ExplorerEntry {
+        func activated(_ entry: ExplorerEntry) -> ExplorerEntry {
+            var entry = entry
+            entry.activationShortcut = favorite.activationShortcut
+            entry.hasDeepChoices = favorite.hasDeepChoices
+            return entry
+        }
+        if let placement = favorite.windowPlacement {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, tilingDirection: favorite.isValidDestination ? placement.direction : nil, tilingLayout: placement.layout))
+        }
+        if let action = favorite.action, action != .windowManager && action != .mediaControls {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, command: action))
+        }
+        if favorite.action == .mediaControls {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name, icon: nil, url: nil, isMediaControls: favorite.isValidDestination))
+        }
+        if let media = favorite.shortcut?.assignedAction?.media, favorite.isValidDestination {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, mediaAction: media))
+        }
+        if let shortcut = favorite.shortcut {
+            if let action = shortcut.assignedAction, action.kind == .openURL, favorite.isValidDestination,
+               let url = action.url.flatMap(AppExplorerFavorite.webURL) {
+                return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                    icon: nil, url: url, isWebURL: true, shortcut: shortcut))
+            }
+            let title = dictionary.label(for: shortcut) == nil ? favorite.name : dictionary.title(for: shortcut)
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: title,
+                icon: nil, url: nil, shortcut: favorite.isValidDestination ? shortcut : nil))
+        }
+        if favorite.isWindowManager {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, isWindowManager: favorite.isValidDestination))
+        }
+        if favorite.isPureGroup {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: nil, isGroup: favorite.isValidDestination && depth < AppExplorerSettings.maximumGroupDepth,
+                isRecentGroup: favorite.isRecentGroup))
+        }
+        if favorite.url != nil {
+            return activated(ExplorerEntry(direction: favorite.direction, bundleID: nil, name: favorite.name,
+                icon: nil, url: favorite.isValidDestination ? favorite.resolvedWebURL : nil, isWebURL: true,
+                webIconSymbol: favorite.iconSymbol))
+        }
+        let url = favorite.bundleID.flatMap(applicationURL)
+        return activated(ExplorerEntry(direction: favorite.direction, bundleID: favorite.bundleID,
+            name: favorite.name, icon: url.map { NSWorkspace.shared.icon(forFile: $0.path) }, url: url, showsWindows: favorite.showsWindows == true))
+    }
+
+    private func loadRecentEntries() {
+        model.entries = recentEntries(slotCount: model.slotCount)
+    }
+    private func recentEntries(slotCount: Int) -> [ExplorerEntry] {
+        let running = Self.recentRunningApps()
+        let active = running.first { $0.processIdentifier == sourcePID }?.bundleIdentifier
+        let ordered = recents.activeFirst(available: running.compactMap(\.bundleIdentifier), active: active, limit: slotCount)
+        let slots = ExplorerSlot.slots(slotCount).sorted { a, b in
+            (a.angle + 180).truncatingRemainder(dividingBy: 360) < (b.angle + 180).truncatingRemainder(dividingBy: 360)
+        }
+        return ordered.compactMap { id in
+            running.first { $0.bundleIdentifier == id && $0.processIdentifier == sourcePID }
+                ?? running.first { $0.bundleIdentifier == id }
+        }.enumerated().map {
+            var entry = ExplorerEntry(direction: slots[$0.offset], app: $0.element)
+            entry.isActiveApp = $0.element.processIdentifier == sourcePID
+            return entry
+        }
+    }
+
+    func process(_ report: TrackpadReport) {
+        guard isVisible else { return }
+        contactIsDown = report.contacts.contains(where: \.touching) || report.buttonDown
+        guard contextIsValid?() != false else { dismiss(); return }
+        guard !isEditing, model.launcherQuery.isEmpty, model.realtimeSession == nil else { return }
+        if let voice = model.voiceSession {
+            // Match the ordinary HUD: preview on movement, commit on lift.
+            // Only arm a result that was ready when the finger selected it.
+            switch input.process(report) {
+            case .highlight(let direction):
+                voiceSwipeMatchID = nil
+                if let direction {
+                    voice.select(direction)
+                    voiceSwipeMatchID = voice.selectedMatch?.id
+                }
+            case .select(let direction):
+                voice.select(direction)
+                let armedID = voiceSwipeMatchID
+                voiceSwipeMatchID = nil
+                input = makeSelection(waitingForLift: false)
+                if direction == .left { endVoiceMode() }
+                else if let armedID, voice.selectedMatch?.id == armedID { confirmVoiceAction() }
+            case .back:
+                voiceSwipeMatchID = nil
+                centerTap()
+                input = makeSelection(waitingForLift: false)
+            case .cancel:
+                voiceSwipeMatchID = nil
+                input = makeSelection(waitingForLift: contactIsDown)
+            default: break
+            }
+            return
+        }
+        if !input.waitingForLift && processLocalGesture(report) { return }
+        applySelection(report)
+    }
+
+    private func applySelection(_ report: TrackpadReport) {
+        switch input.process(report) {
+        case .waiting: break
+        case .highlight(let direction):
+            // Publish only a change of sector, not every hardware report.
+            if model.selected != direction { model.selected = direction }
+        case .deepen(let direction, let continuation): openDeepFan(direction, continuing: continuation)
+        case .select(let direction):
+            if model.deepFan == nil { choose(direction) } else { chooseDeep(direction) }
+        case .back:
+            if model.deepFan == nil { centerTap() } else { closeDeepFan() }
+        case .cancel:
+            if model.deepFan == nil { dismiss() } else { closeDeepFan() }
+        }
+    }
+
+    private func makeSelection(waitingForLift: Bool,
+                               continuing: AppExplorerSelection.Continuation? = nil) -> AppExplorerSelection {
+        let inverted = configuration().resolvedInvertPickerDirection
+        if let continuing, let fan = model.deepFan {
+            return AppExplorerSelection(continuing: continuing, slotCount: fan.slotCount,
+                fanOrigin: fan.origin, invertDirection: inverted)
+        }
+        return AppExplorerSelection(waitingForLift: waitingForLift,
+            slotCount: model.voiceSession == nil ? model.slotCount : 4,
+            deepSlots: model.voiceSession == nil ? Set(model.entries.filter(\.hasDeepChoices).map(\.direction)) : [],
+            invertDirection: inverted)
+    }
+
+    private func openDeepFan(_ direction: ExplorerSlot, continuing: AppExplorerSelection.Continuation) {
+        guard model.deepFan == nil, model.entries.first(where: { $0.direction == direction })?.hasDeepChoices == true else { return }
+        let settings = model.showingWindowManager ? windowKeys.resolved(windowConfiguration) : heldKeys.resolved(configuration())
+        let path = (model.showingWindowManager ? windowGroupPath : groupPath) + [direction]
+        guard let parent = settings.favorite(at: path), let children = parent.children, !children.isEmpty else { return }
+        let count = parent.slotCount ?? max(2, min(16, children.count))
+        model.deepFan = ExplorerDeepFan(origin: direction, entries: children.map { makeEntry($0, depth: path.count) }, slotCount: count)
+        model.selected = nil
+        input = makeSelection(waitingForLift: false, continuing: continuing)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    private func chooseDeep(_ direction: ExplorerSlot) {
+        guard let fan = model.deepFan, fan.entries.contains(where: { $0.direction == direction }) else { closeDeepFan(); return }
+        model.deepFan = nil
+        if model.showingWindowManager { windowGroupPath.append(fan.origin) }
+        else { groupPath.append(fan.origin) }
+        loadEntries()
+        model.selected = direction
+        choose(direction)
+    }
+
+    private func closeDeepFan() {
+        model.deepFan = nil
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+    }
+
+    private func resetLocalGesture() {
+        model.orbitGeneration += 1
+        model.orbitSettling = false
+        model.orbitPosition = nil
+        model.orbitTrigger = nil
+        orbitDragUnit = .zero
+        model.orbitOffset = .zero
+        model.orbitProgress = 0
+        localGestureTimer?.invalidate(); localGestureTimer = nil
+        localGestureReports.removeAll()
+        localGestureStrokeStart = 0
+        localGestureTapCount = 0
+        localGestureFingerCount = 0
+        localGestureSequenceFingers = 0
+        localGestureMaxTravel = 0
+        localGesturePendingWindow = 0
+        localGestureFollowupDelay = 0
+        localGestureOrigin = nil
+        localGestureFingerOrigins.removeAll()
+        localGestureFingerLast.removeAll()
+    }
+
+    private func replayLocalGesture(from index: Int = 0) {
+        let reports = Array(localGestureReports.dropFirst(index))
+        resetLocalGesture()
+        for report in reports where isVisible { applySelection(report) }
+    }
+
+    /// Recognize assigned HUD gestures before the HUD's sector-selection gate.
+    /// Unassigned strokes are replayed through the original selection path.
+    private func processLocalGesture(_ report: TrackpadReport) -> Bool {
+        if model.orbitSettling { return true }
+        var gestures = visibleActionBindings.filter { $0.trigger.gesture != nil && $0.isValid }
+        if mapNavigationAvailable,
+           (configuration().holdLayers ?? []).filter({ $0.isAvailable(in: sourceBundleID) }).count > 0 {
+            let direction = configuration().resolvedSwipeDirection
+            let defaults: [ActionBinding] = [AppGestureTrigger.twoFingerLeft, .twoFingerRight, .twoFingerUp, .twoFingerDown].map { trigger in
+                ActionBinding(trigger: BindingTrigger(gesture: trigger),
+                    action: .hudNavigation(direction.navigation(for: trigger)!))
+            }
+            gestures += defaults.filter { fallback in
+                !gestures.contains { $0.trigger.identity == fallback.trigger.identity }
+            }
+        }
+        guard !gestures.isEmpty else {
+            if !localGestureReports.isEmpty { replayLocalGesture() }
+            return false
+        }
+        let now = Date()
+        let profile = gestureSettings()
+        let contacts = report.contacts.filter(\.touching)
+        guard !report.buttonDown, contacts.count <= 2, contacts.allSatisfy(\.confident) else {
+            if model.orbitPosition != nil {
+                resetLocalGesture(); input = makeSelection(waitingForLift: true); return true
+            }
+            replayLocalGesture(); return false
+        }
+        let needsOneFingerSequence = gestures.contains { binding in
+            guard let base = binding.trigger.gesture?.baseTapTrigger else { return false }
+            return base == .oneFingerTap || base == .oneFingerDoubleTap || base == .oneFingerTripleTap
+        }
+        // The built-in HUD carousel uses only two-finger swipes. Do not make
+        // ordinary one-finger tile selection wait behind that recognizer.
+        if localGestureReports.isEmpty, contacts.count <= 1, !needsOneFingerSequence { return false }
+        let oneTapPairSwipe = localGestureSequenceFingers == 1 && localGestureTapCount == 1 &&
+            gestures.contains { $0.trigger.gesture?.rawValue.hasPrefix("oneTapTwo.") == true }
+        let joiningPair = (localGestureSequenceFingers == 2 || oneTapPairSwipe) && contacts.count == 1 &&
+            (localGestureFingerCount == 0 ||
+             (localGestureFingerCount == 1 && now.timeIntervalSince(localGestureStarted) <= 0.12))
+        if localGestureTapCount > 0, !contacts.isEmpty,
+           (now.timeIntervalSince(localGestureLastLift) > localGesturePendingWindow ||
+            (contacts.count != localGestureSequenceFingers && !(oneTapPairSwipe && contacts.count == 2) && !joiningPair)) {
+            let prior: AppGestureTrigger = localGestureSequenceFingers == 2
+                ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
+                : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
+            if let binding = gestures.first(where: { $0.trigger.gesture == prior }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+                return true
+            }
+            replayLocalGesture()
+            if !isVisible { return true }
+        }
+        if localGestureReports.count >= 200 {
+            if model.orbitPosition != nil { localGestureReports.removeSubrange(1..<100) }
+            else { replayLocalGesture(); return false }
+        }
+        localGestureReports.append(report)
+        if !contacts.isEmpty {
+            let point = CGPoint(x: contacts.map(\.x).reduce(0, +) / Double(contacts.count),
+                                y: contacts.map(\.y).reduce(0, +) / Double(contacts.count))
+            if localGestureFingerCount == 0 {
+                localGestureTimer?.invalidate(); localGestureTimer = nil
+                localGestureStrokeStart = localGestureReports.count - 1
+                localGestureFingerCount = contacts.count
+                localGestureStarted = now
+                localGestureFollowupDelay = localGestureTapCount > 0 ? now.timeIntervalSince(localGestureLastLift) : 0
+                localGestureOrigin = point
+                localGestureLast = point
+                localGestureMaxTravel = 0
+                localGestureFingerOrigins = Dictionary(uniqueKeysWithValues: contacts.map {
+                    ($0.id, CGPoint(x: $0.x, y: $0.y))
+                })
+                localGestureFingerLast = localGestureFingerOrigins
+            } else if contacts.count >= localGestureFingerCount {
+                if localGestureFingerCount == 1 && contacts.count == 2 {
+                    localGestureOrigin = point
+                    localGestureFingerOrigins = Dictionary(uniqueKeysWithValues: contacts.map {
+                        ($0.id, CGPoint(x: $0.x, y: $0.y))
+                    })
+                }
+                localGestureFingerCount = contacts.count
+                localGestureLast = point
+                localGestureFingerLast = Dictionary(uniqueKeysWithValues: contacts.map {
+                    ($0.id, CGPoint(x: $0.x, y: $0.y))
+                })
+                localGestureMaxTravel = max(localGestureMaxTravel, hypot(point.x - (localGestureOrigin?.x ?? point.x),
+                    point.y - (localGestureOrigin?.y ?? point.y)))
+            }
+            if contacts.count == 2, localGestureTapCount == 0, let origin = localGestureOrigin {
+                let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
+                let trigger: AppGestureTrigger = abs(dx) >= abs(dy)
+                    ? (dx < 0 ? .twoFingerLeft : .twoFingerRight)
+                    : (dy < 0 ? .twoFingerUp : .twoFingerDown)
+                if let binding = gestures.first(where: { $0.trigger.gesture == trigger }),
+                   binding.action.kind == .hudNavigation, let assignedNavigation = binding.action.hudNavigation {
+                    let explicit = visibleActionBindings.contains { $0.isValid && $0.trigger.gesture == trigger }
+                    let navigation = explicit ? assignedNavigation : configuration().resolvedSwipeDirection.navigation(dx: dx, dy: dy)
+                    let coherent = localGestureFingerOrigins.count == 2 && localGestureFingerOrigins.allSatisfy { id, start in
+                        guard let end = localGestureFingerLast[id] else { return false }
+                        return (end.x - start.x) * dx + (end.y - start.y) * dy > 0
+                    }
+                    if coherent, hypot(dx, dy) > 14, model.orbitPosition == nil {
+                        let step = navigation.step
+                        let diagonal = step.x != 0 && step.y != 0 && !explicit
+                        orbitDragUnit = diagonal
+                            ? CGPoint(x: dx < 0 ? -sqrt(0.5) : sqrt(0.5), y: dy < 0 ? -sqrt(0.5) : sqrt(0.5))
+                            : (abs(dx) >= abs(dy) ? CGPoint(x: dx < 0 ? -1 : 1, y: 0) : CGPoint(x: 0, y: dy < 0 ? -1 : 1))
+                        model.orbitOffset = orbitDestination(navigation)?.offset ?? step
+                        model.orbitPosition = navigation
+                        model.orbitTrigger = trigger
+                    }
+                }
+                if let position = model.orbitPosition {
+                    let distance = max(0, dx * orbitDragUnit.x + dy * orbitDragUnit.y)
+                    let available = orbitDestination(position) != nil
+                    // Empty cells resist the drag, then spring back on lift.
+                    let progress = available ? min(1, distance / 180) : 0.12 * (1 - exp(-distance / 90))
+                    var transaction = Transaction(); transaction.disablesAnimations = true
+                    withTransaction(transaction) { model.orbitProgress = progress }
+                    deadline = Date().addingTimeInterval(15)
+                }
+            }
+            return true
+        }
+        if let position = model.orbitPosition {
+            let target = orbitDestination(position)
+            let commit = target != nil && model.orbitProgress >= 0.45
+            let generation = model.orbitGeneration
+            model.orbitSettling = true
+            let animate = configuration().resolvedAnimationsEnabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let remaining = commit ? 1 - model.orbitProgress : model.orbitProgress
+            let blocked = target == nil && model.orbitProgress > 0
+            let settleDuration = animate ? (blocked ? 0.24 : 0.18 * remaining) : 0
+            let settling: Animation? = settleDuration == 0 ? nil : (blocked
+                ? .spring(duration: settleDuration, bounce: 0.18)
+                : .easeOut(duration: settleDuration))
+            withAnimation(settling) {
+                model.orbitProgress = commit ? 1 : 0
+            }
+            let finish: @MainActor @Sendable () -> Void = { [weak self] in
+                guard let self, self.isVisible, self.model.orbitGeneration == generation else { return }
+                var transaction = Transaction(); transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if commit, let target { self.switchLayer(UUID(uuidString: target.id)) }
+                    else { self.resetLocalGesture(); self.input = self.makeSelection(waitingForLift: self.contactIsDown) }
+                }
+            }
+            if settleDuration > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration, execute: finish) }
+            else { finish() }
+            return true
+        }
+        guard localGestureFingerCount > 0, let origin = localGestureOrigin else { return true }
+        let fingers = localGestureFingerCount
+        if localGestureTapCount > 0 && fingers != localGestureSequenceFingers && !(oneTapPairSwipe && fingers == 2) {
+            replayLocalGesture()
+            return true
+        }
+        let dx = localGestureLast.x - origin.x, dy = localGestureLast.y - origin.y
+        let duration = now.timeIntervalSince(localGestureStarted)
+        let swipeSettings: DoubleTapSwipeSettings? = fingers == 2
+            ? (oneTapPairSwipe ? profile.oneFingerTapTwoFingerSwipe :
+               localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe : profile.twoFingerDoubleTapSwipe)
+            : (localGestureTapCount == 1 ? profile.singleTapSwipe : profile.doubleTapSwipe)
+        let swipeDistance = localGestureTapCount == 0 && fingers == 2 ? 80 : (swipeSettings?.resolvedDistance ?? 60)
+        let swipeDuration = localGestureTapCount == 0 ? 0.35 : (swipeSettings?.resolvedFastDuration ?? 0.18)
+        localGestureFingerCount = 0
+        localGestureOrigin = nil
+        localGestureLastLift = now
+        let coherentPair = fingers != 2 || (localGestureFingerOrigins.count == 2 &&
+            localGestureFingerOrigins.allSatisfy { id, start in
+                guard let end = localGestureFingerLast[id] else { return false }
+                let fingerDX = end.x - start.x, fingerDY = end.y - start.y
+                return hypot(fingerDX, fingerDY) >= min(40, swipeDistance / 2) &&
+                    fingerDX * dx + fingerDY * dy > 0
+            })
+        if duration <= swipeDuration, hypot(dx, dy) >= swipeDistance, coherentPair,
+           (localGestureTapCount == 0 || localGestureFollowupDelay <= (swipeSettings?.resolvedWindow ?? 0.2)),
+           let direction = SwipeDirection.classify(dx: dx, dy: dy) {
+            let trigger: AppGestureTrigger?
+            if fingers == 2 && localGestureTapCount == 0 {
+                switch direction {
+                case .left: trigger = .twoFingerLeft
+                case .right: trigger = .twoFingerRight
+                case .up: trigger = .twoFingerUp
+                case .down: trigger = .twoFingerDown
+                default: trigger = nil
+                }
+            } else if oneTapPairSwipe && fingers == 2 {
+                trigger = .combining(tap: .oneFingerTap, direction: direction, swipeFingers: 2)
+            } else {
+                let base: AppGestureTrigger = fingers == 2
+                    ? (localGestureTapCount == 1 ? .twoFingerTap : .twoFingerDoubleTap)
+                    : (localGestureTapCount == 1 ? .oneFingerTap : .oneFingerDoubleTap)
+                trigger = localGestureTapCount > 0 ? .combining(tap: base, direction: direction) : nil
+            }
+            if let trigger, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+                return true
+            }
+            replayLocalGesture(from: localGestureStrokeStart)
+            return true
+        }
+        guard duration <= profile.gestures.tapMaxDuration,
+              localGestureMaxTravel <= profile.gestures.tapMaxMovement else {
+            replayLocalGesture(from: localGestureStrokeStart)
+            return true
+        }
+        if oneTapPairSwipe && fingers == 2 {
+            if let binding = gestures.first(where: { $0.trigger.gesture == .oneFingerTap }) {
+                resetLocalGesture()
+                performBoundAction(binding.action)
+            } else { replayLocalGesture() }
+            return true
+        }
+        localGestureTapCount += 1
+        if localGestureTapCount == 1 { localGestureSequenceFingers = fingers }
+        let trigger: AppGestureTrigger = fingers == 2
+            ? (localGestureTapCount == 1 ? .twoFingerTap : localGestureTapCount == 2 ? .twoFingerDoubleTap : .twoFingerTripleTap)
+            : (localGestureTapCount == 1 ? .oneFingerTap : localGestureTapCount == 2 ? .oneFingerDoubleTap : .oneFingerTripleTap)
+        let later = gestures.contains { binding in
+            guard let candidate = binding.trigger.gesture else { return false }
+            return candidate.baseTapTrigger.map { base in
+                fingers == 2 ? [.twoFingerTap, .twoFingerDoubleTap, .twoFingerTripleTap].contains(base)
+                             : [.oneFingerTap, .oneFingerDoubleTap, .oneFingerTripleTap].contains(base)
+            } == true && (candidate.direction != nil ||
+                (localGestureTapCount == 1 && [.oneFingerDoubleTap, .oneFingerTripleTap, .twoFingerDoubleTap, .twoFingerTripleTap].contains(candidate)) ||
+                (localGestureTapCount == 2 && [.oneFingerTripleTap, .twoFingerTripleTap].contains(candidate)))
+        }
+        if !later, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+            resetLocalGesture()
+            performBoundAction(binding.action)
+            return true
+        }
+        let swipeWindow = fingers == 2
+            ? (localGestureTapCount == 1 ? profile.twoFingerSingleTapSwipe?.resolvedWindow : profile.twoFingerDoubleTapSwipe?.resolvedWindow)
+            : (localGestureTapCount == 1
+                ? max(profile.singleTapSwipe?.resolvedWindow ?? 0,
+                      profile.oneFingerTapTwoFingerSwipe?.resolvedWindow ?? 0)
+                : profile.doubleTapSwipe?.resolvedWindow)
+        let hasSwipeFollowup = gestures.contains { $0.trigger.gesture?.baseTapTrigger == trigger && $0.trigger.gesture?.direction != nil }
+        let hasTapFollowup = gestures.contains { binding in
+            guard let candidate = binding.trigger.gesture else { return false }
+            if localGestureTapCount == 1 {
+                return fingers == 2 ? [.twoFingerDoubleTap, .twoFingerTripleTap].contains(candidate)
+                                    : [.oneFingerDoubleTap, .oneFingerTripleTap].contains(candidate)
+            }
+            return localGestureTapCount == 2 && (fingers == 2 ? candidate == .twoFingerTripleTap : candidate == .oneFingerTripleTap)
+        }
+        let tapWindow = localGestureTapCount == 1
+            ? (gestures.contains { $0.trigger.gesture == (fingers == 2 ? .twoFingerTripleTap : .oneFingerTripleTap) }
+                ? profile.gestures.resolvedTripleTapFirstInterval : profile.gestures.resolvedDoubleTapInterval)
+            : profile.gestures.resolvedTripleTapSecondInterval
+        localGesturePendingWindow = max(hasSwipeFollowup ? (swipeWindow ?? 0.2) : 0,
+                                        hasTapFollowup ? tapWindow : 0)
+        if localGesturePendingWindow == 0, let binding = gestures.first(where: { $0.trigger.gesture == trigger }) {
+            resetLocalGesture(); performBoundAction(binding.action); return true
+        }
+        if localGesturePendingWindow == 0 { replayLocalGesture(); return true }
+        localGestureTimer?.invalidate()
+        let generation = selectionGeneration
+        let timer = Timer(timeInterval: localGesturePendingWindow, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation else { return }
+                if let binding = self.visibleActionBindings.first(where: { $0.trigger.gesture == trigger && $0.isValid }) {
+                    self.resetLocalGesture()
+                    self.performBoundAction(binding.action)
+                } else { self.replayLocalGesture() }
+            }
+        }
+        localGestureTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        return true
+    }
+
+    private func choose(_ direction: ExplorerSlot, fromKeyboard: Bool = false) {
+        guard isVisible, !isEditing, model.launcherQuery.isEmpty else { return }
+        guard contextIsValid?() != false else { dismiss(); return }
+        let entry = model.entries.first { $0.direction == direction }
+        if let channel = entry?.slackChannel {
+            RotaActionUsage.record(.slackChannel(channel))
+            dismiss()
+            SlackChannelOpener.open(channel)
+            return
+        }
+        if let tab = entry?.chromeTab {
+            dismiss()
+            Task.detached(priority: .userInitiated) {
+                if !ChromeBookmarkTabs.activate(tab) {
+                    await MainActor.run { Self.showWindowError("That tab moved or closed. Reopen the HUD to refresh Chrome tabs.", title: "Chrome tab unavailable") }
+                } else {
+                    await MainActor.run { ChromeTabRecency.shared.record(tab) }
+                }
+            }
+            return
+        }
+        if model.showingWindowManager && model.windowFullScreen && entry?.command != .exitFullScreen {
+            input = makeSelection(waitingForLift: contactIsDown)
+            model.selected = nil; return
+        }
+        if let index = entry?.windowIndex, windowList.indices.contains(index) {
+            let window = windowList[index]
+            let originalPID = sourcePID
+            dismiss()
+            let generation = selectionGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false,
+                      self.frontmostPID() == originalPID else { return }
+                if let error = window.activate() { Self.showWindowError(error) }
+            }
+            return
+        }
+        if entry?.showsWindows == true {
+            let pid = entry?.bundleID.flatMap { id in workspace.runningApplications.first { $0.bundleIdentifier == id && !$0.isTerminated }?.processIdentifier } ?? (entry?.showsWindows == true ? nil : sourcePID)
+            controlDirection = direction
+            windowList = pid.map(listWindows) ?? []; windowPage = 0
+            model.showingAppWindows = true
+            refreshGroup(); return
+        }
+        if let minutes = entry?.timerMinutes {
+            RotaActionUsage.record(.command(.timer))
+            FocusTimer.shared.start(minutes: minutes)
+            dismiss()
+            return
+        }
+        if entry?.command == .timer {
+            controlDirection = direction
+            model.showingTimer = true
+            refreshGroup()
+            return
+        }
+        if let command = entry?.command, AppExplorerAction.appCommands.contains(command) {
+            performBoundAction(.command(command), fromKeyboard: fromKeyboard)
+            return
+        }
+        if let command = entry?.command, command.macOSShortcut == nil,
+           let message = command.shortcutSetupMessage {
+            model.message = message
+            return
+        }
+        if let command = entry?.command, command.macOSShortcut != nil {
+            let originalPID = sourcePID
+            dismiss()
+            let generation = selectionGeneration
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.selectionGeneration == generation,
+                          self.contextIsValid?() != false, self.frontmostPID() == originalPID else { return }
+                    RotaActionUsage.begin(.command(command))
+                    defer { RotaActionUsage.end() }
+                    self.performMacCommand(command)
+                }
+            }
+            return
+        }
+        if let command = entry?.command { performWindowCommand(command); return }
+        if let media = entry?.mediaAction {
+            RotaActionUsage.record(.media(media))
+            performMedia(media)
+            model.selected = nil
+            input = makeSelection(waitingForLift: contactIsDown)
+            deadline = Date().addingTimeInterval(15)
+            return
+        }
+        if entry?.isMediaControls == true {
+            controlDirection = direction
+            model.showingMediaControls = true
+            refreshGroup()
+            return
+        }
+        if let tile = entry?.tilingDirection {
+            let placement = ExplorerWindowPlacement(direction: tile, layout: entry?.tilingLayout ?? model.windowLayout)
+            RotaActionUsage.record(.windowPlacement(placement))
+            applyWindowPlacement(placement)
+            return
+        }
+        if entry?.isWindowManager == true {
+            windowKeys = ExplorerScopedHeldKeys()
+            windowGroupPath = []; baseWindowGroupPath = []
+            windowOwnerPath = groupPath + [direction]
+            controlDirection = direction
+            model.showingWindowManager = true
+            tilingTarget = sourcePID.flatMap(captureWindow)
+            model.message = tilingTarget == nil ? "No controllable window. Enable Accessibility and open Explorer over a normal app window." : nil
+            refreshGroup()
+            return
+        }
+        if entry?.isGroup == true {
+            if model.showingWindowManager { windowGroupPath.append(direction) }
+            else { groupPath.append(direction) }
+            refreshGroup()
+            return
+        }
+        if let action = entry?.shortcut?.assignedAction {
+            performBoundAction(action, fromKeyboard: fromKeyboard)
+            return
+        }
+        if let shortcut = entry?.shortcut, let id = shortcut.hudLayerID {
+            guard shortcut.isValidExplorerShortcut, let layer = configuration().holdLayers?.first(where: { $0.id == id }),
+                  layer.isAvailable(in: sourceBundleID) else { refreshGroup(); return }
+            heldKeys.selectRootLayer(id, settings: configuration())
+            groupPath = []; baseGroupPath = []
+            model.showingMediaControls = false; model.showingTimer = false; model.showingWindowManager = false; model.showingAppWindows = false
+            refreshGroup()
+            return
+        }
+        dismiss()
+        guard let entry else { return }
+        if let shortcut = entry.shortcut {
+            guard shortcut.isValidExplorerShortcut, let targetPID = sourcePID else { return }
+            let generation = selectionGeneration
+            // Close the HUD before sending keys; cancel if focus or context changes.
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated {
+                guard let self, self.selectionGeneration == generation,
+                      self.contextIsValid?() != false, self.frontmostPID() == targetPID else { return }
+                if let sendShortcut = self.sendShortcut { sendShortcut(shortcut) }
+                else if let id = shortcut.macroID {
+                    if let macro = self.hotkeyDictionary().first(where: { $0.id == id }) { self.shortcutPoster.performMacro(macro) }
+                } else { self.shortcutPoster.performTap(.shortcut, shortcut: shortcut) }
+                }
+            }
+            return
+        }
+        if entry.isWebURL {
+            if let url = entry.url, AppExplorerFavorite.webURL(url.absoluteString) != nil {
+                RotaActionUsage.record(.openURL(url.absoluteString))
+                _ = openWebURL(url)
+            }
+            return
+        }
+        guard let identifier = entry.bundleID else { return }
+        RotaActionUsage.record(.openApp(bundleID: identifier, name: entry.name))
+        // Prefer the actual running bundle when multiple installations exist.
+        let running = workspace.runningApplications.first { $0.bundleIdentifier == identifier && !$0.isTerminated }
+        guard let url = running?.bundleURL ?? entry.url ?? applicationURL(identifier) else { return }
+        let generation = selectionGeneration
+        let center = configuration().resolvedCenterCursorOnAppSwitch
+        let configurationID = editingStore?.activeConfigurationID
+        // Dismissal has restored/unhidden the original pointer before capture.
+        let cursorOrigin = cursorPosition()
+        // A nonactivating panel restores focus as it closes. Submit the user's
+        // activation on the next main-loop turn, after that teardown finishes.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectionGeneration == generation, self.contextIsValid?() != false else { return }
+            self.openApplication(url, Self.activationConfiguration()) { [weak self] pid in
+                guard let self, let pid,
+                      self.selectionGeneration == generation, !self.isVisible,
+                      self.contextIsValid?() != false,
+                      self.editingStore?.settings.enabled != false,
+                      self.editingStore?.activeConfigurationID == configurationID else { return }
+                // Activating the process alone can leave its window on another
+                // Space. Focus/raise its actual window independently of cursor warping.
+                self.focusApplicationWindow(pid)
+                guard center else { return }
+                let isValid: () -> Bool = { [weak self] in
+                    guard let self else { return false }
+                    return self.selectionGeneration == generation && !self.isVisible &&
+                        self.configuration().resolvedCenterCursorOnAppSwitch &&
+                        self.editingStore?.settings.enabled != false &&
+                        self.editingStore?.activeConfigurationID == configurationID
+                }
+                guard isValid() else { return }
+                if let centerApplication = self.centerApplication { centerApplication(pid, cursorOrigin, isValid) }
+                else { self.cursorCentering.start(pid: pid, origin: cursorOrigin, isValid: isValid) }
+            }
+        }
+    }
+
+    /// Places the HUD's captured window, then closes the HUD exactly like
+    /// choosing an app. A placement error stays on screen with the HUD open so
+    /// the message can be read. Also the entry point for a placement bound to a
+    /// global hotkey or gesture that fires while the HUD is visible.
+    func applyWindowPlacement(_ placement: ExplorerWindowPlacement) {
+        guard isVisible, !isEditing else { return }
+        guard contextIsValid?() != false else { dismiss(); return }
+        if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
+        let error = tilingTarget.map { $0.apply(placement.direction, placement.layout) } ?? "No controllable window. Enable Accessibility and open Explorer over a normal app window."
+        if let error { showWindowMessage(error) } else { dismiss() }
+    }
+
+    /// Runs a window command (maximize, minimize, close, full screen) on the
+    /// HUD's captured window and closes the HUD on success; an error keeps it
+    /// open with the message. Shared by command tiles and global bindings that
+    /// fire while the HUD is visible.
+    func performWindowCommand(_ command: AppExplorerAction) {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        RotaActionUsage.record(.command(command))
+        if command == .activateVoiceMode { activateVoiceMode(); return }
+        if tilingTarget == nil, let sourcePID { tilingTarget = captureWindow(sourcePID) }
+        guard let target = tilingTarget else {
+            showWindowMessage("No controllable window. Enable Accessibility and open Explorer over a window."); return
+        }
+        if target.isFullScreen() && command != .exitFullScreen && command != .toggleFullScreen {
+            refreshGroup(); return
+        }
+        if let error = target.command(command) { showWindowMessage(error) }
+        else { dismiss() }
+    }
+
+    /// Keep the HUD open with an inline message and a fresh selection gate so
+    /// the finger that chose the tile does not immediately choose again.
+    private func showWindowMessage(_ message: String) {
+        model.message = message
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    static func showWindowError(_ message: String, title: String = "Window unavailable") {
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
+        alert.addButton(withTitle: "OK"); alert.runModal()
+    }
+
+    func changeWindowPage(_ delta: Int) {
+        if model.showingChromeTabs || model.showingRecentPlaces || model.showingSlackChannels {
+            chromeTabsPage = max(0, min(model.pageCount - 1, chromeTabsPage + delta))
+            refreshGroup(); return
+        }
+        guard model.showingAppWindows else { return }
+        windowPage = max(0, min(max(0, (windowList.count - 1) / 16), windowPage + delta))
+        refreshGroup()
+    }
+
+    func centerTap() {
+        if let realtime = model.realtimeSession { realtime.finish(); return }
+        guard isVisible, !isEditing else { return }
+        guard contextIsValid?() != false else { dismiss(); return }
+        if let voice = model.voiceSession {
+            switch voice.phase {
+            case .listening: voice.finishListening()
+            case .ready: confirmVoiceAction()
+            case .failed, .cancelled: beginVoiceMode()
+            case .preparing, .matching: break
+            }
+            return
+        }
+        if heldKeys.activeID == nil && groupPath.isEmpty && mappedBuiltIn == nil && !model.showingWindowManager && !model.showingAppWindows && !model.showingRecents && !model.showingControlHUD {
+            beginVoiceMode(); return
+        }
+        if model.showingTimer {
+            RotaActionUsage.record(.command(.timer))
+            FocusTimer.shared.start(minutes: FocusTimerPreset.centerMinutes)
+            dismiss()
+            return
+        }
+        guard model.showingMediaControls || mappedBuiltIn == .mediaControls else { goBack(); return }
+        RotaActionUsage.record(.media(.playPause))
+        performMedia(.playPause)
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    private func currentVoiceCatalog() -> [VoiceRegisteredAction] {
+        // Starting voice is an input action; offering it as a spoken output can
+        // repeatedly restart recording when automatic confirmation is enabled.
+        if let voiceCatalog { return voiceCatalog().filter { $0.action.command != .activateVoiceMode } }
+        guard let store = editingStore else { return [] }
+        return VoiceActionRegistry.make(settings: store.settings, applications: VoiceApplicationIndex.shared.applications, activeBundleID: sourceBundleID)
+            .filter { $0.action.command != .activateVoiceMode }
+    }
+
+    /// A reusable action always targets the main HUD and preserves its input owner.
+    func activateVoiceMode() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        guard model.voiceSession == nil, model.realtimeSession == nil else { return }
+        switchLayer(nil)
+        beginVoiceMode()
+    }
+
+    func beginVoiceMode() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        endVoiceMode()
+        resetLocalGesture()
+        model.launcherQuery = ""; model.launcherActions = []; model.launcherResults = []; model.launcherSelection = 0
+        if useRealtimeVoice() {
+            let session = makeRealtimeSession(); session.admission = microphoneAdmission
+            model.realtimeSession = session
+            session.onTranscript = { [weak self, weak session] text in
+                guard let self, let session, self.isVisible, self.model.realtimeSession === session,
+                      self.contextIsValid?() != false else { return }
+                self.pendingMenuAction = nil
+                self.model.launcherQuery = text
+                self.model.launcherSelection = 0
+                self.updateLauncherResults(VoiceApplicationIndex.shared.applications)
+            }
+            deadline = Date().addingTimeInterval(40)
+            session.start()
+            return
+        }
+        let voice = makeVoiceSession()
+        voice.noteStore = noteStore
+        voice.microphoneAdmission = microphoneAdmission
+        voice.onPrivateEditorChanged = { [weak self, weak voice] editing in
+            guard let self, let voice, self.model.voiceSession === voice else { return }
+            self.privateEditorOpen = editing
+            self.panel?.privateEntryEditing = editing
+            self.panel?.allowsEditing = self.model.isEditing || editing
+            self.onEditingChanged?(editing || self.model.isEditing)
+            if !editing { self.deadline = Date().addingTimeInterval(15) }
+        }
+        voice.registerCloudSession()
+        let capturedApp = sourceBundleID
+        voice.isCatalogCurrent = { [weak self, weak voice] snapshot in
+            guard let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                  self.contextIsValid?() != false, self.frontmostBundleID() == capturedApp else { return false }
+            // Revalidate at response boundaries, not on microphone/render ticks.
+            // Includes learned vocabulary and descriptions, not just stable IDs.
+            return snapshot == self.currentVoiceCatalog()
+        }
+        voice.autoSelect = configuration().resolvedVoiceAutoSelect
+        voice.onFinalMatch = { [weak self, weak voice] in
+            guard let self, let voice, self.isVisible, self.model.voiceSession === voice, voice.autoSelecting else { return }
+            self.voiceAutoSelection?.cancel()
+            let delay = UInt64(max(0, self.voiceAutoSelectDelay) * 1_000_000_000)
+            self.voiceAutoSelection = Task { @MainActor [weak self, weak voice] in
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                      voice.autoSelecting, voice.phase == .ready, self.contextIsValid?() != false else { return }
+                self.voiceAutoSelection = nil
+                self.confirmVoiceAction()
+            }
+        }
+        model.voiceSession = voice
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(120)
+        if let prepareVoice { prepareVoice(voice, currentVoiceCatalog()); return }
+        let loadApplications = loadVoiceApplications
+        voicePreparation = Task { [weak self, weak voice] in
+            await loadApplications()
+            guard !Task.isCancelled, let self, let voice, self.isVisible, self.model.voiceSession === voice,
+                  self.contextIsValid?() != false, voice.phase == .preparing else { return }
+            voice.start(catalog: self.currentVoiceCatalog())
+        }
+    }
+
+    func endVoiceMode() {
+        model.realtimeSession?.cancel(); model.realtimeSession = nil
+        voiceSwipeMatchID = nil
+        if privateEditorOpen {
+            privateEditorOpen = false
+            panel?.privateEntryEditing = false; panel?.allowsEditing = model.isEditing
+            onEditingChanged?(model.isEditing)
+        }
+        voicePreparation?.cancel(); voicePreparation = nil
+        voiceAutoSelection?.cancel(); voiceAutoSelection = nil
+        model.voiceSession?.cancel(); model.voiceSession = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    func confirmVoiceAction() {
+        guard !privateEditorOpen else { return }
+        guard let voice = model.voiceSession, contextIsValid?() != false else { return }
+        if voice.selected == .left { endVoiceMode(); return }
+        if voice.phase == .listening { voice.finishListening(); return }
+        guard let match = voice.selectedMatch else { return }
+        if let requiredApp = match.record.appBundleID, frontmostBundleID() != requiredApp {
+            voice.fail(VoiceError.message("The active application changed. Please try again.")); return
+        }
+        guard let current = currentVoiceCatalog().first(where: { $0.id == match.id }),
+              current.enabled, match.record.enabled,
+              current.action == match.record.action,
+              current.appBundleID == match.record.appBundleID,
+              current.overrideTrigger == match.record.overrideTrigger,
+              current.action.isValid else {
+            voice.fail(VoiceError.message("This action changed or was removed. Please try again.")); return
+        }
+        endVoiceMode()
+        performBoundAction(current.action, fromKeyboard: true)
+    }
+
+    func goBack() {
+        guard isVisible, !isEditing else { return }
+        if mappedBuiltIn != nil {
+            guard contextIsValid?() != false else { dismiss(); return }
+            switchLayer(nil)
+            return
+        }
+        if model.showingAppWindows {
+            model.showingAppWindows = false; windowList = []; windowPage = 0; controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
+            model.message = nil; refreshGroup(); return
+        }
+        if model.showingTimer {
+            model.showingTimer = false
+            guard controlDirection != nil, contextIsValid?() != false else { dismiss(); return }
+            controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
+            heldKeys.leave(to: groupPath)
+            refreshGroup()
+            return
+        }
+        if model.showingMediaControls {
+            guard contextIsValid?() != false else { dismiss(); return }
+            model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+            controlDirection = model.showingWindowManager ? windowOwnerPath?.last : nil
+            heldKeys.leave(to: groupPath)
+            refreshGroup()
+            return
+        }
+        if model.showingWindowManager {
+            guard contextIsValid?() != false else { dismiss(); return }
+            if !windowGroupPath.isEmpty {
+                windowGroupPath.removeLast(); windowKeys.leave(to: windowGroupPath)
+                refreshGroup(); return
+            }
+            if model.directWindowManager { dismiss(); return }
+            model.showingWindowManager = false
+            windowKeys = ExplorerScopedHeldKeys()
+            windowOwnerPath = nil
+            controlDirection = nil
+            heldKeys.leave(to: groupPath)
+            model.message = nil
+            tilingTarget = nil
+            refreshGroup()
+            return
+        }
+        guard contextIsValid?() != false, !groupPath.isEmpty else { dismiss(); return }
+        groupPath.removeLast()
+        heldKeys.leave(to: groupPath)
+        refreshGroup()
+    }
+
+    private func refreshGroup() {
+        resetLocalGesture()
+        selectionGeneration &+= 1
+        model.deepFan = nil
+        loadEntries()
+        model.selected = nil
+        input = makeSelection(waitingForLift: contactIsDown)
+        deadline = Date().addingTimeInterval(15)
+    }
+
+    func openSettings() {
+        guard isVisible, !isEditing, contextIsValid?() != false else { return }
+        dismiss()
+        // Restore the pointer and tear down the HUD before activating settings.
+        DispatchQueue.main.async { [weak self] in self?.onSettings?() }
+    }
+
+    func beginEditing() {
+        if model.voiceSession != nil { endVoiceMode() }
+        guard let store = editingStore, let previous = panel, !isEditing, !model.showingAppWindows, !model.showingControlHUD, heldKeys.activeID == nil, windowKeys.activeID == nil, !(model.showingWindowManager && model.windowFullScreen),
+              contextIsValid?() != false else { return }
+        selectionGeneration &+= 1
+        model.isEditing = true
+        model.selected = nil
+        onPresentationChanged?()
+        onEditingChanged?(true)
+        // Use an activating panel for text fields and native picker sheets.
+        // Recreate it in place; toggling NSPanel's nonactivating style at runtime
+        // can leave AppKit's key-focus behavior inconsistent.
+        let frame = previous.frame
+        let previousScreen = previous.screen
+        let visibleFrame = (previousScreen ?? NSScreen.main)?.visibleFrame
+        let editorWidth = min(ExplorerInlineEditor.preferredWidth, (visibleFrame?.width ?? 792) - 32)
+        let editorHeight = min(980, (visibleFrame?.height ?? 1012) - 32)
+        previous.onCancel = nil
+        previous.orderOut(nil)
+        if previous !== hudPanel { previous.close() }
+        let editor = ExplorerPanel(contentRect: NSRect(x: frame.midX - editorWidth / 2, y: frame.midY - editorHeight / 2,
+            width: editorWidth, height: editorHeight),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        editor.isReleasedWhenClosed = false
+        editor.title = "Edit App Explorer"
+        editor.isOpaque = false; editor.backgroundColor = .clear; editor.hasShadow = true
+        editor.level = .floating; editor.hidesOnDeactivate = false
+        editor.allowsEditing = true
+        editor.onCancel = { [weak self] in self?.dismiss() }
+        let editingWindows = model.showingWindowManager
+        let owner = windowOwnerPath ?? []
+        var expected = store.settings.appExplorer ?? AppExplorerSettings()
+        let windowBinding = Binding<AppExplorerSettings>(get: {
+            (store.settings.appExplorer ?? AppExplorerSettings()).windowEditor(at: owner)
+        }, set: { updated in
+            var next = store.settings.appExplorer ?? AppExplorerSettings()
+            guard next == expected, next.saveWindowEditor(updated, at: owner) else { return }
+            store.settings.appExplorer = next; expected = next
+        })
+        editor.contentView = NSHostingView(rootView: ExplorerInlineEditor(store: store, groupPath: editingWindows ? windowGroupPath : groupPath,
+            onGroupPathChange: { [weak self] path in
+                if editingWindows { self?.windowGroupPath = path } else { self?.groupPath = path }
+            }, onDone: { [weak self] in self?.finishEditing() },
+            configurationOverride: editingWindows ? windowBinding : nil, windowManagerOnly: editingWindows,
+            windowOwnerPath: inlineEditorWindowOwnerPath,
+            contentWidth: editorWidth, contentHeight: editorHeight))
+        if let visible = visibleFrame {
+            editor.setFrameOrigin(NSPoint(x: max(visible.minX, min(editor.frame.minX, visible.maxX - editorWidth)),
+                                          y: max(visible.minY, min(editor.frame.minY, visible.maxY - editorHeight))))
+        }
+        panel = editor
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
+        NSApp.activate()
+        editor.makeKeyAndOrderFront(nil)
+    }
+
+    func finishEditing() {
+        guard isEditing else { return }
+        let path = groupPath
+        let windowPath = windowGroupPath, owner = windowOwnerPath
+        let wasWindow = model.showingWindowManager, direct = model.directWindowManager
+        let originalPID = sourcePID, originalTarget = tilingTarget
+        let waitingForLift = contactIsDown
+        dismiss()
+        if wasWindow, let originalPID { _ = NSRunningApplication(processIdentifier: originalPID)?.activate(options: []) }
+        show(waitingForLift: waitingForLift, windowManager: false, autoStartVoice: false)
+        if wasWindow {
+            sourcePID = originalPID; tilingTarget = originalTarget
+            model.showingWindowManager = true; model.directWindowManager = direct
+            groupPath = path; windowGroupPath = windowPath; windowOwnerPath = owner
+            controlDirection = owner?.last
+            refreshGroup(); return
+        }
+        if model.mode == .favorites, configuration().favorites(at: path) != nil {
+            groupPath = path
+            refreshGroup()
+        }
+    }
+
+    static func activationConfiguration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.hides = false
+        configuration.hidesOthers = false
+        configuration.createsNewApplicationInstance = false
+        configuration.allowsRunningApplicationSubstitution = true
+        return configuration
+    }
+
+    func dismiss() {
+        launcherMenuRefresh?.cancel(); launcherMenuRefresh = nil
+        launcherMenuSnapshot = []; launcherActionSnapshot = []; launcherRegisteredSnapshot = []; pendingMenuAction = nil
+        launcherCatalogDirty = true
+        searchObservation = nil
+        model.launcherQuery = ""; model.launcherResults = []; model.launcherSelection = 0
+        endVoiceMode()
+        entryCache.removeAll(keepingCapacity: true)
+        entryCacheSettings = nil
+        resetLocalGesture()
+        guard let panel else { return }
+        selectionGeneration &+= 1
+        self.panel = nil
+        onPresentationChanged?()
+        if model.isEditing { model.isEditing = false; onEditingChanged?(false) }
+        panel.orderOut(nil)
+        if panel !== hudPanel { panel.close() }
+        timer?.invalidate(); timer = nil
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
+        model.selected = nil
+        groupPath = []
+        model.groupNames = []
+        model.groupDirections = []
+        model.groupSlotCounts = []
+        model.showingAppWindows = false
+        windowList = []; windowPage = 0; windowKeys = ExplorerScopedHeldKeys()
+        windowGroupPath = []; baseWindowGroupPath = []; windowOwnerPath = nil
+        model.showingWindowManager = false
+        model.directWindowManager = false
+        model.showingMediaControls = false; model.showingTimer = false; model.showingTimer = false
+        heldKeys = ExplorerScopedHeldKeys()
+        baseGroupPath = []
+        model.message = nil
+        tilingTarget = nil
+        onDismiss?()
+    }
+}
+
+final class ExplorerPanel: NSPanel {
+    var onCancel: (() -> Void)?
+    var onSettings: (() -> Void)?
+    var onKey: ((NSEvent) -> Bool)?
+    var allowsEditing = false
+    var privateEntryEditing = false
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override func resignKey() { super.resignKey(); if !allowsEditing { onCancel?() } }
+    override func cancelOperation(_ sender: Any?) {
+        if privateEntryEditing { super.cancelOperation(sender) } else { onCancel?() }
+    }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Recorded Command-key chords must reach the applet before menu-bar
+        // commands (for example Cmd-M) can act on Rota's own window.
+        if !allowsEditing, onKey?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+    override func keyDown(with event: NSEvent) {
+        if allowsEditing { super.keyDown(with: event); return }
+        if onKey?(event) == true { return }
+        if event.keyCode == 1, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            onSettings?(); return
+        }
+        if event.keyCode == 53 { onCancel?() }
+        // Do not leak typing into the application behind the HUD.
+    }
+    override func keyUp(with event: NSEvent) {
+        if allowsEditing { super.keyUp(with: event) } else { _ = onKey?(event) }
+    }
+    override func flagsChanged(with event: NSEvent) {
+        if allowsEditing { super.flagsChanged(with: event) } else { _ = onKey?(event) }
+    }
+}
+
+struct ExplorerEntry: Equatable {
+    var chromeTab: ChromeRecentTab? = nil
+    var isActiveApp = false
+    var direction: ExplorerSlot
+    var bundleID: String?
+    var name: String
+    var icon: NSImage?
+    var url: URL?
+    var isWebURL: Bool
+    var webIconSymbol: String?
+    var isGroup: Bool
+    var hasDeepChoices: Bool
+    var isRecentGroup: Bool
+    var isWindowManager: Bool
+    var tilingDirection: SwipeDirection?
+    var tilingLayout: ExplorerWindowLayout?
+    var shortcut: RecordedShortcut?
+    var activationShortcut: RecordedShortcut?
+    var isMediaControls: Bool
+    var mediaAction: ExplorerMediaAction?
+    var timerMinutes: Int? = nil
+    var slackChannel: String? = nil
+    var command: AppExplorerAction?
+    var showsWindows: Bool
+    var windowIndex: Int?
+    init(direction: ExplorerSlot, bundleID: String?, name: String, icon: NSImage?, url: URL?, isWebURL: Bool = false, webIconSymbol: String? = nil, isGroup: Bool = false, hasDeepChoices: Bool = false, isRecentGroup: Bool = false, isWindowManager: Bool = false, tilingDirection: SwipeDirection? = nil, shortcut: RecordedShortcut? = nil, activationShortcut: RecordedShortcut? = nil, isMediaControls: Bool = false, mediaAction: ExplorerMediaAction? = nil, command: AppExplorerAction? = nil, showsWindows: Bool = false, windowIndex: Int? = nil, tilingLayout: ExplorerWindowLayout? = nil) {
+        self.direction = direction; self.bundleID = bundleID; self.name = name; self.icon = icon; self.url = url
+        self.isWebURL = isWebURL
+        self.webIconSymbol = webIconSymbol
+        self.isGroup = isGroup
+        self.hasDeepChoices = hasDeepChoices
+        self.isRecentGroup = isRecentGroup
+        self.isWindowManager = isWindowManager
+        self.tilingDirection = tilingDirection
+        self.tilingLayout = tilingLayout
+        self.shortcut = shortcut
+        self.activationShortcut = activationShortcut
+        self.isMediaControls = isMediaControls
+        self.mediaAction = mediaAction
+        self.command = command; self.showsWindows = showsWindows; self.windowIndex = windowIndex
+    }
+    init(direction: ExplorerSlot, app: NSRunningApplication) {
+        self.init(direction: direction, bundleID: app.bundleIdentifier ?? "", name: app.localizedName ?? "Application", icon: app.icon, url: app.bundleURL)
+    }
+}
+
+struct HUDCarouselPreview: Identifiable {
+    let id: String
+    let name: String
+    let offset: HUDMapPoint
+    let slotCount: Int
+    let entries: [ExplorerEntry]
+
+    static func makeMap(_ map: [HUDMapNode], activeLayerID: UUID?,
+                        makeEntry: (AppExplorerFavorite) -> ExplorerEntry) -> [Self] {
+        guard let origin = map.first(where: { $0.layerID == activeLayerID })?.point else { return [] }
+        return map.filter { $0.layerID != activeLayerID }.map { node in
+            Self(id: node.id, name: node.name, offset: node.point - origin,
+                slotCount: node.slotCount, entries: node.favorites.map(makeEntry))
+        }
+    }
+}
+
+struct ExplorerDeepFan {
+    let origin: ExplorerSlot
+    let entries: [ExplorerEntry]
+    let slotCount: Int
+}
+
+private struct ExplorerDeepFanSector: Shape {
+    let angle: Double
+    let innerRadius: Double
+    let outerRadius: Double
+    let halfAngle: Double
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let start = Angle.degrees(angle - halfAngle), end = Angle.degrees(angle + halfAngle)
+        func point(_ value: Angle, radius: Double) -> CGPoint {
+            CGPoint(x: center.x + cos(value.radians) * radius, y: center.y + sin(value.radians) * radius)
+        }
+        var path = Path()
+        path.move(to: point(start, radius: innerRadius))
+        path.addLine(to: point(start, radius: outerRadius))
+        path.addArc(center: center, radius: outerRadius, startAngle: start, endAngle: end, clockwise: false)
+        path.addLine(to: point(end, radius: innerRadius))
+        path.addArc(center: center, radius: innerRadius, startAngle: end, endAngle: start, clockwise: true)
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Both faces use the same HUD renderer; only their position on the orbit differs.
+private struct HUDOrbitSatellite: View, Equatable {
+    let preview: HUDCarouselPreview
+    let theme: ExplorerTheme
+    @StateObject private var model: ExplorerModel
+
+    init(preview: HUDCarouselPreview, theme: ExplorerTheme) {
+        self.preview = preview
+        self.theme = theme
+        _model = StateObject(wrappedValue: Self.prepare(preview: preview, theme: theme))
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.theme == rhs.theme && lhs.preview.id == rhs.preview.id &&
+        lhs.preview.name == rhs.preview.name && lhs.preview.slotCount == rhs.preview.slotCount &&
+        lhs.preview.entries == rhs.preview.entries
+    }
+
+    // StateObject evaluates this lazily, once per satellite identity, not once
+    // per gesture update. The orbit transform remains outside this cached face.
+    private static func prepare(preview: HUDCarouselPreview, theme: ExplorerTheme) -> ExplorerModel {
+        let prepared = ExplorerModel()
+        prepared.entries = preview.entries
+        prepared.theme = theme
+        prepared.slotCount = preview.slotCount
+        prepared.layerName = preview.name
+        prepared.animationsEnabled = false
+        return prepared
+    }
+    var body: some View {
+        AnyView(AppExplorerView(model: model, onSelect: { _ in }, onCancel: {},
+            forceReduceMotion: true, isPreview: true, showsCarousel: false))
+            .frame(width: 470, height: 520)
+            // One GPU raster per face instead of CPU blurs for every tile.
+            .drawingGroup()
+            .allowsHitTesting(false)
+            .onChange(of: theme) { _, _ in refresh() }
+            .onChange(of: preview.name) { _, _ in refresh() }
+            .onChange(of: preview.slotCount) { _, _ in refresh() }
+            .onChange(of: preview.entries) { _, _ in refresh() }
+    }
+    private func refresh() {
+        model.entries = preview.entries
+        model.theme = theme
+        model.slotCount = preview.slotCount
+        model.layerName = preview.name
+        model.animationsEnabled = false
+    }
+}
+
+/// Move the camera across a fixed map. Every face stays front-on; only uniform
+/// scale, brightness and position convey distance. Endpoints are identical to
+/// the next active HUD's coordinates, so committing cannot re-pack the map.
+struct HUDMapProjection {
+    let x: Double
+    let y: Double
+    var scale: Double { 1 / (1 + 0.8 * (x * x + y * y)) }
+    var offsetX: Double { tanh(x * log(2)) * 475 }
+    var offsetY: Double { -tanh(y * log(2)) * 385 }
+    var brightness: Double { -0.18 * (1 - scale) }
+    var opacity: Double { 0.76 + 0.24 * scale }
+}
+
+private struct HUDOrbitTransform: ViewModifier, Animatable {
+    var x: Double
+    var y: Double
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(x, y) }
+        set { x = newValue.first; y = newValue.second }
+    }
+    func body(content: Content) -> some View {
+        let projection = HUDMapProjection(x: x, y: y)
+        content
+            .scaleEffect(projection.scale)
+            .brightness(projection.brightness)
+            .opacity(projection.opacity)
+            .offset(x: projection.offsetX, y: projection.offsetY)
+    }
+}
+
+@MainActor final class ExplorerModel: ObservableObject {
+    /// Bumped on every open so the reused view replays its entrance.
+    @Published var presentation = 0
+    @Published var realtimeSession: RealtimeLauncherSession?
+    @Published var launcherActions: [LauncherAction] = []
+    @Published var launcherQuery = ""
+    @Published var launcherResults: [ExplorerApplication] = []
+    @Published var launcherSelection = 0
+    @Published var voiceSession: VoiceSession?
+    // MRU starts at the left and proceeds clockwise. Positions freeze on open.
+    static let directions = AppExplorerSettings.recentDirections
+    @Published var entries: [ExplorerEntry] = []
+    @Published var actionBindings: [ActionBinding] = []
+    @Published var selected: ExplorerSlot?
+    @Published var deepFan: ExplorerDeepFan?
+    @Published var mode: AppExplorerMode = .favorites
+    @Published var groupNames: [String] = []
+    @Published var groupDirections: [ExplorerSlot] = []
+    @Published var groupSlotCounts: [Int] = []
+    @Published var canEdit = false
+    @Published var isEditing = false
+    @Published var showingRecents = false
+    @Published var showingWindowManager = false
+    @Published var directWindowManager = false
+    @Published var message: String?
+    @Published var showingMediaControls = false
+    /// The timer picker: tap for 25 minutes, swipe for 5–60.
+    @Published var showingTimer = false
+    var showingControlHUD: Bool { showingMediaControls || showingTimer }
+    @Published var layerName: String?
+    @Published var previousLayerName: String?
+    @Published var nextLayerName: String?
+    @Published var carouselPreviews: [HUDCarouselPreview] = []
+    @Published var orbitPosition: HUDNavigationAction?
+    // Track the physical stroke independently of its chosen navigation action.
+    var orbitTrigger: AppGestureTrigger?
+    @Published var orbitOffset: HUDMapPoint = .zero
+    @Published var orbitProgress = 0.0
+    var orbitSettling = false
+    var orbitGeneration = 0
+    @Published var carouselPosition: String?
+    @Published var layerHint = ""
+    @Published var windowLayout: ExplorerWindowLayout = .halves
+    @Published var theme: ExplorerTheme = .starburstAir
+    @Published var animationsEnabled = true
+    @Published var slotCount = 8
+    @Published var windowFullScreen = false
+    @Published var showingAppWindows = false
+    @Published var showingChromeTabs = false
+    @Published var showingSlackChannels = false
+    @Published var showingRecentPlaces = false
+    @Published var page = 0
+    @Published var pageCount = 1
+}
+
+struct AppExplorerView: View {
+    @ObservedObject var model: ExplorerModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var appeared = false
+    @State private var reticleRotation = -135.0
+    @State private var lensAngle = 0.0
+    var onSelect: (ExplorerSlot) -> Void
+    var onCancel: () -> Void
+    var onDeepSelect: (ExplorerSlot) -> Void = { _ in }
+    var onBack: () -> Void = {}
+    var onSettings: () -> Void = {}
+    var onWindowCommand: (AppExplorerAction) -> Void = { _ in }
+    var onWindowPage: (Int) -> Void = { _ in }
+    var onVoiceExit: () -> Void = {}
+    var onVoiceRetry: () -> Void = {}
+    var onVoiceConfirm: () -> Void = {}
+    // Previews/tests may enforce reduced motion; they cannot override macOS's
+    // accessibility preference in the opposite direction.
+    var forceReduceMotion = false
+    var forceReduceTransparency = false
+    var isPreview = false
+    var showsCarousel = true
+    // Settings supply their own persistent controls outside the orbit canvas.
+    // Keep live HUD presentation and all legacy inline previews unchanged.
+    var settingsWorkspace = false
+    var onPreviewLayer: ((String) -> Void)? = nil
+    var previewEmptyPositions: [HUDLayerPosition] = []
+    var previewOrigin: HUDMapPoint = .zero
+    var previewViewportSize: CGSize? = nil
+    var onPreviewAddLayer: ((HUDLayerPosition) -> Void)? = nil
+    var onPreviewDrag: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
+    var onPreviewDrop: (ExplorerSlot, ExplorerSlot?) -> Void = { _, _ in }
+    private let grid: [[ExplorerSlot?]] = [[.topLeft, .up, .topRight], [.left, nil, .right], [.bottomLeft, .down, .bottomRight]]
+    private var canActivateVoice: Bool {
+        !isPreview && !model.isEditing && model.layerName == nil && model.groupNames.isEmpty &&
+            !model.showingWindowManager && !model.showingControlHUD && !model.showingAppWindows && !model.showingRecents
+    }
+    private var canGoBack: Bool { model.directWindowManager ? model.groupNames.count > 1 : !model.groupNames.isEmpty }
+    private var animates: Bool {
+        ExplorerHUDMotion.enabled(theme: model.theme, preference: model.animationsEnabled,
+            reduceMotion: reduceMotion || forceReduceMotion)
+    }
+    // Short enough that the lens lands with the finger; 120 ms read as a lag on quick swipes.
+    private var feedback: Animation? { animates ? .easeOut(duration: 0.07) : nil }
+    private var accent: Color { model.theme.accent }
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var opaqueChrome: Bool { reduceTransparency || forceReduceTransparency }
+    private var guidance: String {
+        if let message = model.message { return message }
+        if let slot = model.selected, model.slotCount > 8,
+           let entry = model.entries.first(where: { $0.direction == slot }) { return "\(entry.name) · lift to choose" }
+        if model.showingAppWindows { return "Swipe to raise a window · ←/→ pages · center tap to go back" }
+        if model.showingTimer {
+            if let left = FocusTimer.shared.remaining {
+                return "\(Int((left / 60).rounded(.up))) min left on your timer · pick a time to restart it · Esc to close"
+            }
+            return "Tap for 25 minutes · swipe for another length · Esc to close"
+        }
+        if model.showingMediaControls { return "Tap to play / pause · swipe to control · Esc to close" }
+        if model.showingWindowManager { return "Swipe to choose · lift to run · center tap to \(canGoBack ? "go back" : "close")" }
+        if model.entries.isEmpty { return model.showingRecents ? "Open another app to see it here" : "Add favorites to get started" }
+        return model.groupNames.isEmpty ? "Type to search apps, Finder, folders, Chrome tabs, bookmarks, and actions · swipe to choose · lift to open" : "\(model.groupNames.last!) · swipe to choose · tap center to go back"
+    }
+
+    var body: some View {
+        Group {
+            if let realtime = model.realtimeSession {
+                VStack(spacing: 12) { RealtimeLauncherStatus(session: realtime); launcherSearchHUD }
+            } else if let voice = model.voiceSession {
+                VoiceHUDView(session: voice, theme: model.theme, onExit: onVoiceExit,
+                    onRetry: onVoiceRetry, onConfirm: onVoiceConfirm,
+                    forceReduceTransparency: forceReduceTransparency)
+                    .frame(width: 950, height: 850)
+            } else if !model.launcherQuery.isEmpty { launcherSearchHUD } else { normalHUD }
+        }
+    }
+
+    private var launcherSearchHUD: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(model.launcherQuery, systemImage: "magnifyingglass")
+                .font(.title2).accessibilityLabel("Search: " + model.launcherQuery)
+            Divider()
+            if model.launcherActions.isEmpty {
+                Text("No matching apps, folders, tabs, bookmarks, or actions · the app index refreshes in the background").foregroundStyle(.secondary)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(model.launcherActions.enumerated()), id: \.element.id) { index, app in
+                            HStack {
+                                launcherIcon(app)
+                                    .font(.title2).frame(width: 28, height: 28)
+                                VStack(alignment: .leading) {
+                                    Text(app.name).font(.headline).lineLimit(1)
+                                    Text(app.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                if index == model.launcherSelection { Image(systemName: "return") }
+                            }.padding(8)
+                                .background(index == model.launcherSelection ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .cornerRadius(8)
+                                .accessibilityAddTraits(index == model.launcherSelection ? .isSelected : [])
+                                .id(app.id)
+                        }
+                    }
+                }
+                .frame(maxHeight: 620)
+                .onChange(of: model.launcherSelection) { index in
+                    guard model.launcherActions.indices.contains(index) else { return }
+                    proxy.scrollTo(model.launcherActions[index].id, anchor: .center)
+                }
+            }
+            if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+            Text("↑↓ choose · Return launch · Backspace edit · Esc close")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 540)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .frame(width: 950, height: model.realtimeSession == nil ? 850 : nil)
+    }
+
+    @ViewBuilder private func launcherIcon(_ item: LauncherAction) -> some View {
+        switch item.target {
+        case .app(let app):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+                .resizable().aspectRatio(contentMode: .fit)
+        case .folder(let folder):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: folder.url.path))
+                .resizable().aspectRatio(contentMode: .fit)
+        case .chromeTab:
+            Image(systemName: "globe")
+        case .rotaSettings:
+            Image(systemName: "gearshape.fill")
+        case .menu:
+            Image(systemName: "menubar.rectangle")
+        case .webSearch(let provider, _):
+            Image(systemName: provider == .gmail ? "envelope.fill" : "magnifyingglass")
+        case .chromeHistory:
+            Image(systemName: "clock.arrow.circlepath")
+        case .registered:
+            let detail = item.detail.lowercased()
+            if detail.contains("macro") {
+                Image(systemName: "square.stack.3d.up.fill")
+            } else if detail.contains("website") || detail.contains("url") || item.name.lowercased().contains("website") {
+                Image(systemName: "safari.fill")
+            } else {
+                Image(systemName: "bolt.fill")
+            }
+        }
+    }
+
+    private var normalHUD: some View {
+        VStack(spacing: 18) {
+            if model.showingWindowManager && model.windowFullScreen {
+                VStack(spacing: 20) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 48, weight: .light)).foregroundStyle(accent)
+                    Button("Exit full screen") { onWindowCommand(.exitFullScreen) }.buttonStyle(.rotaPrimary)
+                    Text("Swipe up to exit full screen").font(.caption).foregroundStyle(.secondary)
+                }.frame(height: 260)
+                    .background { if model.theme.isFloating { Circle().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)) } }
+            } else if model.theme.isRadial || model.slotCount != 8 {
+                starburst
+            } else {
+            VStack(spacing: 8) {
+                ForEach(0..<3) { row in
+                    HStack(spacing: 8) {
+                        ForEach(0..<3) { column in
+                            if let direction = grid[row][column] { tile(direction) }
+                            else {
+                                Button(action: onBack) {
+                                    VStack(spacing: 7) {
+                                        if model.theme.isHUD && model.showingWindowManager {
+                                            let selected = model.entries.first { $0.direction == model.selected }
+                                            ExplorerLayoutPreview(direction: selected?.tilingDirection, layout: selected?.tilingLayout ?? model.windowLayout, accent: accent)
+                                        } else {
+                                            ZStack {
+                                                if model.theme.isHUD {
+                                                    Circle().stroke(accent.opacity(0.20), style: StrokeStyle(lineWidth: 1, dash: [2, 5])).frame(width: 57, height: 57)
+                                                    Circle().trim(from: 0.04, to: 0.26).stroke(accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                                        .frame(width: 57, height: 57)
+                                                        .rotationEffect(.degrees(reticleRotation))
+                                                }
+                                                Image(systemName: canActivateVoice ? "mic.fill" : (model.showingTimer ? "timer" : model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : (model.directWindowManager ? "xmark.circle" : "safari"))))
+                                                    .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
+                                            }.frame(height: model.theme.isHUD ? 57 : 30)
+                                        }
+                                        Text(canActivateVoice ? "Tap for voice" : (model.showingTimer ? "Tap for 25 min" : model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Tap to go back" : "Tap to close")))
+                                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                                    }.frame(width: 130, height: 98).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                    .accessibilityLabel(canActivateVoice ? "Start voice mode" : (model.showingTimer ? "Start a 25 minute timer" : model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close \(model.directWindowManager ? "Window Manager" : "HUD")")))
+                            }
+                        }
+                    }
+                }
+            }
+            }
+        }
+        .padding(.horizontal, 26)
+        // The settings canvas has no runtime footer. Fit the 310-point tile
+        // layout and its chrome without clipping rectangular themes at the
+        // minimum window height; tile sizes and live HUD geometry stay intact.
+        .padding(.vertical, isPreview && settingsWorkspace ? 20 : 26)
+        .frame(width: 470, height: isPreview && settingsWorkspace ? 350 : 520)
+        .background(ExplorerHUDBackdrop(theme: model.theme,
+            forceReduceTransparency: forceReduceTransparency || (isPreview && settingsWorkspace && model.theme == .native)))
+        .tint(accent)
+        .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
+        .scaleEffect(animates && !appeared ? 0.985 : 1)
+        .opacity(animates && !appeared ? 0.85 : 1)
+        .onAppear(perform: enter)
+        .onChange(of: model.presentation) { _, _ in
+            // The window is reused between opens; restart the entrance from the
+            // resting state without animating the reset itself.
+            var reset = Transaction(); reset.disablesAnimations = true
+            withTransaction(reset) { appeared = false }
+            DispatchQueue.main.async(execute: enter)
+        }
+        .onReceive(model.$selected.removeDuplicates()) { direction in
+            withAnimation(feedback) {
+                reticleRotation = ExplorerHUDMotion.nearestAngle(from: reticleRotation, to: reticleAngle(direction))
+            }
+            if let direction {
+                withAnimation(animates ? .spring(response: 0.3, dampingFraction: 0.82) : nil) {
+                    lensAngle = ExplorerHUDMotion.nearestAngle(from: lensAngle, to: direction.angle)
+                }
+            }
+        }
+        .transaction { if !animates { $0.animation = nil } }
+        .help(guidance)
+        .overlay(alignment: .bottom) {
+            if !showsCarousel {
+                Text(model.layerName ?? "Main HUD")
+                    .font(.caption.weight(.medium)).foregroundStyle(accent)
+                    .padding(.bottom, 80)
+            }
+        }
+        .modifier(HUDOrbitTransform(x: -cameraX, y: -cameraY))
+        .offset(y: showsCarousel && !(isPreview && settingsWorkspace) ? -38 : 0)
+        .frame(width: 950, height: 850)
+        .background {
+            if showsCarousel { carouselBackdrop.offset(y: isPreview && settingsWorkspace ? 0 : -38) }
+        }
+        .overlay(alignment: .bottom) {
+            if showsCarousel && !(isPreview && settingsWorkspace) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    fixedHUDControls
+                }
+                .frame(width: 440, height: 72, alignment: .top)
+                .padding(.bottom, 6)
+                .tint(accent)
+                .environment(\.colorScheme, model.theme.isHUD ? .dark : colorScheme)
+                .transaction { $0.animation = nil }
+            }
+        }
+
+    }
+
+    private var fixedHUDControls: some View {
+        VStack(spacing: 6) {
+            settingsFooter
+            if !layerActionHotkeys.isEmpty || !model.actionBindings.isEmpty {
+                layerActionHotkeyFooter.frame(height: 30)
+            }
+            if !isPreview, let message = model.message {
+                Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).lineLimit(3)
+            }
+            if model.showingAppWindows || model.showingChromeTabs || (model.showingRecentPlaces && model.pageCount > 1) || (model.showingSlackChannels && model.pageCount > 1) {
+                HStack {
+                    Button("Previous") { onWindowPage(-1) }.disabled(model.page == 0)
+                    Text("Page \(model.page + 1) / \(model.pageCount)").font(.caption)
+                    Button("Next") { onWindowPage(1) }.disabled(model.page + 1 >= model.pageCount)
+                }.background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-6) } }
+            }
+            if !model.layerHint.isEmpty {
+                Text(model.layerHint).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    .background { if model.theme.isFloating { Capsule().fill(model.theme.surface.opacity(opaqueChrome ? 1 : 0.9)).padding(-5) } }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private var carouselBackdrop: some View {
+        ZStack {
+            if isPreview, let onPreviewAddLayer {
+                ForEach(previewEmptyPositions) { position in
+                    let offset = position.point - previewOrigin
+                    let layout = emptyHUDLayout(offset)
+                    Button { onPreviewAddLayer(position) } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: "plus").font(.system(size: 22, weight: .light))
+                            if layout.diameter >= 85 { Text("Add HUD").font(.system(size: 11, weight: .medium)) }
+                        }
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: layout.diameter, height: layout.diameter)
+                        .background(Circle().fill(Color.primary.opacity(0.035)))
+                        .overlay(Circle().strokeBorder(Color.secondary.opacity(0.5),
+                            style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add a HUD layer at \(position.title.lowercased())")
+                    .accessibilityLabel("Add HUD at \(position.title.lowercased())")
+                    .accessibilityIdentifier("hud-add-position-\(position.rawValue)")
+                    .offset(layout.offset)
+                }
+            }
+            ForEach(model.carouselPreviews) { preview in
+                carouselGhost(preview)
+            }
+        }
+        .allowsHitTesting(isPreview && (onPreviewLayer != nil || onPreviewAddLayer != nil))
+        .accessibilityHidden(!isPreview || (onPreviewLayer == nil && onPreviewAddLayer == nil))
+    }
+
+    private var cameraX: Double { animates ? Double(model.orbitOffset.x) * model.orbitProgress : 0 }
+    private var cameraY: Double { animates ? Double(model.orbitOffset.y) * model.orbitProgress : 0 }
+
+    /// Nearby add controls stay inside the settings viewport. Cardinal gaps
+    /// can be narrow, so use a smaller plus circle rather than cover the HUD.
+    /// Distant cells retain their map projection instead of piling up at edges.
+    private func emptyHUDLayout(_ offset: HUDMapPoint) -> (diameter: CGFloat, offset: CGSize) {
+        let projection = HUDMapProjection(x: Double(offset.x), y: Double(offset.y))
+        var diameter = CGFloat(286 * projection.scale)
+        var x = CGFloat(projection.offsetX), y = CGFloat(projection.offsetY)
+        if let size = previewViewportSize, abs(offset.x) <= 1, abs(offset.y) <= 1 {
+            if offset.x == 0 { diameter = min(diameter, max(44, size.height / 2 - 155 - 16)) }
+            if offset.y == 0 { diameter = min(diameter, max(44, size.width / 2 - 209 - 16)) }
+            let limitX = max(0, size.width / 2 - diameter / 2 - 8)
+            let limitY = max(0, size.height / 2 - diameter / 2 - 8)
+            x = min(limitX, max(-limitX, x)); y = min(limitY, max(-limitY, y))
+        }
+        return (diameter, CGSize(width: x, height: y))
+    }
+
+    private func carouselGhost(_ preview: HUDCarouselPreview) -> some View {
+        Group {
+            if isPreview, let onPreviewLayer {
+                Button { onPreviewLayer(preview.id) } label: {
+                    HUDOrbitSatellite(preview: preview, theme: model.theme)
+                        .equatable()
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(preview.name)")
+                .accessibilityIdentifier("hud-preview-layer-\(preview.id)")
+                .help("Click to edit \(preview.name)")
+            } else {
+                HUDOrbitSatellite(preview: preview, theme: model.theme).equatable()
+            }
+        }
+            .modifier(HUDOrbitTransform(x: Double(preview.offset.x) - cameraX,
+                y: Double(preview.offset.y) - cameraY))
+            .zIndex(-Double(preview.offset.x * preview.offset.x + preview.offset.y * preview.offset.y))
+    }
+
+    private var settingsFooter: some View {
+        HStack(spacing: 4) {
+            Text("HUD: \(model.groupNames.last ?? model.layerName ?? "Main HUD")")
+                .lineLimit(1).truncationMode(.middle)
+            Text("·")
+            if isPreview {
+                Text("Click a HUD to switch · click a tile to edit")
+            } else {
+            Text("Press")
+            footerKey("/", help: "Open HUD settings", identifier: "explorer-settings", action: onSettings)
+            Text("for settings")
+            }
+            if let position = model.carouselPosition {
+                Text("· \(position)").monospacedDigit()
+            }
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background {
+            Capsule().fill(model.theme.isHUD ? model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.9 : 1) : Color(nsColor: .controlBackgroundColor))
+                .overlay(Capsule().strokeBorder(accent.opacity(0.24), lineWidth: 0.7))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Press slash for settings")
+    }
+
+    private var layerActionHotkeys: [ExplorerEntry] {
+        model.entries.filter { $0.activationShortcut != nil }
+    }
+
+    private var layerActionHotkeyFooter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(layerActionHotkeys, id: \.direction) { entry in
+                    HStack(spacing: 5) {
+                        Text(entry.activationShortcut!.displayName)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent)
+                        Text(entry.name).lineLimit(1)
+                    }
+                    .modifier(HUDChip(accent: accent))
+                }
+                ForEach(model.actionBindings) { binding in
+                    HStack(spacing: 5) {
+                        Text(binding.trigger.title)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent)
+                        Text(binding.action.title).lineLimit(1)
+                    }
+                    .modifier(HUDChip(accent: accent))
+                }
+            }
+        }
+        .frame(maxWidth: 390)
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Hotkeys for actions in this HUD layer")
+    }
+
+    private func footerKey(_ key: String, help: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(key)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(accent)
+                .frame(minWidth: 18, minHeight: 18)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(accent.opacity(0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(accent.opacity(0.45), lineWidth: 0.7))
+        }
+        .buttonStyle(.plain)
+        .disabled(isPreview || (key == "E" && !model.canEdit))
+        .help(help)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var starburst: some View {
+        let names = model.directWindowManager ? Array(model.groupNames.dropFirst()) : model.groupNames
+        let depth = min(5, names.count)
+        let center = CGPoint(x: 209, y: 155)
+        return ZStack {
+            if model.theme.isFloating {
+                ExplorerAirGlass(opaque: opaqueChrome, lightweight: isPreview).frame(width: 304, height: 304).position(center)
+                let lensVisible = model.deepFan == nil && model.selected.map { slot in isAvailable(model.entries.first { $0.direction == slot }) } == true
+                // Previews only draw the lens while something is selected; the
+                // live HUD keeps it mounted so its fade and glide animate.
+                if !opaqueChrome && (!isPreview || lensVisible) {
+                    // The lens is the tile shape itself, lit.
+                    let tile = ExplorerStarburstLayout.airTile(angle: 0, depth: depth, slotCount: model.slotCount)
+                    ExplorerGlassLensView(angle: lensAngle, innerRadius: tile.innerRadius,
+                        outerRadius: tile.outerRadius, halfAngle: tile.halfAngle)
+                        .frame(width: 418, height: 310)
+                        .opacity(lensVisible ? 1 : 0)
+                        .animation(feedback, value: lensVisible)
+                }
+            }
+            // Each completed level leaves a concentric breadcrumb. The lit
+            // sector records the direction taken at that level, not a guess
+            // based on a group's name (duplicate names are allowed).
+            ForEach(0..<depth, id: \.self) { level in
+                let radius = ExplorerStarburstLayout.ringRadius(level)
+                let direction = model.groupDirections.indices.contains(level) ? model.groupDirections[level] : nil
+                let count = model.groupSlotCounts.indices.contains(level) ? model.groupSlotCounts[level] : 8
+                ForEach(ExplorerSlot.slots(count), id: \.self) { sector in
+                    ExplorerStarburstSector(direction: sector, innerRadius: radius, outerRadius: radius + 6, halfAngle: 180 / Double(count) - 2)
+                        .fill(direction == sector ? accent.opacity(0.95 - Double(level) * 0.1) : (model.theme.isFloating ? Color.white.opacity(0.14) : accent.opacity(0.12)))
+                        .frame(width: 418, height: 310)
+                        .accessibilityHidden(true)
+                }
+                .transition(.opacity)
+            }
+            ForEach(ExplorerSlot.slots(model.slotCount), id: \.self) { direction in
+                starburstChoice(direction, depth: depth, center: center)
+            }
+            if let fan = model.deepFan { deepFan(fan) }
+            Button(action: onBack) {
+                VStack(spacing: 3) {
+                    Image(systemName: canActivateVoice ? "mic.fill" : (model.showingTimer ? "timer" : model.showingMediaControls ? "playpause.fill" : (canGoBack ? "arrow.uturn.backward" : "xmark")))
+                        .font(.system(size: 14, weight: model.theme.isFloating ? .regular : .medium))
+                    Text(String(format: "%02d", depth + 1))
+                        .font(.system(size: 9, weight: model.theme.isFloating ? .medium : .semibold, design: .monospaced))
+                        .opacity(model.theme.isFloating ? 0.55 : 1)
+                }
+                .foregroundStyle(model.theme.isFloating ? Color.white.opacity(0.9) : accent)
+                .frame(width: 54, height: 54)
+                .background(Circle().fill(model.theme.surface.opacity(model.theme.isFloating && !opaqueChrome ? 0.88 : 1)))
+                .overlay(Circle().strokeBorder(model.theme.isFloating ? Color.white.opacity(0.18) : accent.opacity(0.45),
+                    lineWidth: model.theme.isFloating ? 0.5 : 1))
+                .shadow(color: model.theme.isFloating ? accent.opacity(0.28) : .clear, radius: 4)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .position(center)
+            .help(canActivateVoice ? "Tap for voice mode" : (model.showingTimer ? "Tap for 25 minutes" : model.showingMediaControls ? "Tap to play / pause" : (canGoBack ? "Level \(depth + 1) · Tap to go back" : "Level 1 · Tap to close")))
+            .accessibilityLabel(canActivateVoice ? "Start voice mode" : "\(model.showingTimer ? "Start a 25 minute timer" : model.showingMediaControls ? "Play / pause" : (canGoBack ? "Back to previous HUD layer" : "Close HUD")). Level \(depth + 1). \(([model.mode.title] + names).joined(separator: ", "))")
+        }
+        .frame(width: 418, height: 310)
+        .animation(feedback, value: names)
+    }
+
+    private func starburstChoice(_ direction: ExplorerSlot, depth: Int, center: CGPoint) -> some View {
+        let entry = model.entries.first { $0.direction == direction }
+        let available = isAvailable(entry)
+        let selected = model.deepFan == nil && model.selected == direction && available
+        let shape = ExplorerStarburstSector(direction: direction,
+            innerRadius: ExplorerStarburstLayout.innerRadius(depth: depth), outerRadius: 143, tip: model.theme.isFloating ? 2 : 11,
+            halfAngle: 180 / Double(model.slotCount) - 2, roundedRim: model.theme.isFloating)
+        let point = ExplorerStarburstLayout.point(direction, radius: model.slotCount > 8 ? 128 : 116, center: center)
+        let chromeProfileDescription = entry?.chromeTab.map { tab in
+            tab.profileName.map { $0 + (tab.profileIsEstimated ? " (estimated)" : "") } ?? "unknown"
+        }
+        let airTile = model.theme.isFloating
+            ? ExplorerStarburstLayout.airTile(angle: direction.angle, depth: depth, slotCount: model.slotCount) : nil
+        return Button { onSelect(direction) } label: {
+            ZStack {
+                ExplorerSectorChrome(theme: model.theme, shape: shape, selected: selected,
+                    available: available, opaque: opaqueChrome, airShape: airTile)
+                if entry?.isActiveApp == true {
+                    if let airTile {
+                        airTile.stroke(Color.orange.opacity(0.85), lineWidth: 1.2).allowsHitTesting(false)
+                    } else {
+                        shape.stroke(Color.orange, lineWidth: 2).allowsHitTesting(false)
+                    }
+                }
+                VStack(spacing: 3) {
+                    if let entry {
+                        entrySymbol(entry).scaleEffect(model.slotCount > 8 ? 0.43 : 0.55).frame(width: 24, height: model.slotCount > 8 ? 18 : 24)
+                        Text(entry.name).font(.system(size: model.slotCount > 8 ? 8.5 : 10, weight: .medium))
+                            .lineLimit(entry.chromeTab == nil ? (entry.shortcut == nil ? 2 : 3) : 1).multilineTextAlignment(.center)
+                        if let tab = entry.chromeTab, let profile = tab.profileName {
+                            Text(profile + (tab.profileIsEstimated ? "?" : ""))
+                                .font(.system(size: 7, weight: .medium))
+                                .foregroundStyle(accent)
+                                .lineLimit(1)
+                        }
+                        if entry.isActiveApp { HUDActiveBadge(size: 6.5) }
+                        if entry.hasDeepChoices {
+                            Image(systemName: "chevron.forward.2")
+                                .font(.system(size: 7, weight: .bold)).foregroundStyle(accent)
+                                .rotationEffect(.degrees(direction.angle))
+                        }
+                    } else {
+                        Image(systemName: "plus").font(.system(size: 13, weight: .ultraLight)).foregroundStyle(.tertiary)
+                        Text(direction.title).font(.system(size: 8)).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(width: model.slotCount > 8 ? 45 : (model.theme.isFloating ? 68 : 78), height: entry?.chromeTab == nil ? (model.slotCount > 8 ? 40 : 50) : 56)
+                .foregroundStyle(model.theme.isHUD ? (selected ? Color.white : Color.white.opacity(model.theme.isFloating ? 0.92 : 0.85)) : Color.primary)
+                // Previews skip the per-label shadow: a dozen HUDs on one page
+                // would otherwise rasterize ~100 tiny offscreen blurs.
+                .shadow(color: model.theme.isFloating && !isPreview ? .black.opacity(0.8) : .clear, radius: isPreview ? 0 : 1, y: 1)
+                .position(point)
+            }
+            .frame(width: 418, height: 310)
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain).disabled(!available)
+        .modifier(ExplorerSectorFocus(theme: model.theme, shape: shape, airShape: airTile))
+        .modifier(previewDrag(direction))
+        .anchorPreference(key: ExplorerTileAnchors.self, value: .rect(CGRect(x: point.x - 26, y: point.y - 24, width: 52, height: 48))) {
+            isPreview ? [direction: $0] : [:]
+        }
+        .help(chromeProfileDescription.map { "\(entry?.name ?? "Chrome tab") · Chrome profile: \($0)" }
+            ?? (entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot")))
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "Empty slot")\(chromeProfileDescription.map { ", Chrome profile: \($0)" } ?? "")\(entry?.isActiveApp == true ? ", Active app" : "")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .animation(feedback, value: selected)
+    }
+
+    private func deepFan(_ fan: ExplorerDeepFan) -> some View {
+        let width = DeepSwipeFan.span(count: fan.slotCount) / Double(fan.slotCount)
+        let fanCenter = CGPoint(x: 209, y: 195)
+        let originPoint = CGPoint(x: 0.5 + cos(fan.origin.angle * .pi / 180) * 0.34,
+                                  y: 0.5 + sin(fan.origin.angle * .pi / 180) * 0.44)
+        return ZStack {
+            ForEach(ExplorerSlot.slots(fan.slotCount), id: \.self) { slot in
+                let angle = DeepSwipeFan.angle(for: slot, count: fan.slotCount, origin: fan.origin)
+                let entry = fan.entries.first { $0.direction == slot }
+                let selected = model.selected == slot && entry != nil
+                let shape = ExplorerDeepFanSector(angle: angle, innerRadius: 147, outerRadius: 205,
+                    halfAngle: max(3, width / 2 - 1.2))
+                let radians = angle * .pi / 180
+                let point = CGPoint(x: fanCenter.x + cos(radians) * 176, y: fanCenter.y + sin(radians) * 176)
+                Button { onDeepSelect(slot) } label: {
+                    ZStack {
+                        shape.fill(accent.opacity(selected ? 0.40 : entry == nil ? 0.035 : 0.15))
+                        shape.stroke(accent.opacity(selected ? 1 : entry == nil ? 0.12 : 0.58),
+                            lineWidth: selected ? 1.8 : 0.8)
+                        VStack(spacing: 2) {
+                            if let entry {
+                                entrySymbol(entry).scaleEffect(0.38).frame(width: 20, height: 17)
+                                Text(entry.name).font(.system(size: 7, weight: .semibold)).lineLimit(2)
+                            } else {
+                                Image(systemName: "plus").font(.system(size: 9, weight: .light)).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(width: 42, height: 34)
+                        .position(point)
+                    }
+                    .frame(width: 418, height: 390)
+                    .contentShape(shape)
+                }
+                .buttonStyle(.plain).disabled(entry == nil)
+                .accessibilityLabel("Deep choice: \(entry?.name ?? "Empty slot")")
+            }
+        }
+        .frame(width: 418, height: 390)
+        .transition(animates
+            ? .scale(scale: 0.92, anchor: UnitPoint(x: originPoint.x, y: originPoint.y)).combined(with: .opacity)
+            : .identity)
+        .animation(animates ? .easeOut(duration: 0.18) : nil, value: fan.origin)
+        .zIndex(4)
+    }
+
+    private func isAvailable(_ entry: ExplorerEntry?) -> Bool {
+        if isPreview { return true }
+        guard let entry else { return false }
+        return entry.url != nil || entry.isGroup || entry.isWindowManager || entry.tilingDirection != nil ||
+            entry.shortcut != nil || entry.isMediaControls || entry.mediaAction != nil || entry.timerMinutes != nil || entry.slackChannel != nil || entry.command != nil || entry.windowIndex != nil
+    }
+
+    @ViewBuilder private func entrySymbol(_ entry: ExplorerEntry) -> some View {
+        if entry.slackChannel != nil {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "number").font(.system(size: 28, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+                if let icon = entry.icon { Image(nsImage: icon).resizable().frame(width: 18, height: 18).offset(x: 5, y: 5) }
+            }
+        } else if let minutes = entry.timerMinutes {
+            Text("\(minutes)").font(.system(size: 28, weight: .light, design: .rounded)).monospacedDigit()
+                .foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if let command = entry.command {
+            Image(systemName: command.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.windowIndex != nil {
+            Image(systemName: "macwindow").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.isMediaControls || entry.mediaAction != nil {
+            Image(systemName: entry.mediaAction?.symbol ?? "speaker.wave.2.fill").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.shortcut != nil {
+            Image(systemName: "keyboard").font(.system(size: 30, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if let direction = entry.tilingDirection {
+            WindowTileIcon(direction: direction, layout: entry.tilingLayout ?? model.windowLayout, accent: accent)
+        } else if entry.isWindowManager {
+            Image(systemName: "rectangle.split.2x2").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.isGroup {
+            Image(systemName: entry.isRecentGroup ? "clock.arrow.circlepath" : "folder.fill").font(.system(size: 34, weight: .light)).foregroundStyle(accent).frame(width: 42, height: 42)
+        } else if entry.chromeTab != nil {
+            // The site's favicon identifies a tab; a small Chrome badge keeps it distinct from a bookmark.
+            WebsiteFavicon(url: entry.url, size: 42, fallback: entry.icon)
+                .overlay(alignment: .bottomTrailing) {
+                    if let icon = entry.icon {
+                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 18, height: 18).offset(x: 5, y: 5)
+                    }
+                }
+        } else if entry.isWebURL {
+            WebsiteFavicon(url: entry.url, size: 42, symbolName: entry.webIconSymbol)
+        } else {
+            Image(nsImage: entry.icon ?? NSImage(named: NSImage.applicationIconName)!).resizable().scaledToFit().frame(width: 42, height: 42)
+        }
+    }
+
+    private func reticleAngle(_ direction: ExplorerSlot?) -> Double {
+        (direction?.angle ?? -90) - 45
+    }
+
+    private func enter() {
+        reticleRotation = reticleAngle(model.selected)
+        lensAngle = model.selected?.angle ?? lensAngle
+        withAnimation(animates ? .easeOut(duration: 0.16) : nil) { appeared = true }
+    }
+
+    private func tile(_ direction: ExplorerSlot) -> some View {
+        let entry = model.entries.first { $0.direction == direction }
+        let available = isAvailable(entry)
+        let selected = model.selected == direction && available
+        return Button { onSelect(direction) } label: {
+            VStack(spacing: 5) {
+                if let entry {
+                    entrySymbol(entry)
+                    Text(entry.name).font(.system(size: 11, weight: .medium)).lineLimit(entry.shortcut == nil ? 1 : 2)
+                    if entry.isActiveApp { HUDActiveBadge(size: 8) }
+                    if let shortcut = entry.shortcut {
+                        if !entry.name.hasSuffix("(\(shortcut.readableCombination))") { Text(shortcut.displayName).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    else if entry.isGroup { Text(entry.isRecentGroup ? "Recent apps" : "HUD layer").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.isWindowManager { Text("Swipe to tile").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    else if entry.url == nil && entry.tilingDirection == nil && !entry.isMediaControls && entry.mediaAction == nil && entry.command == nil { Text(entry.isWebURL ? "Invalid URL" : "Not installed").font(.system(size: 9)).foregroundStyle(.secondary) }
+                } else {
+                    Image(systemName: "app.dashed").font(.system(size: 27, weight: .ultraLight)).foregroundStyle(.tertiary)
+                    Text("—").font(.caption).foregroundStyle(.tertiary)
+                }
+                Text(selected && model.theme.isHUD ? "\(direction.title.uppercased()) · READY" : direction.title)
+                    .font(.system(size: 9, weight: .medium, design: model.theme.isHUD ? .monospaced : .default))
+                    .tracking(model.theme.isHUD ? 0.4 : 0)
+                    .foregroundStyle(selected ? accent : .secondary)
+            }
+            .frame(width: 130, height: 98)
+            .background(ExplorerTileChrome(theme: model.theme, selected: selected, occupied: entry != nil))
+            .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(
+                entry?.isActiveApp == true ? Color.orange : .clear, lineWidth: 2))
+            .scaleEffect(selected && model.theme.isHUD ? 1.025 : 1)
+            .animation(feedback, value: selected)
+            .contentShape(RoundedRectangle(cornerRadius: 15))
+        }
+        .buttonStyle(.plain).disabled(!available)
+        .modifier(previewDrag(direction))
+        .help(entry?.isWebURL == true ? (entry?.url?.absoluteString ?? "Invalid URL") : (entry?.name ?? "Empty slot"))
+        .accessibilityLabel("\(direction.title): \(entry?.name ?? "No app")\(entry?.isActiveApp == true ? ", Active app" : "")")
+        .anchorPreference(key: ExplorerTileAnchors.self, value: .bounds) { isPreview ? [direction: $0] : [:] }
+    }
+
+    private func previewDrag(_ direction: ExplorerSlot) -> ExplorerPreviewDrag {
+        ExplorerPreviewDrag(enabled: isPreview && !model.showingRecents && model.entries.contains { $0.direction == direction },
+            source: direction, theme: model.theme, count: model.slotCount, depth: model.groupNames.count,
+            onChanged: onPreviewDrag, onEnded: onPreviewDrop)
+    }
+}
+
+private struct RealtimeLauncherStatus: View {
+    @ObservedObject var session: RealtimeLauncherSession
+    var body: some View {
+        VStack(spacing: 8) {
+            Label("OpenAI Realtime · " + OpenAIRealtimeTransport.model, systemImage: "mic.fill").font(.headline)
+            Text(session.message).font(.caption)
+            if session.phase == .listening { Button("Finish speaking") { session.finish() } }
+            if session.phase == .failed { Button("Retry voice") { session.start() } }
+            Text("Audio → OpenAI · matching stays local · no automatic execution").font(.caption2).foregroundStyle(.secondary)
+        }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// Shared keycap/hotkey chip used along the HUD footer.
+private struct HUDChip: ViewModifier {
+    let accent: Color
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(accent.opacity(0.09)))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent.opacity(0.22), lineWidth: 0.6))
+    }
+}
+
+/// The "active app" marker shared by sector and grid tiles.
+private struct HUDActiveBadge: View {
+    var size: CGFloat
+    var body: some View {
+        Text("ACTIVE")
+            .font(.system(size: size, weight: .bold)).tracking(0.6)
+            .foregroundStyle(Color.orange)
+            .padding(.horizontal, size * 0.55).padding(.vertical, size * 0.18)
+            .background(Capsule().fill(Color.orange.opacity(0.16)))
+    }
+}

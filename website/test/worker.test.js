@@ -194,31 +194,31 @@ test("release routes redirect to and serve versioned files", async () => {
   const manifest = {
     version: "1.2.3",
     build: "45",
-    url: "https://rota.example/releases/Rotagivan-1.2.3-45.dmg",
-    zip: { url: "https://rota.example/releases/Rotagivan-1.2.3-45.zip" },
+    url: "https://rota.example/releases/Rota-1.2.3-45.dmg",
+    zip: { url: "https://rota.example/releases/Rota-1.2.3-45.zip" },
   };
   const { env } = await makeEnv({
     RELEASES: fakeR2({
       "latest.json": JSON.stringify(manifest),
-      "releases/Rotagivan-1.2.3-45.dmg": "dmg-bytes",
-      "releases/Rotagivan-1.2.3-45.zip": "zip-bytes",
+      "releases/Rota-1.2.3-45.dmg": "dmg-bytes",
+      "releases/Rota-1.2.3-45.zip": "zip-bytes",
     }),
   });
   const latest = await call(env, "/download/latest");
   assert.equal(latest.status, 302);
-  assert.equal(latest.headers.get("location"), "/releases/Rotagivan-1.2.3-45.dmg");
-  assert.equal((await call(env, "/download/latest.zip")).headers.get("location"), "/releases/Rotagivan-1.2.3-45.zip");
+  assert.equal(latest.headers.get("location"), "/releases/Rota-1.2.3-45.dmg");
+  assert.equal((await call(env, "/download/latest.zip")).headers.get("location"), "/releases/Rota-1.2.3-45.zip");
   const json = await call(env, "/latest.json");
   assert.equal(json.headers.get("access-control-allow-origin"), "*");
   assert.deepEqual(await json.json(), manifest);
-  const file = await call(env, "/releases/Rotagivan-1.2.3-45.dmg");
+  const file = await call(env, "/releases/Rota-1.2.3-45.dmg");
   assert.equal(file.status, 200);
   assert.equal(file.headers.get("content-type"), "application/x-apple-diskimage");
   assert.equal(file.headers.get("content-length"), "9");
   assert.equal(await file.text(), "dmg-bytes");
-  const head = await call(env, "/releases/Rotagivan-1.2.3-45.dmg", { method: "HEAD" });
+  const head = await call(env, "/releases/Rota-1.2.3-45.dmg", { method: "HEAD" });
   assert.equal(head.headers.get("content-length"), "9");
-  const partial = await call(env, "/releases/Rotagivan-1.2.3-45.dmg", { headers: { range: "bytes=0-2" } });
+  const partial = await call(env, "/releases/Rota-1.2.3-45.dmg", { headers: { range: "bytes=0-2" } });
   assert.equal(partial.status, 206);
   assert.equal(await partial.text(), "dmg");
   assert.equal((await call(env, "/releases/..%2Fsecret")).status, 404);

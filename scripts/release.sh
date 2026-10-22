@@ -1,12 +1,12 @@
 #!/bin/zsh
-# Build, package and publish a Rotagivan release to rota.silvermine.dev.
+# Build, package and publish a Rota release to rota.silvermine.dev.
 #
 #   scripts/release.sh               build, package, upload, verify
-#   scripts/release.sh --skip-build  package the existing Rotagivan/build/Rotagivan.app
+#   scripts/release.sh --skip-build  package the existing Rota/build/Rota.app
 #   scripts/release.sh --no-publish  package only (no upload)
 #   scripts/release.sh --allow-dirty permit a build made from uncommitted inputs
 #
-# Output: release/<version>-<build>/Rotagivan-<version>-<build>.{dmg,zip} and
+# Output: release/<version>-<build>/Rota-<version>-<build>.{dmg,zip} and
 # latest.json. Uploads go to the private R2 bucket served by the
 # rotagivan-website Worker (/download/latest, /latest.json, /releases/*).
 # latest.json is uploaded last so it never points at a missing file.
@@ -37,33 +37,33 @@ done
 
 base_url=${RELEASE_BASE_URL:-https://rota.silvermine.dev}
 bucket=${RELEASE_BUCKET:-rotagivan-releases}
-app="$repo/Rotagivan/build/Rotagivan.app"
+app="$repo/Rota/build/Rota.app"
 step() { print -P "%B==> $*%b"; }
 die() { echo "release: $*" >&2; exit 1; }
 plist_value() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist" 2>/dev/null || true; }
 
 if (( ! skip_build )); then
-  step "Building with Rotagivan/build.sh"
-  "$repo/Rotagivan/build.sh"
+  step "Building with Rota/build.sh"
+  "$repo/Rota/build.sh"
 fi
 [[ -d $app ]] || die "missing $app (run without --skip-build)"
 
 version=$(plist_value CFBundleShortVersionString)
 build=$(plist_value CFBundleVersion)
 minimum_os=$(plist_value LSMinimumSystemVersion)
-commit=$(plist_value RotagivanGitCommit)
-dirty=$(plist_value RotagivanGitDirty)
+commit=$(plist_value RotaGitCommit)
+dirty=$(plist_value RotaGitDirty)
 [[ $version =~ '^[0-9]+\.[0-9]+\.[0-9]+$' && $build =~ '^[0-9]+(\.[0-9]+){0,2}$' ]] || die "invalid version/build: '$version' '$build'"
 if [[ $dirty != false ]] && (( ! allow_dirty )); then
-  die "the app was built from uncommitted inputs (RotagivanGitDirty=$dirty). Commit first or pass --allow-dirty."
+  die "the app was built from uncommitted inputs (RotaGitDirty=$dirty). Commit first or pass --allow-dirty."
 fi
-architectures=($(lipo -archs "$app/Contents/MacOS/Rotagivan"))
-name="Rotagivan-$version-$build"
+architectures=($(lipo -archs "$app/Contents/MacOS/Rota"))
+name="Rota-$version-$build"
 out="$repo/release/$version-$build"
 step "Packaging $name (${architectures[*]})"
 rm -rf "$out"
 mkdir -p "$out/stage" "$out/dmg"
-staged="$out/stage/Rotagivan.app"
+staged="$out/stage/Rota.app"
 ditto "$app" "$staged"
 
 signing=development notarized=false
@@ -75,8 +75,8 @@ if [[ -n ${DEVELOPER_ID:-} ]]; then
   step "Signing with Developer ID"
   security find-identity -v -p codesigning | grep -Fq "$DEVELOPER_ID" || die "Developer ID identity not found in Keychain: $DEVELOPER_ID"
   codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$staged/Contents/Resources/librota_search.dylib"
-  codesign --force --timestamp --options runtime --identifier local.rotagivan.mcp --sign "$DEVELOPER_ID" "$staged/Contents/MacOS/rotagivan-mcp"
-  codesign --force --timestamp --options runtime --entitlements "$repo/Rotagivan/Release.entitlements" \
+  codesign --force --timestamp --options runtime --identifier local.rota.mcp --sign "$DEVELOPER_ID" "$staged/Contents/MacOS/rota-mcp"
+  codesign --force --timestamp --options runtime --entitlements "$repo/Rota/Release.entitlements" \
     --sign "$DEVELOPER_ID" "$staged"
   signing=developer-id
   if [[ -n ${NOTARY_PROFILE:-} ]]; then
@@ -92,9 +92,9 @@ codesign --verify --deep --strict "$staged"
 zip="$out/$name.zip"
 dmg="$out/$name.dmg"
 ditto -c -k --sequesterRsrc --keepParent "$staged" "$zip"
-ditto "$staged" "$out/dmg/Rotagivan.app"
+ditto "$staged" "$out/dmg/Rota.app"
 ln -s /Applications "$out/dmg/Applications"
-hdiutil create -quiet -volname "Rotagivan $version" -srcfolder "$out/dmg" -fs HFS+ -format UDZO -ov "$dmg"
+hdiutil create -quiet -volname "Rota $version" -srcfolder "$out/dmg" -fs HFS+ -format UDZO -ov "$dmg"
 if [[ $signing == developer-id ]]; then
   codesign --force --timestamp --sign "$DEVELOPER_ID" "$dmg"
   if [[ -n ${NOTARY_PROFILE:-} ]]; then

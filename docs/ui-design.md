@@ -1,19 +1,19 @@
 # Settings UI design
 
-This note covers how the settings window is laid out and which shared components it uses. The components live in `Rotagivan/UIComponents.swift`.
+This note covers how the settings window is laid out and which shared components it uses. The components live in `Rota/UIComponents.swift`.
 
 ## Navigation
 
 - There is one sidebar, with one row per section: Devices, HUD, Actions, Voice mode, Pointer & scrolling, General, Sync & backup. Legacy section names such as "Hotkeys" or "Profiles" still redirect in `ContentView.init`.
 - **The user controls whether the sidebar is collapsed.** A sidebar button at the far left of the header switches between the full sidebar (icon and label, 196 pt) and an icon rail (56 pt). The choice persists in `@AppStorage("settings.sidebarCollapsed")`. The shortcut is ⌃⌘S. The HUD page no longer collapses the sidebar automatically. Icon-rail rows show the section name as a tooltip.
 - Each section has a shortcut, ⌘1 to ⌘7, in sidebar order. Rows keep `settings-section-<name>` identifiers and the selected trait.
-- The header shows where you are: the "ROTAGIVAN" overline and the current section title. Ordinary pages no longer repeat that title in large type. Each page starts with its one-line description, which keeps the `settings-page-heading` identifier, so top-alignment checks still apply.
+- The header shows where you are: the "ROTA" overline and the current section title. Ordinary pages no longer repeat that title in large type. Each page starts with its one-line description, which keeps the `settings-page-heading` identifier, so top-alignment checks still apply.
 
 ## Header
 
 The header has three parts, always in the same place:
 
-`[sidebar toggle] [ROTAGIVAN / Section title] ············ [profile switcher]`
+`[sidebar toggle] [ROTA / Section title] ············ [profile switcher]`
 
 All other actions belong to the page they affect. The footer shows the version and that changes save automatically.
 

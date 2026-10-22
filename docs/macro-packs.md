@@ -1,17 +1,19 @@
 # Macro packs
 
 A macro pack is a YAML file holding a set of macros for one application or
-website, written by hand or exported from Rotagivan. Importing a pack adds
+website, written by hand or exported from Rota. Importing a pack adds
 its macros to the saved-action library, where they can be assigned to any
 hotkey, tap, swipe or HUD tile like any other macro.
 
-Rotagivan ships packs for Slack, Google Chrome and Gmail. See
-`Rotagivan/MacroPacks/` for the files and copy one to start your own.
+Rota ships packs for Slack, Google Chrome, Gmail, Claude Code (the
+Claude desktop app), Codex (the ChatGPT desktop app) and an AI terminal pack
+that starts the `claude` and `codex` CLIs in iTerm. See
+`Rota/MacroPacks/` for the files and copy one to start your own.
 
 ## File format
 
 ```yaml
-format: rotagivan-macro-pack/1
+format: rota-macro-pack/1
 name: Slack
 app: com.tinyspeck.slackmacgap      # OR  website: https://mail.google.com  (one, or neither = global)
 appName: Slack                      # optional display name, only with app
@@ -24,17 +26,35 @@ macros:
   - name: Reply in thread, then jump back
     steps: [cmd+shift+t, esc]
     delay: 120            # ms between steps, optional (default 100)
+  - name: Start Claude Code in a new window   # a typed-text step
+    steps: [cmd+n, {type: "claude"}, return]
+    delay: 600
 ```
 
 | Key | Required | Meaning |
 | --- | --- | --- |
-| `format` | yes | Exactly `rotagivan-macro-pack/1`. |
+| `format` | yes | Exactly `rota-macro-pack/1`. |
 | `name` | yes | Pack name, up to 120 characters. Shown as the subgroup under Macros and in the picker. |
 | `app` | no | Bundle identifier of the app that receives the keystrokes (contains a dot, at most 255 characters). |
 | `appName` | no | Display name for the app. Only valid with `app`. Defaults to the pack name. |
 | `website` | no | An `http(s)` URL with a host, at most 512 characters. A pack has `app` or `website`, never both. |
 | `notes` | no | Up to 2000 characters, shown in the confirmation after import. |
-| `macros` | yes | 1–500 entries. Each has `name` (unique within the pack) and either `keys` (one chord) or `steps` (1–32 chords), plus optional `delay` (0–2000 ms). |
+| `macros` | yes | 1–500 entries. Each has `name` (unique within the pack) and either `keys` (one chord) or `steps` (1–32 steps, each a chord or a typed-text mapping), plus optional `delay` (0–2000 ms). |
+
+## Typed-text steps
+
+A step written as the mapping `{type: "…"}` types its text into the
+frontmost app instead of pressing a chord. The text is 1–512 characters with
+no control characters; a newline inside the text presses Return. Typing is
+posted as unicode keyboard events, so it is independent of the keyboard
+layout and works in terminals, chat boxes and editors alike. The usual
+inter-step `delay` applies before and after the text, and playback stops if
+focus leaves the target app while typing. `keys` always names one chord; a
+macro that only types text is written as `steps: [{type: "…"}]`.
+
+Typed text is also available in the saved-action editor (**Add typed text**)
+and round-trips through export. Saved configurations store it as a
+`sequence` step with `kind: text` and `text`.
 
 Unknown keys anywhere in the file are rejected, as are YAML anchors and
 aliases. Parse errors name the macro and the chord that failed, for
@@ -102,7 +122,8 @@ There is one import path, offered in two places:
 
 - **Settings → Actions → Add action → Import macro pack…** opens a file
   chooser for `.yaml`/`.yml` files. **Add action → Built-in packs** lists the
-  packs shipped with the app (Slack, Google Chrome, Gmail).
+  packs shipped with the app (AI terminal, Claude Code, Codex, Gmail, Google
+  Chrome, Slack).
 - In the **Choose an action** picker, the **Macros** tab has **Add macro…**
   (opens the saved-action editor; the new macro is stored and then chosen as
   the picked action) and **Import macro pack…** (the same import; the
@@ -125,27 +146,50 @@ scope in the detail text (for example `Slack pack · Cmd+K`).
 
 In the actions table, open a pack macro's **⋯** menu and choose
 **Export <pack> pack…**. Every macro sharing that pack name is written to one
-pack file through a save panel. Packs hold keystroke-only macros; a macro
-with an open-app step cannot be exported, and neither can a key outside the
-chord vocabulary above.
+pack file through a save panel. Packs hold keystroke and typed-text macros; a
+macro with an open-app step cannot be exported, and neither can a key outside
+the chord vocabulary above.
+
+## AI session packs
+
+- **Claude Code** (`claude-code.yaml`, app `com.anthropic.claudefordesktop`):
+  the Claude desktop app's menu shortcuts. `Cmd+N` starts a new Claude Code
+  session while the Code view is showing (a new chat in the chat view; the
+  app has no shortcut for Go → Code), `Ctrl+Cmd+\` / `Ctrl+Cmd+-` open a
+  session in a split, `Shift+Cmd+O` opens a folder, `Shift+Cmd+K` searches
+  sessions. "New session and ask for a plan" types a prompt without sending
+  it.
+- **Codex** (`codex.yaml`, app `com.openai.codex`): the ChatGPT desktop app,
+  which hosts Codex. `Cmd+N` new chat, `Shift+Cmd+N` temporary chat, `Cmd+O`
+  opens a folder for Codex, `Ctrl+`` opens the terminal panel.
+- **AI terminal** (`ai-terminal.yaml`, app `com.googlecode.iterm2`): opens a
+  new iTerm window or tab, types `claude`, `claude --continue`,
+  `claude --resume`, `codex` or `codex resume` and presses Return, with a
+  600 ms step delay so the shell is ready. Copy the file and set
+  `app: com.apple.Terminal` for Terminal.app.
+
+The shortcuts were read from each app's menu bar through Accessibility; the
+same walk powers the launcher's menu search (`LauncherMenuCatalog.scan`).
 
 ## Where built-in packs live
 
-Source: `Rotagivan/MacroPacks/*.yaml`. `Rotagivan/build.sh` copies the folder
-to `Rotagivan.app/Contents/Resources/MacroPacks`, which the Built-in packs
+Source: `Rota/MacroPacks/*.yaml`. `Rota/build.sh` copies the folder
+to `Rota.app/Contents/Resources/MacroPacks`, which the Built-in packs
 menu reads at launch. A pack that fails to parse is skipped so it never
 hides the others.
 
 ## Code map
 
-- `Rotagivan/MacroPack.swift`: `KeyChord` (chord parser, key-code table,
+- `Rota/MacroPack.swift`: `KeyChord` (chord parser, key-code table,
   canonical formatting), `MacroPack` (parse, validate, `namedHotkeys()`,
   export `yaml()`, built-in discovery), `Array<NamedHotkey>.importing(_:)`.
-- `Rotagivan/MacroPackImport.swift`: open/save panels, confirmation alerts
+- `Rota/MacroPackImport.swift`: open/save panels, confirmation alerts
   and the picker's `ActionPickerMacroTools.live(store:)`.
-- `Rotagivan/Models.swift`: `NamedHotkey.packName/appBundleID/appName/website`,
+- `Rota/Models.swift`: `NamedHotkey.packName/appBundleID/appName/website`,
   `scope`, `MacroScope`.
-- `Rotagivan/MacroPlayback.swift`: the scope prefix step and the website
-  opener hook; `Rotagivan/BrowserURLDispatcher.swift` supplies the
-  Chrome-aware opener.
-- Tests: `Rotagivan/Tests/MacroPackTests.swift`.
+- `Rota/MacroPlayback.swift`: the scope prefix step, the website
+  opener hook and the `type` hook for text steps; `Rota/EventPoster.swift`
+  builds the unicode keyboard events (`textEvents`);
+  `Rota/BrowserURLDispatcher.swift` supplies the Chrome-aware opener.
+- Tests: `Rota/Tests/MacroPackTests.swift`,
+  `Rota/Tests/MacroPlaybackTests.swift`.

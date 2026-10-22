@@ -1,8 +1,8 @@
 .firecrawl/
-Rotagivan/build/
+Rota/build/
 backups/
 .DS_Store
-Rotagivan/.signing/
+Rota/.signing/
 YAML/.build/
 YAML/.swiftpm/
 node_modules/

@@ -1,7 +1,7 @@
 # Voice API keys
 
 Voice providers read their API keys through `SyncSecrets.value(_:)`
-(Rotagivan/SyncCrypto.swift):
+(Rota/SyncCrypto.swift):
 
 - **Cloud sync** (Settings → Sync & backup → Cloud): the OpenRouter and OpenAI
   keys you paste into the API keys card, or import from `~/.env`, are part of

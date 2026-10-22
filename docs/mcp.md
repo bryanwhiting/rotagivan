@@ -1,6 +1,6 @@
 # Local agents (MCP)
 
-Rotagivan can act as a local [Model Context Protocol](https://modelcontextprotocol.io) server so an AI agent running on this Mac (Claude Code, Claude Desktop, or any MCP client) can read and edit a bounded set of settings: website bookmarks, HUD tiles, voice keywords, and read-only lists of actions and macros.
+Rota can act as a local [Model Context Protocol](https://modelcontextprotocol.io) server so an AI agent running on this Mac (Claude Code, Claude Desktop, or any MCP client) can read and edit a bounded set of settings: website bookmarks, HUD tiles, voice keywords, and read-only lists of actions and macros.
 
 It is **off by default** and **device-only**. Nothing about it syncs.
 
@@ -9,7 +9,7 @@ It is **off by default** and **device-only**. Nothing about it syncs.
 Settings → General → **Agents (MCP)** → *Allow local agents (MCP)*.
 
 While it is on, the app listens on a Unix socket at
-`~/Library/Application Support/Rotagivan/MCP/bridge.sock` (directory `0700`, socket `0600`). Every connection is checked with `getpeereid`, so only processes running as the same macOS user are answered. Turning the toggle off removes the socket.
+`~/Library/Application Support/Rota/MCP/bridge.sock` (directory `0700`, socket `0600`). Every connection is checked with `getpeereid`, so only processes running as the same macOS user are answered. Turning the toggle off removes the socket.
 
 ## Connecting a client
 
@@ -18,7 +18,7 @@ The MCP server itself is a small stdio helper inside the app bundle. It holds no
 Claude Code:
 
 ```sh
-claude mcp add rotagivan -- /Applications/Rotagivan.app/Contents/MacOS/rotagivan-mcp
+claude mcp add rota -- /Applications/Rota.app/Contents/MacOS/rota-mcp
 ```
 
 Claude Desktop and other JSON-configured clients:
@@ -26,8 +26,8 @@ Claude Desktop and other JSON-configured clients:
 ```json
 {
   "mcpServers": {
-    "rotagivan": {
-      "command": "/Applications/Rotagivan.app/Contents/MacOS/rotagivan-mcp"
+    "rota": {
+      "command": "/Applications/Rota.app/Contents/MacOS/rota-mcp"
     }
   }
 }
@@ -63,8 +63,8 @@ Requests and responses are capped at 1 MB and 8 MB, sockets time out after 10–
 
 ## Troubleshooting
 
-- *"Rotagivan is not accepting agent connections"*: open the app and turn on the toggle in General → Agents (MCP).
-- *"Another Rotagivan is already serving local agents"*: a second copy of the app is running; quit it.
-- The helper path is fixed to `/Applications/Rotagivan.app`. If the app lives elsewhere, point the client at that bundle's `Contents/MacOS/rotagivan-mcp`.
+- *"Rota is not accepting agent connections"*: open the app and turn on the toggle in General → Agents (MCP).
+- *"Another Rota is already serving local agents"*: a second copy of the app is running; quit it.
+- The helper path is fixed to `/Applications/Rota.app`. If the app lives elsewhere, point the client at that bundle's `Contents/MacOS/rota-mcp`.
 
-Tests: `Rotagivan/Tests/MCPTests.swift` (tool validation, socket framing, peer checks and the JSON-RPC state machine), run by `Rotagivan/test.sh`.
+Tests: `Rota/Tests/MCPTests.swift` (tool validation, socket framing, peer checks and the JSON-RPC state machine), run by `Rota/test.sh`.

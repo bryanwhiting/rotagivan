@@ -1,4 +1,4 @@
-# Rotagivan account sync
+# Rota account sync
 
 Production API: `https://rotagivan-sync.bryan-b4b.workers.dev`
 

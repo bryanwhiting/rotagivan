@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { parseEnv } from 'node:util';
 const base = process.argv[2];
-if (base !== 'https://rotagivan-sync.bryan-b4b.workers.dev') throw new Error('Specify the deployed Rotagivan endpoint explicitly.');
+if (base !== 'https://rotagivan-sync.bryan-b4b.workers.dev') throw new Error('Specify the deployed Rota endpoint explicitly.');
 const ids = [];
 const password = randomBytes(32).toString('hex');
 async function call(path, method='GET', data, token) {
@@ -14,13 +14,13 @@ async function call(path, method='GET', data, token) {
     body:data===undefined?undefined:JSON.stringify(data), redirect:'error' });
 }
 async function register() {
-  const response = await call('register','POST',{email:`rotagivan-test-${randomUUID()}@example.invalid`,password});
+  const response = await call('register','POST',{email:`rota-test-${randomUUID()}@example.invalid`,password});
   assert.equal(response.status,200,'Registration failed');
   const user = await response.json(); ids.push(user.userID); return user;
 }
 try {
   const a = await register(), b = await register();
-  const yaml = readFileSync('../Rotagivan/DefaultConfiguration.yaml','utf8');
+  const yaml = readFileSync('../Rota/DefaultConfiguration.yaml','utf8');
   assert.equal((await call('settings','PUT',{yaml,baseRevision:0},a.token)).status,200);
   const logged = await call('login','POST',{email:a.email,password});
   assert.equal(logged.status,200); const secondMac = await logged.json();

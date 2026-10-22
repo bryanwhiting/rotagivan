@@ -1,4 +1,4 @@
-/* Rotagivan website. Styled after the app's settings window (docs/ui-design.md):
+/* Rota website. Styled after the app's settings window (docs/ui-design.md):
    system font, light and dark, flat panels with hairline borders, teal accent,
    radii 5/7/12 and the 2/4/6/8/12/16/22 spacing scale. */
 
@@ -273,6 +273,21 @@ button { font: inherit; color: inherit; }
 .hero .button-row { justify-content: center; margin-top: 22px; }
 .page-hero { padding-block: 48px 22px; max-width: 640px; }
 .page-hero .lede { margin-top: 8px; }
+
+/* Tour video, revealed under the hero by the "Watch the 60-second tour" button. */
+.hero .tour-row { margin-top: 12px; }
+.tour { max-width: 760px; margin: 22px auto 0; }
+.tour video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--hud-line);
+  border-radius: var(--r-l);
+  background: #121214;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+.tour .fineprint { margin-top: 8px; text-align: center; }
 
 /* Download */
 .download-cta {

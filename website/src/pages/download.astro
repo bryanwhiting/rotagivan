@@ -4,20 +4,20 @@ import DownloadButton from "../components/DownloadButton.astro";
 ---
 
 <Layout
-  title="Download Rotagivan for Mac"
-  description="Download the latest Rotagivan for macOS. Open the disk image, drag Rotagivan to Applications, and grant Accessibility."
+  title="Download Rota for Mac"
+  description="Download the latest Rota for macOS. Open the disk image, drag Rota to Applications, and grant Accessibility."
 >
   <div class="wrap">
     <section class="page-hero">
-      <h1>Download Rotagivan</h1>
+      <h1>Download Rota</h1>
       <p class="lede">
-        One disk image. Drag it to Applications and Rotagivan lives in your
+        One disk image. Drag it to Applications and Rota lives in your
         menu bar.
       </p>
     </section>
 
     <div class="card download-panel">
-      <DownloadButton withVersion variant="large" label="Download Rotagivan" />
+      <DownloadButton withVersion variant="large" label="Download Rota" />
       <p class="fineprint" data-published hidden></p>
     </div>
 
@@ -26,12 +26,12 @@ import DownloadButton from "../components/DownloadButton.astro";
       <ol class="steps" aria-label="Install steps">
         <li>
           <span>
-            Open the disk image and drag <b>Rotagivan</b> onto the <b>Applications</b> folder.
+            Open the disk image and drag <b>Rota</b> onto the <b>Applications</b> folder.
           </span>
         </li>
         <li data-gatekeeper-step>
           <span>
-            First launch: in Applications, right-click <b>Rotagivan</b>,
+            First launch: in Applications, right-click <b>Rota</b>,
             choose <b>Open</b>, then click <b>Open</b> again.
             <small>
               This build is signed for development and not yet notarized by
@@ -45,9 +45,11 @@ import DownloadButton from "../components/DownloadButton.astro";
             Grant <b>Accessibility</b> in System Settings › Privacy &amp;
             Security › Accessibility, and <b>Input Monitoring</b> if asked.
             <small>
-              Rotagivan needs these to read trackpad gestures, send your
+              Rota needs these to read trackpad gestures, send your
               keystrokes and move windows. Voice mode asks for the microphone
-              only when you first use it.
+              only when you first use it. Upgrading from Rotagivan? macOS sees
+              Rota as a new app, so grant both once more; your settings,
+              shortcuts and sync login carry over.
             </small>
           </span>
         </li>
@@ -64,7 +66,7 @@ import DownloadButton from "../components/DownloadButton.astro";
         <summary>Check the SHA-256 checksum</summary>
         <dl>
           <dt>File</dt>
-          <dd><code data-file-name>Rotagivan.dmg</code></dd>
+          <dd><code data-file-name>Rota.dmg</code></dd>
           <dt>SHA-256</dt>
           <dd>
             <code data-sha256>
@@ -73,7 +75,7 @@ import DownloadButton from "../components/DownloadButton.astro";
           </dd>
         </dl>
         <p>Run this in Terminal and compare the output with the checksum above.</p>
-        <pre><code>shasum -a 256 ~/Downloads/<span data-file-name>Rotagivan.dmg</span></code></pre>
+        <pre><code>shasum -a 256 ~/Downloads/<span data-file-name>Rota.dmg</span></code></pre>
       </details>
     </section>
 
@@ -89,7 +91,7 @@ import DownloadButton from "../components/DownloadButton.astro";
       <details>
         <summary>Why does it need Accessibility?</summary>
         <p>
-          Rotagivan sends the keystrokes you configure, reads trackpad input
+          Rota sends the keystrokes you configure, reads trackpad input
           and moves windows. macOS requires Accessibility for that, and you
           can revoke it any time in System Settings.
         </p>

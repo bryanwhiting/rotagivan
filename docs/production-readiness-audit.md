@@ -62,7 +62,7 @@ Unfinished local voice-note edits are preserved and excluded from this baseline.
 Run from a clean checkout:
 
 ```sh
-zsh Rotagivan/benchmark-actions.sh
+zsh Rota/benchmark-actions.sh
 ```
 
 This builds with `swiftc -O` and runs 12 timed samples after one warm-up for each
@@ -130,12 +130,12 @@ revision-keyed table identity matches the final product behavior. Configuration,
 snapshot lifecycle and ApplicationCommand UI checks also passed in this batch.
 
 After integrating concurrent main changes, BrowserURLDispatcherTests passed
-again with the onboarding source included. Rotagivan **1.1.194 (196)** was built
+again with the onboarding source included. Rota **1.1.194 (196)** was built
 and installed/reopened with `./launch.sh --keep-accessibility`; the installed
 bundle passed strict D47A-certificate-pinned verification, and the built/installed
 executable SHA-256 matched:
 `2a1a8d4df80fed4cd757fc0f6366ffb2e3b011996f9a914063f9f93576c0400a`.
-The running executable was `/Applications/Rotagivan.app/Contents/MacOS/Rotagivan`.
+The running executable was `/Applications/Rota.app/Contents/MacOS/Rota`.
 This does not close the real-Chrome, physical cross-Mac, billing, or Rust gates.
 
 ## Chrome bookmark tab reuse

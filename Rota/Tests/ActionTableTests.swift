@@ -1,0 +1,153 @@
+import AppKit
+import SwiftUI
+
+@main struct ActionTableTests {
+    @MainActor static func main() throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+        let suite = "Rota.ActionTable.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "migration.rota.v1")
+        let output = RecordedShortcut(keyCode: 8, modifiers: 1 << 20, keyLabel: "C")
+        let trigger = RecordedShortcut(keyCode: 40, modifiers: 1 << 20, keyLabel: "K")
+        let macro = NamedHotkey(name: "Copy selection", shortcut: output, activationShortcut: trigger)
+        var settings = StoredSettings()
+        settings.enabled = true
+        settings.hotkeyDictionary = [macro]
+        settings.actionBindings = [ActionBinding(trigger: BindingTrigger(keyboard: trigger), action: .command(.lockScreen))]
+        settings.appExplorer = AppExplorerSettings(favorites: [AppExplorerFavorite(direction: .up, name: "Volume", shortcut: .assigned(.media(.volumeUp)), activationShortcut: output)])
+        let slackActivity = VoiceActionRegistry.slackDefaults.first { $0.title == "Activity" }!
+        settings.actionVocabulary = [ActionVocabulary(actionID: slackActivity.id, keywordSets: [["mentions", "what did I miss"], ["my notifications"]])]
+        settings.appOverrides = [AppGestureOverride(bundleID: "com.tinyspeck.slackmacgap", name: "Slack", bindings: [
+            AppGestureBinding(trigger: .twoFingerTap, action: .shortcut, shortcut: slackActivity.action.shortcut)
+        ])]
+        let all = VoiceActionRegistry.make(settings: settings, includeInactiveApplications: true)
+        let inactive = VoiceActionRegistry.make(settings: settings, activeBundleID: "com.apple.finder")
+        let active = VoiceActionRegistry.make(settings: settings, activeBundleID: "com.tinyspeck.slackmacgap")
+        precondition(!inactive.contains { $0.appBundleID != nil }, "Application actions must not leak into other apps")
+        precondition(active.contains { $0.id == slackActivity.id && $0.matchingDescription.contains("what did I miss") })
+        precondition(!inactive.contains { $0.action == .from(shortcut: slackActivity.action.shortcut!) }, "Override outputs must not leak through recursive scanning")
+        precondition(Set(all.map(\.id)).count == all.count)
+        let roundtrip = try JSONDecoder().decode(StoredSettings.self, from: JSONEncoder().encode(settings))
+        precondition(roundtrip.actionVocabulary == settings.actionVocabulary)
+        settings.appExplorer?.voiceAutoStart = true
+        let document = AppConfiguration(settings: settings, shortcuts: ShortcutConfiguration())
+        let reloaded = try AppConfiguration.parse(document.yaml())
+        precondition(reloaded.settings.actionVocabulary == settings.actionVocabulary, "Cloud/YAML round trip preserves every keyword set")
+        precondition(reloaded.settings.appExplorer?.resolvedVoiceAutoStart == true, "Cloud/YAML round trip preserves voice auto-start")
+        var bookmarked = settings
+        var gmail = BindingAction.openURL(WebsiteBookmarksEditor.normalizedURL("mail.google.com")!.absoluteString)
+        gmail.name = "Gmail"; gmail.targetBrowserBundleID = "com.google.Chrome"
+        precondition(gmail.url == "https://mail.google.com", "Bare hosts become https bookmarks")
+        precondition(WebsiteBookmarksEditor.normalizedURL("ftp://example.com") == nil)
+        precondition(bookmarked.addWebsiteBookmarks([gmail, gmail, .openURL("javascript:alert(1)")]) == 1, "Duplicate and invalid bookmarks are skipped")
+        precondition(bookmarked.addWebsiteBookmarks([gmail]) == 0)
+        let bookmarkRows = ActionTableRow.make(settings: bookmarked, applications: [], audit: HotkeyAudit(settings: bookmarked, shortcuts: ShortcutConfiguration(), layerID: 1, device: .navigator))
+        precondition(bookmarkRows.contains { $0.group == "Websites" && $0.name == "Gmail" && !$0.isAppScoped }, "Bookmarks appear under Websites")
+        let bookmarkYAML = try AppConfiguration.parse(AppConfiguration(settings: bookmarked, shortcuts: ShortcutConfiguration()).yaml())
+        precondition(bookmarkYAML.settings.websiteBookmarks == [gmail], "Bookmarks survive the YAML/sync round trip")
+        bookmarked.removeWebsiteBookmark(identity: gmail.identity)
+        precondition(bookmarked.websiteBookmarks == nil)
+        precondition(ActionVocabulary.parse("chat, open Slack\n\nmessages") == [["chat", "open Slack"], ["messages"]])
+        let audit = HotkeyAudit(settings: settings, shortcuts: ShortcutConfiguration(), layerID: 1, device: .navigator)
+        let rows = ActionTableRow.make(settings: settings, applications: [], audit: audit)
+        precondition(Set(rows.map(\.id)).count == rows.count)
+        let macroRow = rows.first { $0.action.macroID == macro.id }!
+        precondition(macroRow.name == macro.name && macroRow.group == "Macros")
+        precondition(macroRow.id == VoiceRegisteredAction.id(for: .macro(macro)))
+        precondition(macroRow.keybindings.contains("Cmd+K") && !macroRow.keybindings.contains("Cmd+C"), "Macro output keys must not be presented as input bindings")
+        precondition(rows.first { $0.action.command == .lockScreen }!.keybindings.contains("Global"))
+        precondition(rows.first { $0.action.media == .volumeUp }!.keybindings.contains("HUD"))
+        precondition(rows.allSatisfy { !$0.detail.isEmpty && !$0.group.isEmpty })
+        let appRow = rows.first { $0.id == slackActivity.id }!
+        precondition(appRow.group == "Applications" && appRow.subgroup == "Slack" && appRow.keywords.contains("mentions"))
+        precondition(rows.contains { $0.subgroup == "Slack" && $0.keybindings == "Two-finger tap" })
+        let store = SettingsStore(defaults: defaults)
+        store.settings = settings
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let before = try encoder.encode(store.settings)
+        let catalog = ActionCatalogSnapshot()
+        let host = NSHostingView(rootView: HotkeyOrganizerView(store: store, catalog: catalog).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light).defaultAppStorage(defaults))
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 790), styleMask: [.titled], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false; panel.contentView = host; panel.center(); panel.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func renderedTable() -> NSTableView { descendants(host).compactMap { $0 as? NSTableView }.first! }
+        var table = renderedTable()
+        let deadline = Date().addingTimeInterval(10)
+        while catalog.value == nil || catalog.isRefreshing {
+            precondition(Date() < deadline, "Background catalog did not finish")
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(table.tableColumns.count == 6, "IDs must be hidden by default")
+        func capture(_ name: String) throws {
+            host.layoutSubtreeIfNeeded()
+            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/" + name + ".png"))
+        }
+        try capture("actions-table")
+        guard let searchField = descendants(host).compactMap({ $0 as? NSTextField })
+            .first(where: { $0.isEditable && $0.placeholderString == "Search actions, apps or shortcuts" }) else {
+            preconditionFailure("Actions must expose native search")
+        }
+        let buildsBeforeSearch = catalog.buildCount
+        let rowsBeforeSearch = table.numberOfRows
+        searchField.stringValue = "Slack"
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        table = renderedTable()
+        precondition(table.numberOfRows > 0 && table.numberOfRows < rowsBeforeSearch, "Native search must filter the cached table")
+        precondition(catalog.buildCount == buildsBeforeSearch, "Native typing must never reconstruct the catalog")
+        try capture("actions-table-search")
+        searchField.stringValue = ""
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        table = renderedTable()
+        precondition(table.numberOfRows == rowsBeforeSearch && catalog.buildCount == buildsBeforeSearch)
+        panel.setContentSize(NSSize(width: 740, height: 790))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        try capture("actions-table-compact")
+        panel.setContentSize(NSSize(width: 1000, height: 790))
+        defaults.set(true, forKey: "actions.showIDs")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        table = renderedTable()
+        precondition(table.tableColumns.count == 7, "Show IDs must reveal the seventh column")
+        try capture("actions-table-ids")
+        // Press the real inline control; opening and canceling must be draft-only.
+        searchField.stringValue = "Lock Screen"
+        searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        func accessible(_ object: Any) -> [AnyObject] {
+            let element = object as AnyObject
+            return [element] + (element.accessibilityChildren?() ?? []).flatMap(accessible)
+        }
+        func elements(in view: NSView) -> [AnyObject] { descendants(view).flatMap(accessible) }
+        let lockRow = rows.first { $0.action.command == .lockScreen }!
+        guard let assignButton = elements(in: host).first(where: {
+            $0.accessibilityIdentifier?() == "assign-action-hotkey-\(lockRow.id)"
+        }) else { preconditionFailure("Every assignable row must expose its inline hotkey button") }
+        precondition(assignButton.accessibilityPerformPress?() == true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        guard let sheet = panel.sheets.first, let sheetContent = sheet.contentView else {
+            preconditionFailure("Inline assignment must open the shared editor")
+        }
+        let sheetElements = elements(in: sheetContent)
+        precondition(descendants(sheetContent).contains { ($0 as? NSPopUpButton)?.title == "Trackpad tap or swipe" },
+            "Inline hotkey assignment must offer keyboard shortcuts and trackpad gestures")
+        precondition(sheetElements.contains { ($0.accessibilityLabel?() ?? "").contains("Action: \(lockRow.name)") },
+            "The editor must be prefilled with the clicked action")
+        guard let cancel = sheetElements.first(where: { $0.accessibilityLabel?() == "Cancel" }) else {
+            preconditionFailure("Assignment editor must support cancellation")
+        }
+        precondition(cancel.accessibilityPerformPress?() == true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(panel.sheets.isEmpty)
+        let after = try encoder.encode(store.settings)
+        precondition(after == before, "Browsing the table must not change actions or assignments")
+        panel.orderOut(nil); panel.close()
+        print("Action table passed: scoped app defaults and overrides, vocabulary matching, JSON/YAML persistence, six/seven columns, non-mutating browsing")
+    }
+}

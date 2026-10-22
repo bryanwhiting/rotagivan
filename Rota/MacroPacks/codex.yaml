@@ -1,0 +1,45 @@
+# Rota macro pack · Codex (ChatGPT desktop app)
+# Import: Settings → Actions → Add action → Built-in packs → Codex.
+# Every macro brings the ChatGPT app to the front (launching it if needed) before typing.
+# Shortcuts were read from the app's File, View and Help menus.
+format: rota-macro-pack/1
+name: Codex
+app: com.openai.codex
+appName: ChatGPT
+notes: >-
+  Shortcuts follow the ChatGPT desktop app's menus, which hosts Codex. The app
+  has no dedicated "new Codex thread" shortcut: Cmd+N starts a new chat in the
+  current view and File → Open Folder… (Cmd+O) opens a folder for Codex.
+  "New chat and ask Codex…" types a prompt without sending it.
+macros:
+  - name: New chat
+    keys: cmd+n
+  - name: New temporary chat
+    keys: shift+cmd+n
+  - name: New chat and ask Codex for a plan
+    steps: [cmd+n, {type: "Look over this project and propose a plan before changing anything."}]
+    delay: 600
+  - name: Open folder in Codex…
+    keys: cmd+o
+  - name: Close
+    keys: cmd+w
+  - name: Toggle sidebar
+    keys: shift+cmd+s
+  - name: Toggle navigation panel
+    keys: shift+cmd+e
+  - name: Toggle bottom panel
+    keys: cmd+j
+  - name: Open terminal
+    keys: ctrl+backtick
+  - name: Switch between chat and tabs
+    keys: opt+cmd+b
+  - name: Open browser tab
+    keys: cmd+t
+  - name: Previous tab
+    keys: "shift+cmd+["
+  - name: Next tab
+    keys: "shift+cmd+]"
+  - name: Find
+    keys: cmd+f
+  - name: Keyboard shortcuts
+    keys: cmd+/

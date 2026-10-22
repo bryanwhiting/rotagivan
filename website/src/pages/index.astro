@@ -32,14 +32,14 @@ const features = [
   {
     icon: "≋",
     title: "Voice mode",
-    body: "Say “open Slack”. Rotagivan matches it against your own actions and shows the best three. Nothing runs until you confirm.",
+    body: "Say “open Slack”. Rota matches it against your own actions and shows the best three. Nothing runs until you confirm.",
     paid: true,
   },
 ];
 ---
 
 <Layout
-  title="Rotagivan — a radial HUD for your Mac"
+  title="Rota — a radial HUD for your Mac"
   description="Tap your trackpad and a wheel of your apps, windows, Chrome tabs and macros appears under your fingers. Free for macOS."
 >
   <section class="hero wrap">
@@ -50,6 +50,35 @@ const features = [
     </p>
     <div class="button-row">
       <DownloadButton />
+    </div>
+    <div class="button-row tour-row">
+      <button
+        class="button secondary"
+        type="button"
+        data-tour-toggle
+        aria-expanded="false"
+        aria-controls="tour"
+      >
+        Watch the 60-second tour <span aria-hidden="true">▷</span>
+      </button>
+    </div>
+    <div class="tour" id="tour" hidden>
+      <video
+        controls
+        playsinline
+        preload="none"
+        poster="/rota-tour-poster.jpg"
+        width="1280"
+        height="800"
+        data-tour-video
+      >
+        <source src="/rota-tour.mp4" type="video/mp4" />
+        Your browser cannot play this video.
+        <a href="/rota-tour.mp4">Download the tour (MP4)</a>.
+      </video>
+      <p class="fineprint">
+        Recorded from the interactive demo below. Captions, no sound.
+      </p>
     </div>
     <div id="playground">
       <Demo />
@@ -91,11 +120,31 @@ const features = [
 
   <section class="section wrap" id="download">
     <div class="card download-panel">
-      <h2>Download Rotagivan</h2>
-      <DownloadButton withVersion variant="large" label="Download Rotagivan" />
+      <h2>Download Rota</h2>
+      <DownloadButton withVersion variant="large" label="Download Rota" />
       <p class="fineprint">
         Free. Takes a minute to install. <a href="/download/">Install steps and checksum</a>
       </p>
     </div>
   </section>
 </Layout>
+
+<script>
+  const toggle = document.querySelector<HTMLButtonElement>("[data-tour-toggle]");
+  const tour = document.getElementById("tour");
+  const video = document.querySelector<HTMLVideoElement>("[data-tour-video]");
+  if (toggle && tour && video) {
+    toggle.addEventListener("click", () => {
+      const open = tour.hidden;
+      tour.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.firstChild!.textContent = open ? "Hide the tour " : "Watch the 60-second tour ";
+      if (open) {
+        tour.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+      }
+    });
+  }
+</script>

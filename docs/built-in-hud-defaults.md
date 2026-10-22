@@ -20,22 +20,22 @@ Google Chrome Tabs is available in Built-in defaults, New HUD, and the nested
 built-in layer picker. It uses a local, per-open snapshot of Chrome's live tabs. Selecting a tile
 focuses the existing tab; it does not create a duplicate. Previous/Next controls
 show additional pages. Chrome must be running, with macOS Automation access
-granted to Rotagivan. Empty or unavailable snapshots show guidance. If a tab moved
+granted to Rota. Empty or unavailable snapshots show guidance. If a tab moved
 or closed, activation fails safely and asks the user to reopen the HUD.
 The current Chrome tab appears on the left; other tabs follow clockwise by focus
-changes observed while Rotagivan runs. For tabs it has not observed, it uses the
+changes observed while Rota runs. For tabs it has not observed, it uses the
 latest page-visit timestamp from this Mac's Chrome History databases, then Chrome's
 tab order. A history visit is a navigation, not a tab-focus event, so it cannot
 reconstruct exact past switching. History is read locally and read-only; tab URLs,
 visit timestamps, and the lightweight focus history are never saved or synced by
-Rotagivan. The reader includes live WAL data when available and falls back to a
+Rota. The reader includes live WAL data when available and falls back to a
 nonblocking on-disk checkpoint read if Chrome holds the database lock.
 The Chrome tab tiles also show profile names from Chrome's local `Local State`
 metadata, matched to open URLs through each profile's read-only History. Chrome's
 AppleScript tab interface does not report a profile ID, so a name followed by `?`
 means the URL appeared in more than one profile and the most recent visit was
 used as a best guess. Tabs without a matching history visit have no profile
-label. These names are never saved or synced by Rotagivan.
+label. These names are never saved or synced by Rota.
 
 Only the default layout and assigned layer settings are saved/synced. Live tab
 titles and URLs remain transient on this Mac. The Chrome settings preview reads

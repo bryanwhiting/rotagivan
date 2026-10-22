@@ -1,12 +1,12 @@
 # Settings sync
 
-Settings → Sync & backup. Rotagivan keeps the complete configuration (every
+Settings → Sync & backup. Rota keeps the complete configuration (every
 profile, HUD, action, macro and shortcut) in exactly one of two homes. Nothing
 is written anywhere until you choose:
 
 | | Cloud sync | Local file |
 | --- | --- | --- |
-| Where | Rotagivan's sync service, as ciphertext | `settings.yaml` in a folder you pick (default `~/.config/rotagivan`) |
+| Where | Rota's sync service, as ciphertext | `settings.yaml` in a folder you pick (default `~/.config/rota`) |
 | Encryption | AES-GCM under a key derived from your account password | none; the file is plain YAML you can read and edit |
 | Other Macs | sign in with the same email and password | share the folder yourself (git, a synced drive) |
 | API keys | inside the encrypted document, used on every Mac you sign in to | read from `~/.env`; never written to the file |
@@ -42,7 +42,7 @@ Wire form: `rota-e2ee-settings-v1:` + base64(JSON `{version: 2, revision,
 sealed}`). The prefix is the server's "encrypted" marker (it refuses to replace
 an encrypted document with plaintext); the inner `version` is the format.
 
-**Cycle.** `CloudSyncEngine.reconcile` (Rotagivan/CloudSync.swift) is a pure
+**Cycle.** `CloudSyncEngine.reconcile` (Rota/CloudSync.swift) is a pure
 function of (local document, persisted state, server) and is total: every run
 ends in one of up-to-date, uploaded, downloaded, remote-won, local-won or
 replaced-unreadable, or an error that is shown and retried.
@@ -74,6 +74,27 @@ Failures retry after 60 s, doubling to 5 minutes.
 `~/.env`, are part of the document and are cached in this Mac's encrypted
 preferences. Voice providers read `SyncSecrets.value(_:)`: the synced key in
 cloud mode, otherwise `~/.env`.
+
+## Installing over Rotagivan
+
+The app was named Rotagivan (bundle identifier `local.rotagivan`) before it
+became Rota (`local.rota`). Installing Rota keeps everything:
+
+- the local settings key moves from the Keychain service
+  `local.rotagivan.settings.v1` to `local.rota.settings.v1`, and
+  `~/Library/Application Support/Rotagivan` moves to
+  `~/Library/Application Support/Rota` (`SettingsPersistence.migrateLegacyInstall`);
+- a saved sync login under `local.rotagivan.sync.v2` is copied to
+  `local.rota.sync.v2` on first read (`SyncKeychain.read`);
+- the default local-file folder `~/.config/rotagivan` moves to `~/.config/rota`
+  the first time the default is resolved (`SettingsSync.resolveDefaultLocalFolder`);
+  a folder you picked yourself is left where it is;
+- key-derivation salts and the server's names keep the old string on purpose:
+  they are inputs to existing accounts' keys and deployed resources.
+
+Old items are never deleted. macOS keys Accessibility and Input Monitoring by
+bundle identifier, so grant both to Rota once more after installing; macOS may
+also ask once to let Rota read the Keychain items the old app saved.
 
 ## Local file
 
@@ -108,7 +129,7 @@ application index. Explicit exports are plain files; keep them private.
 ## Verification
 
 ```
-zsh Rotagivan/test.sh      # includes the four suites below
+zsh Rota/test.sh      # includes the four suites below
 ```
 
 - `SyncCryptoTests`: deterministic KDF, login-secret separation, authenticated
